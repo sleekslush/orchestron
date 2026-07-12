@@ -54,7 +54,29 @@ pnpm typecheck
 pnpm test
 ```
 
-### Run a score
+### Run a concert from the CLI
+
+```bash
+# Copy or write a .score.yaml file to the default scores directory
+mkdir -p ~/.orchestron/scores
+cp examples/opencode-demo.score.yaml ~/.orchestron/scores/
+
+# Start a concert
+pnpm orchestron start opencode-demo --context.topic='Obsidian plugins'
+
+# Monitor it
+pnpm orchestron list
+pnpm orchestron status <concert-id>
+
+# Launch the web dashboard
+pnpm orchestron dashboard --port 3000
+```
+
+Use `--json` for scriptable output and `--store <path>` for a custom SQLite
+path. Pass `--context.key=value` arguments to populate the concert's initial
+context.
+
+### Run a score programmatically
 
 ```typescript
 import { SqliteLoge, ScoreRegistry, ConcertHall, FakeEvaluator } from '@orchestron/core';
@@ -203,8 +225,7 @@ packages/
   core/              # Types, Conductor, ConcertHall, ScoreRegistry, Loge
   adapter-pi/        # Pi harness adapter
   adapter-opencode/  # Opencode harness adapter
-  cli/               # (future) orchestron CLI
-  dashboard/         # (future) web UI
+  cli/               # orchestron CLI + basic web dashboard
   plugin-pi/         # (future) Pi session plugin
 examples/            # Example scores
 ```
@@ -250,8 +271,9 @@ movement A cannot see movement B's conversation history. Set
 - [x] Conductor engine with crash recovery
 - [x] Pi harness adapter
 - [x] Opencode harness adapter
-- [ ] CLI (`orchestron start`, `status`, `list`, etc.)
-- [ ] Dashboard (web UI + WebSocket)
+- [x] CLI (`orchestron start`, `status`, `list`, `dashboard`, etc.)
+- [x] Basic dashboard (`orchestron dashboard`)
+- [ ] Rich React dashboard (web UI + WebSocket)
 - [ ] Pi session plugin
 - [ ] Claude harness adapter
 - [ ] More example scores
