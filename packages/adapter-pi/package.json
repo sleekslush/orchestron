@@ -1,0 +1,15 @@
+{
+  "name": "@orchestron/adapter-pi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.80.0",
+    "@orchestron/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

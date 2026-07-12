@@ -32,15 +32,15 @@
 - [x] `packages/core/src/__tests__/` — Conductor unit tests with mock harness
 - [x] `packages/core/src/__tests__/use-cases.test.ts` — 6 integration use cases
 
-## Phase 3: Pi Harness Adapter
+## Phase 3: Pi Harness Adapter ✅
 
 **Goal**: Real movement execution via Pi SDK.
 
-- [ ] Create `packages/adapter-pi/`
-- [ ] Implement `PiAdapter` — `createAgentSession()` → `session.prompt()` → `session.dispose()`
+- [x] Create `packages/adapter-pi/`
+- [x] Implement `PiAdapter` — wraps `@earendil-works/pi-ai` models.complete()
   - Handle `OutputConfig.mode === 'structured'` — inject schema into prompt, parse result
-  - Extract `ResourceUsage` from session metadata (or stub if unavailable)
-  - Streaming event bridge: pipe Pi session events into Loge as `ConcertEvent`s
+  - Extract `ResourceUsage` from response metadata (input/output tokens, cost → spend)
+  - Streaming event bridge: (stretch — uses complete() for now, stream() available for later)
 - [ ] Integration test: run a real 2-movement score against Pi
 
 ## Phase 4: CLI
