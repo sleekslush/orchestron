@@ -35,6 +35,7 @@ export class Conductor implements IConductor {
   private nestingDepth: number;
   private activeSessions = new Map<string, HarnessAdapter>();
   private adapterResolver: { get(name: string): Promise<HarnessAdapter> };
+  private loopPromise?: Promise<void>;
 
   constructor(
     private concert: Concert,
@@ -115,11 +116,10 @@ export class Conductor implements IConductor {
     const signal = this.abortController.signal;
     const previousOutputs = new Map<MovementID, MovementRecord>();
 
-    try {
-      await this.runLoop(this.score.startMovement, previousOutputs, 0, signal);
-    } catch (err) {
-      await this.handleExecutionError(err);
-    }
+    this.loopPromise = this.runLoop(this.score.startMovement, previousOutputs, 0, signal).catch(
+      (err) => this.handleExecutionError(err),
+    );
+    await this.loopPromise;
   }
 
   async recover(): Promise<void> {
@@ -149,69 +149,67 @@ export class Conductor implements IConductor {
     });
 
     const signal = this.abortController.signal;
-    const previousOutputs = new Map<MovementID, MovementRecord>();
+    let currentId: MovementID | '__end__' | '__fail__';
+    let movementCount = this.concert.history.length;
 
-    try {
-      let currentId: MovementID | '__end__' | '__fail__';
-      let movementCount = 0;
+    if (this.concert.currentMovement) {
+      const failedMovement = this.score.movements.find(
+        (m) => m.id === this.concert.currentMovement,
+      );
 
-      if (this.concert.currentMovement) {
-        const failedMovement = this.score.movements.find(
-          (m) => m.id === this.concert.currentMovement,
-        );
+      if (failedMovement) {
+        movementCount++;
+        this.checkMovementLimit(movementCount, failedMovement.id);
 
-        if (failedMovement) {
-          movementCount++;
-          this.checkMovementLimit(movementCount, failedMovement.id);
+        const error: SerializedError = {
+          code: 'STATE_CORRUPTION',
+          message: 'Process crashed during this movement',
+          retryable: false,
+          concertId: this.concert.id,
+          movementId: failedMovement.id,
+        };
 
-          const error: SerializedError = {
-            code: 'STATE_CORRUPTION',
-            message: 'Process crashed during this movement',
-            retryable: false,
-            concertId: this.concert.id,
-            movementId: failedMovement.id,
-          };
+        const failedRecord: MovementRecord = {
+          movementId: failedMovement.id,
+          movementName: failedMovement.name,
+          status: 'failed',
+          output: '',
+          summary: 'Movement failed during crash recovery',
+          goalEvaluation: { achieved: false, confidence: 0, summary: 'Interrupted by crash' },
+          usage: {},
+          durationMs: 0,
+          startedAt: new Date(),
+          completedAt: new Date(),
+          error,
+        };
 
-          const failedRecord: MovementRecord = {
-            movementId: failedMovement.id,
-            movementName: failedMovement.name,
-            status: 'failed',
-            output: '',
-            summary: 'Movement failed during crash recovery',
-            goalEvaluation: { achieved: false, confidence: 0, summary: 'Interrupted by crash' },
-            usage: {},
-            durationMs: 0,
-            startedAt: new Date(),
-            completedAt: new Date(),
-            error,
-          };
+        await this.store.appendMovement(this.concert.id, failedRecord);
+        await this.store.pushEvent({
+          type: 'movement:failed',
+          concertId: this.concert.id,
+          movementId: failedMovement.id,
+          error,
+          retryCount: 0,
+          timestamp: new Date(),
+        });
 
-          await this.store.appendMovement(this.concert.id, failedRecord);
-          await this.store.pushEvent({
-            type: 'movement:failed',
-            concertId: this.concert.id,
-            movementId: failedMovement.id,
-            error,
-            retryCount: 0,
-            timestamp: new Date(),
-          });
+        this.concert.history.push(failedRecord);
 
-          this.concert.history.push(failedRecord);
-          previousOutputs.set(failedMovement.id, failedRecord);
-
-          const transition = this.matchTransition(failedMovement, false);
-          currentId = transition?.to ?? '__fail__';
-        } else {
-          currentId = '__fail__';
-        }
+        const transition = this.matchTransition(failedMovement, false);
+        currentId = transition?.to ?? '__fail__';
       } else {
-        currentId = this.score.startMovement;
+        currentId = '__fail__';
       }
-
-      await this.runLoop(currentId, previousOutputs, movementCount, signal);
-    } catch (err) {
-      await this.handleExecutionError(err);
+    } else {
+      currentId = this.score.startMovement;
     }
+
+    const previousOutputs = this.buildPreviousOutputs();
+
+    this.loopPromise = this.runLoop(currentId, previousOutputs, movementCount, signal).catch(
+      (err) => this.handleExecutionError(err),
+    );
+    await this.loopPromise;
   }
 
   async pause(): Promise<void> {
@@ -238,13 +236,48 @@ export class Conductor implements IConductor {
       concertId: this.concert.id,
       timestamp: new Date(),
     });
+
+    // If there is no active execution loop (e.g. after process restart / rehydration),
+    // continue execution from the stored current movement.
+    if (!this.loopPromise) {
+      const stored = await this.store.getConcert(this.concert.id);
+      if (stored) {
+        this.concert = stored;
+      }
+      if (this.startedAt === 0) {
+        this.startedAt = this.concert.startedAt.getTime();
+      }
+      const signal = this.abortController.signal;
+      const previousOutputs = this.buildPreviousOutputs();
+      const currentId = this.concert.currentMovement ?? this.score.startMovement;
+      this.loopPromise = this.runLoop(
+        currentId,
+        previousOutputs,
+        this.concert.history.length,
+        signal,
+      ).catch((err) => this.handleExecutionError(err));
+    }
   }
 
   async cancel(): Promise<void> {
+    if (
+      this._status !== 'pending' &&
+      this._status !== 'running' &&
+      this._status !== 'paused'
+    ) {
+      return;
+    }
+
     this.abortController.abort();
     if (this._status === 'paused') {
       this.pauseResolver?.();
       this.pauseResolver = null;
+    }
+
+    // If there is no active execution loop (e.g. pending or rehydrated paused),
+    // finalize immediately.
+    if (!this.loopPromise) {
+      await this.finalize('cancelled', 'Concert cancelled');
     }
   }
 
@@ -254,6 +287,14 @@ export class Conductor implements IConductor {
       this.concert = stored;
     }
     return { ...this.concert };
+  }
+
+  private buildPreviousOutputs(): Map<MovementID, MovementRecord> {
+    const previousOutputs = new Map<MovementID, MovementRecord>();
+    for (const record of this.concert.history) {
+      previousOutputs.set(record.movementId, record);
+    }
+    return previousOutputs;
   }
 
   private async executeMovement(

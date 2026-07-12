@@ -254,17 +254,6 @@ export class SqliteLoge implements ConcertStore {
   }
 
   async appendMovement(concertId: ConcertID, record: MovementRecord): Promise<void> {
-    const existing = this.db
-      .prepare(
-        'SELECT id FROM movements WHERE concert_id = ? AND movement_id = ? AND started_at = ?',
-      )
-      .get(concertId, record.movementId, serializeDate(record.startedAt));
-
-    if (existing) {
-      await this.updateMovement(concertId, record);
-      return;
-    }
-
     const stmt = this.db.prepare(`
       INSERT INTO movements
         (concert_id, movement_id, movement_name, status, output, structured,
@@ -354,7 +343,7 @@ export class SqliteLoge implements ConcertStore {
 
   async getMovementHistory(concertId: ConcertID): Promise<MovementRecord[]> {
     const rows = this.db
-      .prepare('SELECT * FROM movements WHERE concert_id = ? ORDER BY started_at ASC')
+      .prepare('SELECT * FROM movements WHERE concert_id = ? ORDER BY started_at ASC, id ASC')
       .all(concertId) as MovementRow[];
     return rows.map(rowToMovementRecord);
   }
@@ -386,7 +375,7 @@ export class SqliteLoge implements ConcertStore {
       params.push(serializeDate(filter.since));
     }
 
-    sql += ' ORDER BY timestamp ASC';
+    sql += ' ORDER BY timestamp ASC, id ASC';
 
     if (filter?.limit) {
       sql += ' LIMIT ?';
