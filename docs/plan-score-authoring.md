@@ -14,10 +14,9 @@
 | `orchestron_create_score` | `scoreId`, `yaml`, `persist?`, `saveLocation?` | Parse YAML, validate, register in `ScoreRegistry`. If `persist: true`, save to disk. |
 | `orchestron_edit_score` | `scoreId`, `yaml`, `persist?`, `saveLocation?` | Parse YAML, validate, update `ScoreRegistry`. If `persist: true`, overwrite the file. |
 | `orchestron_get_score` | `scoreId` | Return the full YAML and file path of an existing score. |
-| `orchestron_validate_score` | `scoreId` | Run `ScoreRegistry.validate()` and return errors. |
 
 - `persist` defaults to `false`.
-- `saveLocation` defaults to `local` (`./orchestron/scores/`); `global` maps to `~/.orchestron/scores/`.
+- `saveLocation` defaults to `local` (`./.orchestron/scores/`); `global` maps to `~/.orchestron/scores/`.
 - Scores are validated before any write or in-memory registration.
 - `orchestron_list_scores` will include a `persisted: boolean` field.
 

@@ -68,6 +68,7 @@ export class OpencodeAdapter implements HarnessAdapter {
       output?: OutputConfig;
       movementId?: string;
       sessionId?: string;
+      onProgress?: (update: import('@orchestron/core').ProgressUpdate) => void;
     },
   ): Promise<HarnessResponse> {
     await this.ensureInitialized();

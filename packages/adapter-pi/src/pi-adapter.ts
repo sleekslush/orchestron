@@ -9,7 +9,6 @@ import {
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
-import { getBuiltinModel } from '@earendil-works/pi-ai/providers/all';
 import type { Model, Usage, Api } from '@earendil-works/pi-ai';
 
 export interface PiAdapterConfig {
@@ -54,6 +53,7 @@ export class PiAdapter implements HarnessAdapter {
       output?: OutputConfig;
       movementId?: string;
       sessionId?: string;
+      onProgress?: (update: import('@orchestron/core').ProgressUpdate) => void;
     },
   ): Promise<HarnessResponse> {
     let finalPrompt = prompt;
@@ -91,6 +91,24 @@ export class PiAdapter implements HarnessAdapter {
             output += ame.delta;
           }
         }
+        if (event.type === 'tool_execution_start') {
+          options?.onProgress?.({
+            type: 'tool_execution_start',
+            toolName: event.toolName,
+            args: this.summarizeToolArgs(event.args as Record<string, unknown> | undefined),
+          });
+        }
+        if (event.type === 'tool_execution_end') {
+          const rawResult = event.result as Record<string, unknown> | undefined;
+          const isError = event.isError as boolean;
+          options?.onProgress?.({
+            type: 'tool_execution_end',
+            toolName: event.toolName,
+            isError,
+            result: isError ? undefined : this.summarizeToolResult(rawResult),
+            error: isError ? this.extractToolError(rawResult) : undefined,
+          });
+        }
         if (event.type === 'agent_end') {
           for (const msg of event.messages) {
             if ('usage' in msg && msg.usage) {
@@ -121,6 +139,14 @@ export class PiAdapter implements HarnessAdapter {
         unsubscribe();
         if (abortListener && options?.signal) {
           options.signal.removeEventListener('abort', abortListener);
+        }
+      }
+
+      // Fallback to the session's last assistant message if no text deltas were captured.
+      if (!output.trim()) {
+        const lastText = session.getLastAssistantText?.();
+        if (lastText) {
+          output = lastText;
         }
       }
 
@@ -159,11 +185,8 @@ export class PiAdapter implements HarnessAdapter {
     if (!this.provider || !this.modelId) return;
 
     try {
-      const getModel = getBuiltinModel as (
-        provider: string,
-        modelId: string,
-      ) => Model<Api> | undefined;
-      const resolved = getModel(this.provider, this.modelId);
+      const registry = ModelRegistry.inMemory(AuthStorage.create());
+      const resolved = registry.find(this.provider, this.modelId);
       if (!resolved) {
         throw new HarnessError(
           `Unknown Pi model '${this.modelId}' for provider '${this.provider}'`,
@@ -281,6 +304,45 @@ export class PiAdapter implements HarnessAdapter {
       }
     }
     return undefined;
+  }
+
+  private summarizeToolArgs(args: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    if (!args) return undefined;
+    const { command, filePath, file, path, content, text, oldString, newString, ...rest } = args;
+    const summary: Record<string, unknown> = {};
+    if (command !== undefined) summary.command = command;
+    if (filePath !== undefined) summary.filePath = filePath;
+    if (file !== undefined) summary.file = file;
+    if (path !== undefined) summary.path = path;
+    // Keep other small metadata; omit large content blobs.
+    for (const [key, value] of Object.entries(rest)) {
+      if (typeof value === 'string' && value.length > 200) continue;
+      summary[key] = value;
+    }
+    return Object.keys(summary).length > 0 ? summary : undefined;
+  }
+
+  private summarizeToolResult(result: Record<string, unknown> | undefined): unknown {
+    if (!result) return undefined;
+    if (typeof result.output === 'string') {
+      return result.output.length > 1000 ? result.output.slice(0, 1000) + '...' : result.output;
+    }
+    if (typeof result.content === 'string') {
+      return result.content.length > 1000 ? result.content.slice(0, 1000) + '...' : result.content;
+    }
+    if (Array.isArray(result.results) && result.results.length > 0) {
+      return result.results.slice(0, 5);
+    }
+    return result;
+  }
+
+  private extractToolError(result: Record<string, unknown> | undefined): string | undefined {
+    if (!result) return undefined;
+    if (typeof result.error === 'string') return result.error;
+    if (result.error && typeof result.error === 'object' && typeof (result.error as Record<string, unknown>).message === 'string') {
+      return (result.error as Record<string, unknown>).message as string;
+    }
+    return JSON.stringify(result.error ?? result);
   }
 
   private findMatchingClose(text: string, start: number): number {

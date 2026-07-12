@@ -24,7 +24,7 @@ const program = new Command()
   .option('--store <path>', 'Path to the SQLite store', DEFAULT_STORE_PATH)
   .option(
     '--scores-dir <dir>',
-    'Directory containing .score.yaml/.score.json files (can be used multiple times). Local ./orchestron/scores takes priority over ~/.orchestron/scores.',
+    'Directory containing .score.yaml/.score.json files (can be used multiple times). Local ./.orchestron/scores takes priority over ~/.orchestron/scores.',
     collect,
     [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
   )

@@ -12,7 +12,7 @@ import type {
   Program,
   Transition,
 } from '../types/score.js';
-import type { HarnessAdapter } from '../types/adapter.js';
+import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
 import type { ConcertStore } from '../store/concert-store.js';
 import type { ChildConcertFactory } from './child-concert-factory.js';
@@ -26,6 +26,9 @@ import {
 } from '../types/errors.js';
 
 export { StartOptions };
+
+const DEFAULT_MOVEMENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const HEARTBEAT_INTERVAL_MS = 5000; // 5 seconds
 
 export class Conductor implements IConductor {
   private abortController = new AbortController();
@@ -337,19 +340,79 @@ export class Conductor implements IConductor {
         this.activeSessions.set(sessionId, adapter);
       }
 
-      const response = await adapter.execute(prompt, this.concert.context, {
-        signal,
-        output: movement.output,
-        movementId: movement.id,
-        sessionId,
-      });
+      const movementController = new AbortController();
+      const movementSignal = movementController.signal;
+      const onParentAbort = () => movementController.abort();
+      if (signal.aborted) {
+        movementController.abort();
+      } else {
+        signal.addEventListener('abort', onParentAbort, { once: true });
+      }
 
-      record.status = 'completed';
-      record.output = response.output;
-      if (response.structured) record.structured = response.structured;
-      record.summary = response.summary;
-      record.usage = response.usage;
-      record.durationMs = Date.now() - startedAt.getTime();
+      const timeoutMs =
+        movement.budget?.timeoutMs && movement.budget.timeoutMs > 0
+          ? movement.budget.timeoutMs
+          : DEFAULT_MOVEMENT_TIMEOUT_MS;
+      const timeoutHandle = setTimeout(() => {
+        movementController.abort();
+      }, timeoutMs);
+
+      const heartbeatHandle = setInterval(() => {
+        const elapsedMs = Date.now() - startedAt.getTime();
+        this.store.pushEvent({
+          type: 'movement:progress',
+          concertId: this.concert.id,
+          movementId: movement.id,
+          progressType: 'heartbeat',
+          payload: {
+            elapsedMs,
+            message: `Movement '${movement.id}' still running (${Math.round(elapsedMs / 1000)}s)`,
+          },
+          timestamp: new Date(),
+        }).catch(() => {});
+      }, HEARTBEAT_INTERVAL_MS);
+
+      const onProgress = (update: ProgressUpdate) => {
+        const payload: Record<string, unknown> = { type: update.type };
+        if (update.type === 'tool_execution_start') {
+          payload.toolName = update.toolName;
+          if (update.args) payload.args = update.args;
+        } else if (update.type === 'tool_execution_end') {
+          payload.toolName = update.toolName;
+          payload.isError = update.isError;
+          if (update.result !== undefined) payload.result = update.result;
+          if (update.error) payload.error = update.error;
+        }
+        this.store.pushEvent({
+          type: 'movement:progress',
+          concertId: this.concert.id,
+          movementId: movement.id,
+          progressType: update.type,
+          payload,
+          timestamp: new Date(),
+        }).catch(() => {});
+      };
+
+      try {
+        const response = await adapter.execute(prompt, this.concert.context, {
+          signal: movementSignal,
+          output: movement.output,
+          movementId: movement.id,
+          sessionId,
+          onProgress,
+        });
+
+        record.status = 'completed';
+        record.output = response.output;
+        if (response.structured) record.structured = response.structured;
+        record.summary = response.summary;
+        record.usage = response.usage;
+        record.durationMs = Date.now() - startedAt.getTime();
+      } finally {
+        clearTimeout(timeoutHandle);
+        clearInterval(heartbeatHandle);
+        signal.removeEventListener('abort', onParentAbort);
+      }
     } catch (err) {
       record.status = 'failed';
       record.durationMs = Date.now() - startedAt.getTime();
@@ -557,23 +620,20 @@ export class Conductor implements IConductor {
     const totalTokens = (this.concert.usage.tokens ?? 0) + (record.usage.tokens ?? 0);
     const program = this.score.program;
 
-    if (program.maxSpend && totalSpend > program.maxSpend) {
+    // Update aggregate usage before checking constraints so failures still report real spend.
+    this.concert.usage.spend = totalSpend;
+    this.concert.usage.tokens = totalTokens;
+
+    // maxSpendDollars is configured in dollars; internal usage is tracked in micro-dollars.
+    const maxSpendMicro = program.maxSpendDollars ? Math.round(program.maxSpendDollars * 1_000_000) : undefined;
+    if (maxSpendMicro && totalSpend > maxSpendMicro) {
+      const totalSpendDollars = totalSpend / 1_000_000;
       throw new ConstraintBreachError(
-        `Spend limit exceeded: ${totalSpend} > ${program.maxSpend}`,
+        `Spend limit exceeded: $${totalSpendDollars.toFixed(6)} > $${program.maxSpendDollars!.toFixed(6)}`,
         'SPEND_LIMIT',
-        program.maxSpend,
-        totalSpend,
-        'maxSpend',
-        this.concert.id,
-      );
-    }
-    if (program.maxTokens && totalTokens > program.maxTokens) {
-      throw new ConstraintBreachError(
-        `Token limit exceeded: ${totalTokens} > ${program.maxTokens}`,
-        'TOKEN_LIMIT',
-        program.maxTokens,
-        totalTokens,
-        'maxTokens',
+        program.maxSpendDollars!,
+        totalSpendDollars,
+        'maxSpendDollars',
         this.concert.id,
       );
     }
@@ -590,9 +650,6 @@ export class Conductor implements IConductor {
         );
       }
     }
-
-    this.concert.usage.spend = totalSpend;
-    this.concert.usage.tokens = totalTokens;
   }
 
   private async runLoop(

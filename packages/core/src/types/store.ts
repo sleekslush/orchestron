@@ -2,6 +2,7 @@ export interface EventFilter {
   types?: string[];
   limit?: number;
   since?: Date;
+  order?: 'asc' | 'desc';
 }
 
 export interface SystemAggregates {

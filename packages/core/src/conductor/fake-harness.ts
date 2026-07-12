@@ -1,4 +1,4 @@
-import type { HarnessAdapter, HarnessResponse } from '../types/adapter.js';
+import type { HarnessAdapter, HarnessResponse, ProgressUpdate } from '../types/adapter.js';
 import type { ConcertContext } from '../types/concert.js';
 import type { OutputConfig } from '../types/score.js';
 import { HarnessError } from '../types/errors.js';
@@ -10,6 +10,7 @@ export interface FakeHarnessScenario {
   usage?: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number };
   fail?: boolean;
   delayMs?: number;
+  progressUpdates?: { atMs: number; update: ProgressUpdate }[];
 }
 
 export interface FakeHarnessConfig {
@@ -26,7 +27,12 @@ export class FakeHarnessAdapter implements HarnessAdapter {
   async execute(
     _prompt: string,
     _context: ConcertContext,
-    options?: { signal?: AbortSignal; output?: OutputConfig; movementId?: string },
+    options?: {
+      signal?: AbortSignal;
+      output?: OutputConfig;
+      movementId?: string;
+      onProgress?: (update: ProgressUpdate) => void;
+    },
   ): Promise<HarnessResponse> {
     const movementId = options?.movementId;
     let scenario: FakeHarnessScenario | undefined;
@@ -47,7 +53,20 @@ export class FakeHarnessAdapter implements HarnessAdapter {
 
     const delay = scenario.delayMs ?? this.config.globalDelayMs ?? 0;
     if (delay > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      const progressUpdates = scenario.progressUpdates ?? [];
+      let elapsed = 0;
+      const intervalMs = 50;
+      while (elapsed < delay) {
+        if (options?.signal?.aborted) {
+          throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
+        }
+        const batch = progressUpdates.filter((p) => p.atMs >= elapsed && p.atMs < elapsed + intervalMs);
+        for (const { update } of batch) {
+          options?.onProgress?.(update);
+        }
+        await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, delay - elapsed)));
+        elapsed += intervalMs;
+      }
     }
 
     if (options?.signal?.aborted) {

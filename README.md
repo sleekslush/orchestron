@@ -59,7 +59,7 @@ pnpm test
 Orchestron looks for score files (`*.score.yaml`/`*.score.json`) in two places
 by default:
 
-1. `./orchestron/scores/` — project-local scores, checked first
+1. `./.orchestron/scores/` — project-local scores, checked first
 2. `~/.orchestron/scores/` — global scores, checked second
 
 Local scores take priority over global scores when the same score ID is present
@@ -67,8 +67,8 @@ in both.
 
 ```bash
 # Copy an example to the project-local scores directory
-mkdir -p ./orchestron/scores
-cp examples/opencode-demo.score.yaml ./orchestron/scores/
+mkdir -p ./.orchestron/scores
+cp examples/opencode-demo.score.yaml ./.orchestron/scores/
 
 # Or use the global directory
 mkdir -p ~/.orchestron/scores
@@ -200,8 +200,7 @@ Set limits in `program`:
 
 ```yaml
 program:
-  maxSpend: 5000        # micro-dollars
-  maxTokens: 500000
+  maxSpendDollars: 2    # dollars
   maxMovements: 100
   maxDurationMs: 600000
   maxNestingDepth: 5

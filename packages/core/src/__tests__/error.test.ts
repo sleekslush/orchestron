@@ -54,11 +54,11 @@ describe('HarnessError', () => {
 describe('ConstraintBreachError', () => {
   it('constructs with limit, actual, and constraint fields', () => {
     const err = new ConstraintBreachError(
-      'Spent too much', 'SPEND_LIMIT', 1000, 1500, 'maxSpend', 'concert-1',
+      'Spent too much', 'SPEND_LIMIT', 1000, 1500, 'maxSpendDollars', 'concert-1',
     );
     expect(err.limit).toBe(1000);
     expect(err.actual).toBe(1500);
-    expect(err.constraint).toBe('maxSpend');
+    expect(err.constraint).toBe('maxSpendDollars');
     expect(err.retryable).toBe(false);
     expect(err.name).toBe('ConstraintBreachError');
   });

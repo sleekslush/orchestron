@@ -14,17 +14,16 @@ const createAgentSessionMock = vi.fn() as Mock<
 >;
 createAgentSessionMock.mockImplementation(async () => ({ session: mockSession, extensionsResult: {} }));
 
-const getBuiltinModelMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
+const registryFindMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   AuthStorage: { create: vi.fn(() => ({ id: 'auth' })) },
-  ModelRegistry: { create: vi.fn(() => ({ id: 'registry' })) },
+  ModelRegistry: {
+    create: vi.fn(() => ({ id: 'registry' })),
+    inMemory: vi.fn(() => ({ find: registryFindMock })),
+  },
   SessionManager: { inMemory: vi.fn(() => ({ id: 'manager' })) },
   createAgentSession: (...args: unknown[]) => createAgentSessionMock(...args as Parameters<typeof createAgentSessionMock>),
-}));
-
-vi.mock('@earendil-works/pi-ai/providers/all', () => ({
-  getBuiltinModel: (...args: unknown[]) => getBuiltinModelMock(...args as Parameters<typeof getBuiltinModelMock>),
 }));
 
 describe('PiAdapter', () => {
@@ -144,6 +143,52 @@ describe('PiAdapter', () => {
     expect(result.structured).toEqual({ ok: true });
   });
 
+  it('forwards tool execution events to onProgress', async () => {
+    let messageHandler: ((event: unknown) => void) | undefined;
+    const capturingSession = {
+      ...mockSession,
+      subscribe: vi.fn((handler) => {
+        messageHandler = handler;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        messageHandler?.({
+          type: 'tool_execution_start',
+          toolCallId: 'tc-1',
+          toolName: 'git_status',
+          args: {},
+        });
+        messageHandler?.({
+          type: 'tool_execution_end',
+          toolCallId: 'tc-1',
+          toolName: 'git_status',
+          result: {},
+          isError: false,
+        });
+        messageHandler?.({ type: 'agent_end', messages: [], willRetry: false });
+      }),
+    };
+    createAgentSessionMock.mockResolvedValueOnce({ session: capturingSession, extensionsResult: {} });
+
+    const onProgress = vi.fn();
+    const adapter = new PiAdapter();
+    await adapter.execute('do it', { shared: {} }, { onProgress });
+
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenNthCalledWith(1, {
+      type: 'tool_execution_start',
+      toolName: 'git_status',
+      args: undefined,
+    });
+    expect(onProgress).toHaveBeenNthCalledWith(2, {
+      type: 'tool_execution_end',
+      toolName: 'git_status',
+      isError: false,
+      result: {},
+      error: undefined,
+    });
+  });
+
   it('extracts resource usage from agent_end messages', async () => {
     let messageHandler: ((event: unknown) => void) | undefined;
     const capturingSession = {
@@ -171,6 +216,23 @@ describe('PiAdapter', () => {
       inputTokens: 5,
       outputTokens: 3,
     });
+  });
+
+  it('falls back to getLastAssistantText when no text deltas were captured', async () => {
+    const noTextSession = {
+      ...mockSession,
+      prompt: vi.fn(async () => {
+        // No message_update events emitted, so output stays empty.
+      }),
+      getLastAssistantText: vi.fn(() => '{"review": "looks good"}'),
+    };
+    createAgentSessionMock.mockResolvedValueOnce({ session: noTextSession, extensionsResult: {} });
+
+    const adapter = new PiAdapter();
+    const result = await adapter.execute('review', { shared: {} });
+
+    expect(result.output).toBe('{"review": "looks good"}');
+    expect(result.summary).toBe('{"review": "looks good"}');
   });
 
   it('aborts the session when the signal is aborted', async () => {
@@ -213,7 +275,7 @@ describe('PiAdapter', () => {
   });
 
   it('throws HARNESS_FAILURE when model resolution fails', async () => {
-    getBuiltinModelMock.mockImplementation(() => {
+    registryFindMock.mockImplementation(() => {
       throw new Error('boom');
     });
 

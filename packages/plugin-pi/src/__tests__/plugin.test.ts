@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FakeHarnessAdapter, ScoreRegistry, SqliteLoge, ConcertHall } from '@orchestron/core';
+import {
+  FakeEvaluator,
+  FakeHarnessAdapter,
+  ScoreRegistry,
+  SqliteLoge,
+  ConcertHall,
+} from '@orchestron/core';
 import type { Score } from '@orchestron/core';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import orchestronPlugin from '../index.js';
@@ -60,6 +66,7 @@ async function createTestOrchestron(score: Score): Promise<Orchestron> {
         }),
       ],
     ]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   }).then((orchestron) => {
     orchestron.registry.register(score);
     return orchestron;
@@ -104,6 +111,122 @@ describe('Orchestron Pi plugin tools', () => {
     expect(status.movements[0].movementId).toBe('step_a');
     expect(status.movements[1].movementId).toBe('step_b');
     expect(status.usage.spend).toBe(20);
+  });
+
+  it('streams progress updates when starting a concert', async () => {
+    const score: Score = {
+      ...linearScore(),
+      startMovement: 'slow',
+      movements: [
+        {
+          id: 'slow',
+          name: 'Slow',
+          section: 'default',
+          description: 'Slow step',
+          harness: 'fake',
+          prompt: 'S',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+    };
+    const orchestron = await createTestOrchestron(score);
+    orchestron.hall = new ConcertHall({
+      store: orchestron.store,
+      scoreRegistry: orchestron.registry,
+      adapters: new Map([
+        [
+          'fake',
+          new FakeHarnessAdapter({
+            defaultResponse: {
+              output: 'o',
+              summary: 's',
+              usage: { spend: 10, tokens: 100 },
+              delayMs: 300,
+              progressUpdates: [
+                { atMs: 50, update: { type: 'tool_execution_start', toolName: 'git_status' } },
+                { atMs: 150, update: { type: 'tool_execution_end', toolName: 'git_status', isError: false } },
+              ],
+            },
+          }),
+        ],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const onUpdate = vi.fn();
+    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' }, onUpdate);
+    expect(concertId).toBeDefined();
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            text: expect.stringContaining('Started concert'),
+          }),
+        ]),
+      }),
+    );
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            text: expect.stringContaining('git_status'),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('returns current movement progress in status', async () => {
+    const score: Score = {
+      ...linearScore(),
+      startMovement: 'slow',
+      movements: [
+        {
+          id: 'slow',
+          name: 'Slow',
+          section: 'default',
+          description: 'Slow step',
+          harness: 'fake',
+          prompt: 'S',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+    };
+    const orchestron = await createTestOrchestron(score);
+    orchestron.hall = new ConcertHall({
+      store: orchestron.store,
+      scoreRegistry: orchestron.registry,
+      adapters: new Map([
+        [
+          'fake',
+          new FakeHarnessAdapter({
+            defaultResponse: {
+              output: 'o',
+              summary: 's',
+              usage: { spend: 10, tokens: 100 },
+              delayMs: 500,
+              progressUpdates: [
+                { atMs: 50, update: { type: 'tool_execution_start', toolName: 'git_status' } },
+              ],
+            },
+          }),
+        ],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
+
+    // Wait briefly for the movement to start and emit a progress event.
+    await new Promise((r) => setTimeout(r, 100));
+
+    const status = await getConcertStatus(orchestron, { concertId });
+    expect(status.currentMovement).toBe('slow');
+    expect(status.currentMovementProgress).toBeDefined();
+    expect(status.currentMovementProgress?.type).toBe('tool_execution_start');
+    expect(status.currentMovementProgress?.toolName).toBe('git_status');
   });
 
   it('lists concerts with filters', async () => {
@@ -182,6 +305,7 @@ describe('Orchestron Pi plugin tools', () => {
       store,
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
     const orchestron2: Orchestron = { store, registry, hall, scoresDirs: [] };
 
@@ -228,6 +352,7 @@ describe('Orchestron Pi plugin tools', () => {
       store,
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
     const orchestron2: Orchestron = { store, registry, hall, scoresDirs: [] };
 
@@ -283,7 +408,6 @@ describe('Orchestron Pi plugin extension', () => {
       'orchestron_create_score',
       'orchestron_edit_score',
       'orchestron_get_score',
-      'orchestron_validate_score',
     ]);
     expect(pi.on).toHaveBeenCalledWith('session_shutdown', expect.any(Function));
   });

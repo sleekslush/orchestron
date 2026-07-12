@@ -1,6 +1,11 @@
 import type { ConcertContext, ResourceUsage } from './concert.js';
 import type { OutputConfig } from './score.js';
 
+export type ProgressUpdate =
+  | { type: 'tool_execution_start'; toolName: string; args?: Record<string, unknown> }
+  | { type: 'tool_execution_end'; toolName: string; isError: boolean; result?: unknown; error?: string }
+  | { type: 'heartbeat'; elapsedMs: number; message: string };
+
 export interface HarnessAdapter {
   readonly type: string;
   execute(
@@ -11,6 +16,7 @@ export interface HarnessAdapter {
       output?: OutputConfig;
       movementId?: string;
       sessionId?: string;
+      onProgress?: (update: ProgressUpdate) => void;
     },
   ): Promise<HarnessResponse>;
   disposeSession?(sessionId: string): Promise<void>;

@@ -3,8 +3,7 @@ export type MovementID = string;
 export type SectionID = string;
 
 export interface Program {
-  maxSpend?: number;
-  maxTokens?: number;
+  maxSpendDollars?: number;
   maxMovements?: number;
   maxDurationMs?: number;
   maxNestingDepth?: number;
@@ -13,8 +12,7 @@ export interface Program {
 }
 
 export interface SectionBudget {
-  maxSpend?: number;
-  maxTokens?: number;
+  maxSpendDollars?: number;
   maxMovements?: number;
 }
 
@@ -52,8 +50,7 @@ export interface Movement {
 }
 
 export interface MovementBudget {
-  maxSpend?: number;
-  maxTokens?: number;
+  maxSpendDollars?: number;
   maxRetries?: number;
   timeoutMs?: number;
 }

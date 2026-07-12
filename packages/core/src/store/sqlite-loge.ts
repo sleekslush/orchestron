@@ -375,7 +375,8 @@ export class SqliteLoge implements ConcertStore {
       params.push(serializeDate(filter.since));
     }
 
-    sql += ' ORDER BY timestamp ASC, id ASC';
+    const order = filter?.order === 'desc' ? 'DESC' : 'ASC';
+    sql += ` ORDER BY timestamp ${order}, id ${order}`;
 
     if (filter?.limit) {
       sql += ' LIMIT ?';
@@ -484,6 +485,14 @@ function rowToEvent(row: EventRow): ConcertEvent {
       return { type: 'concert:recovered', ...base };
     case 'movement:started':
       return { type: 'movement:started', ...base, movementId: parsed.movementId as string };
+    case 'movement:progress':
+      return {
+        type: 'movement:progress',
+        ...base,
+        movementId: parsed.movementId as string,
+        progressType: parsed.progressType as string,
+        payload: (parsed.payload as Record<string, unknown>) ?? {},
+      };
     case 'movement:completed':
       return {
         type: 'movement:completed',

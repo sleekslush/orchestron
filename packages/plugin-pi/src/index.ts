@@ -9,7 +9,6 @@ import { listScoresTool } from './tools/list-scores.js';
 import { createScoreTool } from './tools/create-score.js';
 import { editScoreTool } from './tools/edit-score.js';
 import { getScoreTool } from './tools/get-score.js';
-import { validateScoreTool } from './tools/validate-score.js';
 
 export interface OrchestronPluginConfig extends OrchestronOptions {}
 
@@ -51,5 +50,4 @@ export default function orchestronPlugin(
   pi.registerTool(createScoreTool(getOrchestron));
   pi.registerTool(editScoreTool(getOrchestron));
   pi.registerTool(getScoreTool(getOrchestron));
-  pi.registerTool(validateScoreTool(getOrchestron));
 }

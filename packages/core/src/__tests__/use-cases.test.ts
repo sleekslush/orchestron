@@ -160,63 +160,7 @@ describe('Use Case: Plan → Review → End', () => {
   });
 });
 
-// ─── Use Case 2: Constrained Workflow ────────────────────────
-
-describe('Use Case: Constrained Workflow', () => {
-  it('fails when token limit is exceeded', async () => {
-    const store = new SqliteLoge(':memory:');
-    const registry = new ScoreRegistry();
-    registry.register({
-      id: 'token-limited',
-      name: 'Token Limited',
-      description: 'Hits token limit',
-      version: '1.0.0',
-      startMovement: 'step_a',
-      movements: [
-        {
-          id: 'step_a', name: 'A', section: 'x', description: 'x',
-          harness: 'fake', prompt: 'A',
-          goal: { description: 'done', strategy: 'llm_judge' as const },
-          transitions: [{ to: 'step_b', on: 'success' as const }],
-        },
-        {
-          id: 'step_b', name: 'B', section: 'x', description: 'x',
-          harness: 'fake', prompt: 'B',
-          goal: { description: 'done', strategy: 'llm_judge' as const },
-          transitions: [{ to: 'step_c', on: 'success' as const }],
-        },
-        {
-          id: 'step_c', name: 'C', section: 'x', description: 'x',
-          harness: 'fake', prompt: 'C',
-          goal: { description: 'done', strategy: 'llm_judge' as const },
-          transitions: [{ to: '__end__', on: 'success' as const }],
-        },
-      ],
-      program: { maxTokens: 250 },
-    });
-
-    const adapter = new FakeHarnessAdapter({
-      defaultResponse: { output: 'o', summary: 's', usage: { spend: 1, tokens: 100 } },
-    });
-
-    const hall = new ConcertHall({
-      store,
-      scoreRegistry: registry,
-      adapters: new Map([['fake', adapter]]),
-      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-    });
-
-    const conductor = await hall.createConcert('token-limited');
-    await conductor.start();
-
-    // A: 100 tokens (total 100), B: 100 tokens (total 200), C: 100 tokens (total 300 > 250) → breach
-    expect(conductor.status).toBe('failed');
-    const events = await store.getEvents(conductor.concertId);
-    expect(events.some(e => e.type === 'constraint:breached')).toBe(true);
-  });
-});
-
-// ─── Use Case 3: Structured Output Flow ──────────────────────
+// ─── Use Case 2: Structured Output Flow ──────────────────────
 
 describe('Use Case: Structured Output Flow', () => {
   it('passes structured output between movements', async () => {
@@ -302,7 +246,7 @@ describe('Use Case: Structured Output Flow', () => {
   });
 });
 
-// ─── Use Case 4: Dashboard-style Query ───────────────────────
+// ─── Use Case 3: Dashboard-style Query ───────────────────────
 
 describe('Use Case: Dashboard Queries', () => {
   it('can query aggregates across multiple concerts', async () => {

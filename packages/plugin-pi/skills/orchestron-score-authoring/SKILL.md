@@ -24,7 +24,6 @@ A **Score** is a YAML workflow definition. A **Concert** is one running instance
 - `orchestron_create_score(scoreId, yaml, persist?, saveLocation?)` — create a new score. Set `persist: true` only when the user explicitly wants to save.
 - `orchestron_edit_score(scoreId, yaml, persist?, saveLocation?)` — edit an existing score. Use `orchestron_get_score(scoreId)` first to read the current YAML.
 - `orchestron_get_score(scoreId)` — read the current YAML of a score.
-- `orchestron_validate_score(scoreId)` — validate a score without changing anything.
 - `orchestron_list_scores()` — see registered scores and whether each one is persisted to disk.
 
 ## Score YAML structure
@@ -42,8 +41,7 @@ evaluator:
   model: pi-4-mini
 
 program:
-  maxSpend: 5000       # micro-dollars
-  maxTokens: 500000
+  maxSpendDollars: 2   # dollars
   maxMovements: 20
   maxDurationMs: 600000
   persistSession: true

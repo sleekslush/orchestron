@@ -6,7 +6,6 @@ import { createOrchestron, type Orchestron } from '../orchestron.js';
 import { createScore } from '../tools/create-score.js';
 import { editScore } from '../tools/edit-score.js';
 import { getScore } from '../tools/get-score.js';
-import { validateScore } from '../tools/validate-score.js';
 import { listScores } from '../tools/list-scores.js';
 
 const validYaml = `id: test-score
@@ -232,18 +231,6 @@ describe('Score authoring tools', () => {
     expect(state.persisted).toBe(true);
     expect(state.yaml).toContain('Test Score');
     expect(state.path).toContain('test-score.score.yaml');
-  });
-
-  it('validates a registered score', async () => {
-    await createScore(orchestron, {
-      scoreId: 'test-score',
-      yaml: validYaml,
-      persist: false,
-    });
-
-    const result = await validateScore(orchestron, { scoreId: 'test-score' });
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
   });
 
   it('lists scores with persisted flag', async () => {

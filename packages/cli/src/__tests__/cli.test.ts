@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FakeHarnessAdapter } from '@orchestron/core';
+import { FakeHarnessAdapter, FakeEvaluator } from '@orchestron/core';
 import type { Score, HarnessAdapter, HarnessResponse, ConcertContext, OutputConfig } from '@orchestron/core';
 import { createOrchestron } from '../orchestron.js';
 import { startCommandHandler } from '../commands/start.js';
@@ -85,6 +85,7 @@ async function createTestOrchestron(dir: string) {
     storePath,
     scoresDirs: [scoresDir],
     adapters: new Map([['fake', adapter]]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
 }
 
@@ -262,6 +263,7 @@ describe('CLI commands', () => {
       storePath,
       scoresDirs: [scoresDir],
       adapters: new Map([['fake', pausableAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
     const conductor = await testOrchestron.hall.createConcert('pause-test', {

@@ -96,7 +96,7 @@ export function createScoreTool(getOrchestron: () => Promise<Orchestron>) {
       ),
       saveLocation: Type.Optional(
         StringEnum(['local', 'global'] as const, {
-          description: "Where to save the score. 'local' (default) uses ./orchestron/scores/. 'global' uses ~/.orchestron/scores/.",
+          description: "Where to save the score. 'local' (default) uses ./.orchestron/scores/. 'global' uses ~/.orchestron/scores/.",
         }),
       ),
     }),

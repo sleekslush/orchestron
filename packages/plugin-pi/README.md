@@ -27,7 +27,6 @@ The plugin registers these Pi tools:
   new score from YAML. Set `persist: true` to save it.
 - `orchestron_edit_score(scoreId, yaml, persist?, saveLocation?)` — Replace an
   existing score with new YAML.
-- `orchestron_validate_score(scoreId)` — Validate a registered score.
 
 All tools return structured JSON so Pi can summarize the results for the user.
 
@@ -86,7 +85,7 @@ Create a score that analyzes a topic and summarizes it.
 The plugin uses the same defaults as the Orchestron CLI:
 
 - Store: `~/.orchestron/store.db`
-- Scores: `./orchestron/scores/` (project-local) and `~/.orchestron/scores/`
+- Scores: `./.orchestron/scores/` (project-local) and `~/.orchestron/scores/`
   (global)
 
 Override with environment variables:

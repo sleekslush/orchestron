@@ -88,10 +88,10 @@ it('constraint breach', async () => {
         goal: { description: 'done', strategy: 'llm_judge' as const },
         transitions: [{ to: '__end__', on: 'success' as const }] },
     ],
-    program: { maxSpend: 15 },
+    program: { maxSpendDollars: 1.5 },
   });
   const adapter = new FakeHarnessAdapter({
-    defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    defaultResponse: { output: 'o', summary: 's', usage: { spend: 1_000_000, tokens: 100 } },
   });
   const hall = new ConcertHall({
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
@@ -305,6 +305,7 @@ describe('Conductor lifecycle', () => {
     });
     const hall = new ConcertHall({
       store, scoreRegistry: registry, adapters: new Map(),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
     const conductor = await hall.createConcert('idempotent');
     await conductor.pause();
@@ -327,6 +328,7 @@ describe('Conductor lifecycle', () => {
     });
     const hall = new ConcertHall({
       store, scoreRegistry: registry, adapters: new Map(),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
     const conductor = await hall.createConcert('noop-resume');
     await conductor.resume();
@@ -370,6 +372,78 @@ describe('Conductor constraints', () => {
   });
 });
 
+// ─── Movement Progress & Timeout Tests ───────────────────────
+
+describe('Conductor movement progress', () => {
+  it('pushes movement:progress events from the adapter', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'progress-test', name: 'Progress Test', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'o',
+        summary: 's',
+        usage: { spend: 10, tokens: 100 },
+        delayMs: 100,
+        progressUpdates: [
+          { atMs: 25, update: { type: 'tool_execution_start', toolName: 'git_status' } },
+          { atMs: 75, update: { type: 'tool_execution_end', toolName: 'git_status', isError: false } },
+        ],
+      },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('progress-test');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    const progressEvents = await store.getEvents(conductor.concertId, { types: ['movement:progress'] });
+    expect(progressEvents.length).toBeGreaterThanOrEqual(2);
+    expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_start')).toBe(true);
+    expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_end')).toBe(true);
+  });
+
+  it('aborts a movement that exceeds its timeout', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'timeout-test', name: 'Timeout Test', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        budget: { timeoutMs: 100 },
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 500 },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('timeout-test');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const state = await conductor.getState();
+    expect(state.history[0].error?.code).toBe('HARNESS_TIMEOUT');
+  });
+});
+
 // ─── ConcertHall Tests ───────────────────────────────────────
 
 describe('ConcertHall', () => {
@@ -404,7 +478,7 @@ describe('ConcertHall', () => {
   it('waitForConcert throws for unknown concert', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();
-    const hall = new ConcertHall({ store, scoreRegistry: registry, adapters: new Map() });
+    const hall = new ConcertHall({ store, scoreRegistry: registry, adapters: new Map(), evaluator: new FakeEvaluator({ alwaysSucceed: true }) });
     await expect(hall.waitForConcert('nonexistent')).rejects.toThrow('not found');
   });
 

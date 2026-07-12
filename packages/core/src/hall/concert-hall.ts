@@ -8,7 +8,7 @@ import { Conductor } from '../conductor/conductor.js';
 import type { IConductor } from '../conductor/conductor-interface.js';
 import type { ChildConcertFactory } from '../conductor/child-concert-factory.js';
 import type { StartOptions } from '../conductor/start-options.js';
-import { FakeEvaluator, HarnessEvaluator, type Evaluator } from '../evaluator/index.js';
+import { HarnessEvaluator, type Evaluator } from '../evaluator/index.js';
 import { ConductorPanic } from '../types/errors.js';
 
 export interface ConcertHallOptions {
@@ -34,7 +34,10 @@ export class ConcertHall implements ChildConcertFactory {
     this.store = options.store;
     this.scoreRegistry = options.scoreRegistry;
     this.adapterResolver = this.createAdapterResolver(options.adapters);
-    this.evaluator = options.evaluator ?? new FakeEvaluator({ alwaysSucceed: true });
+    if (!options.evaluator) {
+      throw new Error('ConcertHall requires an evaluator; pass one explicitly or use FakeEvaluator only in tests.');
+    }
+    this.evaluator = options.evaluator;
   }
 
   private createAdapterResolver(

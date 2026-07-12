@@ -16,6 +16,16 @@ export async function getConcertStatus(
   startedAt: string;
   completedAt?: string;
   currentMovement: string | null;
+  currentMovementProgress?: {
+    type: string;
+    toolName?: string;
+    isError?: boolean;
+    elapsedMs?: number;
+    message?: string;
+    args?: Record<string, unknown>;
+    result?: unknown;
+    error?: string;
+  };
   usage: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number };
   movements: Array<{
     movementId: string;
@@ -33,6 +43,27 @@ export async function getConcertStatus(
   }
 
   const history = await orchestron.store.getMovementHistory(input.concertId);
+  const latestProgress = state.currentMovement
+    ? await orchestron.store.getEvents(input.concertId, {
+        types: ['movement:progress'],
+        limit: 1,
+        order: 'desc',
+      })
+    : [];
+  const progressEvent = latestProgress[0];
+  const currentMovementProgress =
+    progressEvent?.type === 'movement:progress'
+      ? {
+          type: progressEvent.progressType,
+          toolName: progressEvent.payload.toolName as string | undefined,
+          isError: progressEvent.payload.isError as boolean | undefined,
+          elapsedMs: progressEvent.payload.elapsedMs as number | undefined,
+          message: progressEvent.payload.message as string | undefined,
+          args: progressEvent.payload.args as Record<string, unknown> | undefined,
+          result: progressEvent.payload.result,
+          error: progressEvent.payload.error as string | undefined,
+        }
+      : undefined;
 
   return {
     concertId: state.id,
@@ -41,6 +72,7 @@ export async function getConcertStatus(
     startedAt: state.startedAt.toISOString(),
     completedAt: state.completedAt?.toISOString(),
     currentMovement: state.currentMovement,
+    currentMovementProgress,
     usage: state.usage,
     movements: history.map((h) => ({
       movementId: h.movementId,
@@ -59,7 +91,7 @@ export function getConcertStatusTool(getOrchestron: () => Promise<Orchestron>) {
     name: 'orchestron_get_concert_status',
     label: 'Get Orchestron Concert Status',
     description:
-      'Get the current status, movement history, and resource usage of an Orchestron concert.',
+      'Get the current status, movement history, resource usage, and current movement progress of an Orchestron concert.',
     parameters: Type.Object({
       concertId: Type.String({ description: 'ID of the concert to check' }),
     }),

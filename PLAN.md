@@ -276,8 +276,7 @@ interface ResourceUsage {
 
 // === Program ===
 interface Program {
-  maxSpend?: number;
-  maxTokens?: number;
+  maxSpendDollars?: number; // dollars
   maxMovements?: number;
   maxDurationMs?: number;
   maxNestingDepth?: number;
@@ -285,8 +284,7 @@ interface Program {
 }
 
 interface SectionBudget {
-  maxSpend?: number;
-  maxTokens?: number;
+  maxSpendDollars?: number; // dollars
   maxMovements?: number;
 }
 
@@ -335,8 +333,7 @@ interface Movement {
 }
 
 interface MovementBudget {
-  maxSpend?: number;
-  maxTokens?: number;
+  maxSpendDollars?: number; // dollars
   maxRetries?: number;
   timeoutMs?: number;
 }
@@ -637,8 +634,7 @@ evaluator:
   harness: pi
   model: pi-4-mini
 program:
-  maxSpend: 5000
-  maxTokens: 500000
+  maxSpendDollars: 5 # dollars
 startMovement: clarify
 
 movements:
@@ -681,7 +677,7 @@ movements:
       description: "Working implementation with tests"
       strategy: llm_judge
     budget:
-      maxSpend: 3000
+      maxSpendDollars: 3 # dollars
     transitions:
       - on: success -> review
       - on: failure -> __fail__

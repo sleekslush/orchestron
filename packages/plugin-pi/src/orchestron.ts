@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type {
   ConcertHall,
+  Evaluator,
   HarnessAdapter,
   HarnessAdapterResolver,
   ScoreRegistry,
@@ -12,12 +13,13 @@ import type {
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
 export const DEFAULT_STORE_PATH = join(DEFAULT_CONFIG_DIR, 'store.db');
 export const DEFAULT_SCORES_DIR = join(DEFAULT_CONFIG_DIR, 'scores');
-export const LOCAL_SCORES_DIR = join(process.cwd(), 'orchestron', 'scores');
+export const LOCAL_SCORES_DIR = join(process.cwd(), '.orchestron', 'scores');
 
 export interface OrchestronOptions {
   storePath?: string;
   scoresDirs?: string[];
   adapters?: Map<string, HarnessAdapter> | HarnessAdapterResolver;
+  evaluator?: Evaluator;
 }
 
 export interface Orchestron {
@@ -40,9 +42,10 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     ensureDir(dir);
   }
 
-  const { SqliteLoge, ScoreRegistry, ConcertHall, FakeEvaluator } = await import(
+  const { SqliteLoge, ScoreRegistry, ConcertHall, HarnessEvaluator } = await import(
     '@orchestron/core'
   );
+  const { PiAdapter } = await import('@orchestron/adapter-pi');
 
   const store = new SqliteLoge(storePath);
   const registry = new ScoreRegistry();
@@ -51,12 +54,19 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     loadScoresFromDir(dir, registry);
   }
 
-  const adapters = options.adapters ?? new LazyAdapterResolver();
+  const adapterResolver = options.adapters ?? new LazyAdapterResolver();
+  const piAdapter = new PiAdapter();
+  if (adapterResolver instanceof LazyAdapterResolver) {
+    adapterResolver.register('pi', piAdapter);
+  }
+
+  const evaluator = options.evaluator ?? new HarnessEvaluator({ adapter: piAdapter });
+
   const hall = new ConcertHall({
     store,
     scoreRegistry: registry,
-    adapters,
-    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    adapters: adapterResolver,
+    evaluator,
   });
 
   return { store, registry, hall, scoresDirs };
@@ -64,6 +74,10 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
 
 class LazyAdapterResolver implements HarnessAdapterResolver {
   private adapters = new Map<string, HarnessAdapter>();
+
+  register(name: string, adapter: HarnessAdapter): void {
+    this.adapters.set(name, adapter);
+  }
 
   async resolve(name: string): Promise<HarnessAdapter> {
     const cached = this.adapters.get(name);
