@@ -15,6 +15,19 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@26.1.1)
 
+  packages/adapter-opencode:
+    dependencies:
+      '@opencode-ai/sdk':
+        specifier: ^1.17.18
+        version: 1.17.18
+      '@orchestron/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/adapter-pi:
     dependencies:
       '@earendil-works/pi-ai':
@@ -400,6 +413,9 @@ packages:
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
+
+  '@opencode-ai/sdk@1.17.18':
+    resolution: {integrity: sha512-c/C9PhY8PrbcxDY+JIYtOZsrmMD0KzoVvxq+RGUrZ6LQp57SuVBbT4lfwA2G8Se5RNC1N5JtYjiuaXeECnF2SQ==}
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -1658,6 +1674,10 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@opencode-ai/sdk@1.17.18':
+    dependencies:
+      cross-spawn: 7.0.6
 
   '@opentelemetry/api@1.9.0': {}
 

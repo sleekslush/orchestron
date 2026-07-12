@@ -1,0 +1,63 @@
+id: opencode-demo
+name: "Opencode Demo"
+description: |
+  A two-movement score demonstrating the opencode harness with native
+  structured output and session persistence.
+version: "1.0.0"
+evaluator:
+  harness: opencode
+program:
+  maxMovements: 10
+  persistSession: true
+startMovement: analyze
+
+movements:
+  - id: analyze
+    name: "Analyze Topic"
+    section: planning
+    harness: opencode
+    prompt: >
+      Analyze the following topic and provide a concise summary:
+
+      {{context.topic}}
+    output:
+      mode: structured
+      schema:
+        type: object
+        properties:
+          summary:
+            type: string
+          key_points:
+            type: array
+            items:
+              type: string
+          confidence:
+            type: number
+        required:
+          - summary
+          - key_points
+    goal:
+      description: "Analysis is clear and structured"
+      strategy: llm_judge
+    transitions:
+      - to: summarize
+        on: success
+      - to: __fail__
+        on: failure
+
+  - id: summarize
+    name: "Summarize Analysis"
+    section: delivery
+    harness: opencode
+    prompt: >
+      Based on the previous analysis, produce a one-paragraph final summary:
+
+      {{context.previousOutputs.analyze}}
+    goal:
+      description: "Final summary is concise and accurate"
+      strategy: llm_judge
+    transitions:
+      - to: __end__
+        on: success
+      - to: __fail__
+        on: failure

@@ -49,12 +49,12 @@
   - [x] Bug fix: PiAdapter no longer disposes newly-created persisted sessions — correctly retains them for subsequent execute() calls
 - [ ] Integration test: run a real 2-movement score against Pi
 
-## Phase 4: Opencode Harness Adapter
+## Phase 4: Opencode Harness Adapter ✅
 
 **Goal**: Second harness adapter via `@opencode-ai/sdk`; works alongside Pi.
 
-- [ ] Scaffold `packages/adapter-opencode/` — `package.json`, `src/index.ts`, `src/opencode-adapter.ts`
-- [ ] Implement `OpencodeAdapter`:
+- [x] Scaffold `packages/adapter-opencode/` — `package.json`, `src/index.ts`, `src/opencode-adapter.ts`
+- [x] Implement `OpencodeAdapter`:
   - Connect to existing server via `createOpencodeClient()`, or start embedded via `createOpencode()`
   - Native structured output via `format: { type: "json_schema", schema }`
   - Session persistence (reuse sessions per `sessionId`, same pattern as PiAdapter)
@@ -62,11 +62,11 @@
   - Usage extraction from response metadata (fall back to `{}` when unavailable)
   - `disposeSession()` → `client.session.delete()`
   - Global `dispose()` for embedded server cleanup
-- [ ] Add optional `dispose(): Promise<void>` to `HarnessAdapter` interface in core types
-- [ ] Unit tests: session lifecycle, structured output, abort, session reuse
+- [x] Add optional `dispose(): Promise<void>` to `HarnessAdapter` interface in core types
+- [x] Unit tests: session lifecycle, structured output, abort, session reuse
 - [ ] Integration test: run a real 2-movement score against opencode
-- [ ] Update example scores to show `harness: opencode`
-- [ ] Document decisions in `docs/decisions/opencode-adapter.md`
+- [x] Update example scores to show `harness: opencode`
+- [x] Document decisions in `docs/decisions/opencode-adapter.md`
 
 ## Phase 5: CLI
 

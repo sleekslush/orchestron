@@ -14,6 +14,8 @@ export interface HarnessAdapter {
     },
   ): Promise<HarnessResponse>;
   disposeSession?(sessionId: string): Promise<void>;
+  /** Optional global cleanup for the adapter (e.g. embedded server shutdown). */
+  dispose?(): Promise<void>;
 }
 
 export interface HarnessResponse {
