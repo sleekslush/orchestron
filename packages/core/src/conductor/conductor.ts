@@ -43,6 +43,7 @@ export class Conductor {
   private _status: ConcertStatus = 'pending';
   private startedAt = 0;
   private nestingDepth: number;
+  private activeSessions = new Map<string, HarnessAdapter>();
 
   constructor(
     private concert: Concert,
@@ -299,11 +300,18 @@ export class Conductor {
 
       const adapter = this.resolveAdapter(movement);
       const prompt = this.buildPrompt(movement, previousOutputs);
+      const persistSession = this.score.program.persistSession !== false;
+      const sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
+
+      if (sessionId) {
+        this.activeSessions.set(sessionId, adapter);
+      }
 
       const response = await adapter.execute(prompt, this.concert.context, {
         signal,
         output: movement.output,
         movementId: movement.id,
+        sessionId,
       });
 
       record.status = 'completed';
@@ -578,6 +586,14 @@ export class Conductor {
     this.concert.status = status;
     this.concert.completedAt = new Date();
     this.concert.currentMovement = null;
+
+    await Promise.all(
+      Array.from(this.activeSessions.entries()).map(([sessionId, adapter]) =>
+        adapter.disposeSession?.(sessionId).catch(() => {}),
+      ),
+    );
+    this.activeSessions.clear();
+
     await this.store.updateConcert({
       id: this.concert.id,
       status,

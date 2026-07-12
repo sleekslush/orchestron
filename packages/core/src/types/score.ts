@@ -8,6 +8,7 @@ export interface Program {
   maxMovements?: number;
   maxDurationMs?: number;
   maxNestingDepth?: number;
+  persistSession?: boolean;
   perSection?: Record<SectionID, SectionBudget>;
 }
 

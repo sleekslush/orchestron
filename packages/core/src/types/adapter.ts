@@ -10,8 +10,10 @@ export interface HarnessAdapter {
       signal?: AbortSignal;
       output?: OutputConfig;
       movementId?: string;
+      sessionId?: string;
     },
   ): Promise<HarnessResponse>;
+  disposeSession?(sessionId: string): Promise<void>;
 }
 
 export interface HarnessResponse {

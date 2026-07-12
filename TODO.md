@@ -41,6 +41,11 @@
   - Handle `OutputConfig.mode === 'structured'` — inject schema into prompt, parse result
   - Extract `ResourceUsage` from agent_end event (input/output tokens, cost → spend)
   - Abort signal bridges to `session.abort()`
+- [x] Session persistence: per-movement sessions with `persistSession` (Program config, default `true`)
+  - [x] `sessionId` in `HarnessAdapter.execute()` options
+  - [x] Optional `disposeSession()` on `HarnessAdapter`
+  - [x] Conductor passes `concertId:movementId` as sessionId, tracks active sessions, disposes on finalize
+  - [x] PiAdapter reuses sessions per sessionId, implements `disposeSession()`
 - [ ] Integration test: run a real 2-movement score against Pi
 
 ## Phase 4: CLI
