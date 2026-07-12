@@ -68,12 +68,12 @@
 - [x] Update example scores to show `harness: opencode`
 - [x] Document decisions in `docs/decisions/opencode-adapter.md`
 
-## Phase 5: CLI
+## Phase 5: CLI ✅
 
 **Goal**: `orchestron start|pause|status|list|scores` from the terminal.
 
-- [ ] Create `packages/cli/`
-- [ ] Commands:
+- [x] Create `packages/cli/`
+- [x] Commands:
   - `orchestron start <score-id> [--context.key=val ...]`
   - `orchestron pause <concert-id>`
   - `orchestron resume <concert-id>`
@@ -82,8 +82,8 @@
   - `orchestron list [--status running|completed|failed]`
   - `orchestron scores [--validate]`
   - `orchestron dashboard` — launches dashboard server
-- [ ] Output: human-readable by default, `--json` for programmatic use
-- [ ] Config: `--store` flag for custom SQLite path, default `~/.orchestron/store.db`
+- [x] Output: human-readable by default, `--json` for programmatic use
+- [x] Config: `--store` flag for custom SQLite path, default `~/.orchestron/store.db`
 
 ## Phase 6: Dashboard
 
