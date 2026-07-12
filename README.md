@@ -99,7 +99,7 @@ import { OpencodeAdapter } from '@orchestron/adapter-opencode';
 
 const store = new SqliteLoge('./store.db');
 const registry = new ScoreRegistry();
-registry.loadFrom('./examples');
+registry.loadFrom('./examples/opencode-demo.score.yaml');
 
 const adapters = new Map([
   ['pi', new PiAdapter()],
@@ -241,6 +241,7 @@ packages/
   adapter-opencode/  # Opencode harness adapter
   cli/               # orchestron CLI + basic web dashboard
   plugin-pi/         # (future) Pi session plugin
+  plugin-opencode/   # (future) Opencode session plugin
 examples/            # Example scores
 ```
 
@@ -287,8 +288,9 @@ movement A cannot see movement B's conversation history. Set
 - [x] Opencode harness adapter
 - [x] CLI (`orchestron start`, `status`, `list`, `dashboard`, etc.)
 - [x] Basic dashboard (`orchestron dashboard`)
-- [ ] Rich React dashboard (web UI + WebSocket)
 - [ ] Pi session plugin
+- [ ] Opencode session plugin
+- [ ] Rich React dashboard (web UI + WebSocket)
 - [ ] Claude harness adapter
 - [ ] More example scores
 
