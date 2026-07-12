@@ -87,20 +87,20 @@
 - [x] Output: human-readable by default, `--json` for programmatic use
 - [x] Config: `--store` flag for custom SQLite path, default `~/.orchestron/store.db`
 
-## Phase 6: Pi Session Plugin
+## Phase 6: Pi Session Plugin ✅
 
 **Goal**: Start and monitor concerts from within a Pi session using natural language.
 
-- [ ] Create `packages/plugin-pi/`
-- [ ] Define orchestron tools for Pi:
+- [x] Create `packages/plugin-pi/`
+- [x] Define orchestron tools for Pi:
   - `orchestron_start_concert(scoreId, context?)`
   - `orchestron_get_concert_status(concertId)`
   - `orchestron_list_concerts(filter?)`
   - `orchestron_pause_concert(concertId)`
   - `orchestron_cancel_concert(concertId)`
   - `orchestron_list_scores()`
-- [ ] Tools return structured data (JSON) so Pi can summarize for the user
-- [ ] Example: "Run the jira-to-mr workflow for PROJ-123" → tool call → concert starts in background → user can check status
+- [x] Tools return structured data (JSON) so Pi can summarize for the user
+- [x] Example: "Run the jira-to-mr workflow for PROJ-123" → tool call → concert starts in background → user can check status
 
 ## Phase 7: Opencode Session Plugin
 

@@ -288,7 +288,7 @@ movement A cannot see movement B's conversation history. Set
 - [x] Opencode harness adapter
 - [x] CLI (`orchestron start`, `status`, `list`, `dashboard`, etc.)
 - [x] Basic dashboard (`orchestron dashboard`)
-- [ ] Pi session plugin
+- [x] Pi session plugin
 - [ ] Opencode session plugin
 - [ ] Rich React dashboard (web UI + WebSocket)
 - [ ] Claude harness adapter
