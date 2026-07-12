@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
-import type { HarnessAdapter, SqliteLoge, ScoreRegistry, ConcertHall } from '@orchestron/core';
+import type { HarnessAdapter, HarnessAdapterResolver, SqliteLoge, ScoreRegistry, ConcertHall } from '@orchestron/core';
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
 export const DEFAULT_STORE_PATH = join(DEFAULT_CONFIG_DIR, 'store.db');
@@ -11,7 +11,7 @@ export const DEFAULT_SCORES_DIR = join(DEFAULT_CONFIG_DIR, 'scores');
 export interface OrchestronOptions {
   storePath?: string;
   scoresDirs?: string[];
-  adapters?: Map<string, HarnessAdapter>;
+  adapters?: Map<string, HarnessAdapter> | HarnessAdapterResolver;
 }
 
 export interface Orchestron {
@@ -38,7 +38,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     loadScoresFromDir(dir, registry);
   }
 
-  const adapters = options.adapters ?? (await defaultAdapters());
+  const adapters = options.adapters ?? new LazyAdapterResolver();
   const hall = new ConcertHall({
     store,
     scoreRegistry: registry,
@@ -47,6 +47,31 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
   });
 
   return { store, registry, hall };
+}
+
+class LazyAdapterResolver implements HarnessAdapterResolver {
+  private adapters = new Map<string, HarnessAdapter>();
+
+  async resolve(name: string): Promise<HarnessAdapter> {
+    const cached = this.adapters.get(name);
+    if (cached) return cached;
+
+    let Adapter: new () => HarnessAdapter;
+    switch (name) {
+      case 'pi':
+        ({ PiAdapter: Adapter } = await import('@orchestron/adapter-pi'));
+        break;
+      case 'opencode':
+        ({ OpencodeAdapter: Adapter } = await import('@orchestron/adapter-opencode'));
+        break;
+      default:
+        throw new Error(`Unknown harness adapter: ${name}`);
+    }
+
+    const adapter = new Adapter();
+    this.adapters.set(name, adapter);
+    return adapter;
+  }
 }
 
 function ensureDir(dir: string): void {
@@ -74,16 +99,4 @@ function loadScoresFromDir(dir: string, registry: ScoreRegistry): void {
       registry.loadFrom(fullPath);
     }
   }
-}
-
-async function defaultAdapters(): Promise<Map<string, HarnessAdapter>> {
-  const [{ PiAdapter }, { OpencodeAdapter }] = await Promise.all([
-    import('@orchestron/adapter-pi'),
-    import('@orchestron/adapter-opencode'),
-  ]);
-
-  return new Map<string, HarnessAdapter>([
-    ['pi', new PiAdapter()],
-    ['opencode', new OpencodeAdapter()],
-  ]);
 }

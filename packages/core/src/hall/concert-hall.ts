@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import type { Concert, ConcertID, ConcertFilter } from '../types/concert.js';
 import type { Score, ScoreID } from '../types/score.js';
-import type { HarnessAdapter } from '../types/adapter.js';
+import type { HarnessAdapter, HarnessAdapterResolver } from '../types/adapter.js';
 import type { ConcertStore } from '../store/concert-store.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { Conductor } from '../conductor/conductor.js';
@@ -14,8 +14,12 @@ import { ConductorPanic } from '../types/errors.js';
 export interface ConcertHallOptions {
   store: ConcertStore;
   scoreRegistry: ScoreRegistry;
-  adapters: Map<string, HarnessAdapter>;
+  adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
+}
+
+interface AdapterResolver {
+  get(name: string): Promise<HarnessAdapter>;
 }
 
 export class ConcertHall implements ChildConcertFactory {
@@ -23,19 +27,42 @@ export class ConcertHall implements ChildConcertFactory {
   private parentToChildren = new Map<ConcertID, ConcertID[]>();
   private store: ConcertStore;
   private scoreRegistry: ScoreRegistry;
-  private adapters: ReadonlyMap<string, HarnessAdapter>;
+  private adapterResolver: AdapterResolver;
   private evaluator: Evaluator;
 
   constructor(options: ConcertHallOptions) {
     this.store = options.store;
     this.scoreRegistry = options.scoreRegistry;
-    this.adapters = options.adapters;
+    this.adapterResolver = this.createAdapterResolver(options.adapters);
     this.evaluator = options.evaluator ?? new FakeEvaluator({ alwaysSucceed: true });
   }
 
-  private resolveEvaluator(score: Score): Evaluator {
+  private createAdapterResolver(
+    adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver,
+  ): AdapterResolver {
+    if (adapters instanceof Map) {
+      return {
+        get: async (name) => {
+          const adapter = adapters.get(name);
+          if (!adapter) {
+            throw new ConductorPanic(
+              `No adapter registered for harness type '${name}'`,
+              'INTERNAL_ERROR',
+            );
+          }
+          return adapter;
+        },
+      };
+    }
+
+    return {
+      get: adapters.resolve.bind(adapters),
+    };
+  }
+
+  private async resolveEvaluator(score: Score): Promise<Evaluator> {
     if (score.evaluator?.harness) {
-      const adapter = this.adapters.get(score.evaluator.harness);
+      const adapter = await this.adapterResolver.get(score.evaluator.harness);
       if (!adapter) {
         throw new ConductorPanic(
           `No adapter registered for evaluator harness '${score.evaluator.harness}' in score '${score.id}'`,
@@ -91,8 +118,8 @@ export class ConcertHall implements ChildConcertFactory {
       score,
       this.store,
       this,
-      this.adapters,
-      this.resolveEvaluator(score),
+      this.adapterResolver,
+      await this.resolveEvaluator(score),
     );
 
     this.conductors.set(concert.id, conductor);
@@ -162,8 +189,8 @@ export class ConcertHall implements ChildConcertFactory {
           score,
           this.store,
           this,
-          this.adapters,
-          this.resolveEvaluator(score),
+          this.adapterResolver,
+          await this.resolveEvaluator(score),
         );
         this.conductors.set(concert.id, conductor);
 

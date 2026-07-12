@@ -24,3 +24,7 @@ export interface HarnessResponse {
   summary: string;
   usage: ResourceUsage;
 }
+
+export interface HarnessAdapterResolver {
+  resolve(name: string): Promise<HarnessAdapter>;
+}

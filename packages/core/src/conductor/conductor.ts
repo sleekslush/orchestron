@@ -34,17 +34,34 @@ export class Conductor implements IConductor {
   private startedAt = 0;
   private nestingDepth: number;
   private activeSessions = new Map<string, HarnessAdapter>();
+  private adapterResolver: { get(name: string): Promise<HarnessAdapter> };
 
   constructor(
     private concert: Concert,
     private score: Score,
     private store: ConcertStore,
     private childFactory: ChildConcertFactory,
-    private adapters: ReadonlyMap<string, HarnessAdapter>,
+    adapters: Map<string, HarnessAdapter> | { get(name: string): Promise<HarnessAdapter> },
     private evaluator: Evaluator,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
+    this.adapterResolver =
+      adapters instanceof Map
+        ? {
+            get: async (name) => {
+              const adapter = adapters.get(name);
+              if (!adapter) {
+                throw new ConductorPanic(
+                  `No adapter registered for harness type '${name}'`,
+                  'INTERNAL_ERROR',
+                  this.concert.id,
+                );
+              }
+              return adapter;
+            },
+          }
+        : adapters;
   }
 
   get concertId(): ConcertID {
@@ -270,7 +287,7 @@ export class Conductor implements IConductor {
         return await this.executeSubscore(movement, previousOutputs, signal, record);
       }
 
-      const adapter = this.resolveAdapter(movement);
+      const adapter = await this.resolveAdapter(movement);
       const prompt = this.buildPrompt(movement, previousOutputs);
       const persistSession = this.score.program.persistSession !== false;
       const sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
@@ -404,7 +421,7 @@ export class Conductor implements IConductor {
     return record;
   }
 
-  private resolveAdapter(movement: Movement): HarnessAdapter {
+  private async resolveAdapter(movement: Movement): Promise<HarnessAdapter> {
     const type = movement.harness;
     if (!type) {
       throw new ConductorPanic(
@@ -413,7 +430,7 @@ export class Conductor implements IConductor {
         this.concert.id,
       );
     }
-    const adapter = this.adapters.get(type);
+    const adapter = await this.adapterResolver.get(type);
     if (!adapter) {
       throw new ConductorPanic(
         `No adapter registered for harness type '${type}'`,
