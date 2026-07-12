@@ -292,4 +292,60 @@ describe('OpencodeAdapter', () => {
 
     expect(createOpencodeMock).toHaveBeenCalledWith({ hostname: '127.0.0.1', port: 4097, config: undefined });
   });
+
+  it('retries initialization after a failure', async () => {
+    createOpencodeClientMock.mockReset();
+    let attempts = 0;
+    createOpencodeClientMock.mockImplementation(() => {
+      attempts++;
+      if (attempts === 1) throw new Error('server not ready');
+      return mockClient;
+    });
+
+    const adapter = new OpencodeAdapter({ baseUrl: 'http://localhost:4096' });
+    await expect(adapter.execute('x', { shared: {} })).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+    });
+
+    await adapter.execute('y', { shared: {} });
+    expect(attempts).toBe(2);
+  });
+
+  it('handles concurrent execute calls with different sessionIds', async () => {
+    mockClient.session.create
+      .mockResolvedValueOnce({ data: { id: 's1' } })
+      .mockResolvedValueOnce({ data: { id: 's2' } })
+      .mockResolvedValueOnce({ data: { id: 's3' } });
+    const adapter = new OpencodeAdapter();
+
+    const [r1, r2, r3] = await Promise.all([
+      adapter.execute('a', { shared: {} }, { sessionId: 'c1:m1' }),
+      adapter.execute('b', { shared: {} }, { sessionId: 'c1:m2' }),
+      adapter.execute('c', { shared: {} }, { sessionId: 'c1:m3' }),
+    ]);
+
+    expect(mockClient.session.create).toHaveBeenCalledTimes(3);
+    expect(r1.output).toBe('hello');
+    expect(r2.output).toBe('hello');
+    expect(r3.output).toBe('hello');
+    expect(mockClient.session.delete).not.toHaveBeenCalled();
+  });
+
+  it('handles concurrent execute calls for the same sessionId', async () => {
+    let createCount = 0;
+    mockClient.session.create.mockImplementation(() => {
+      createCount++;
+      return Promise.resolve({ data: { id: `s${createCount}` } });
+    });
+    const adapter = new OpencodeAdapter();
+
+    const [r1, r2] = await Promise.all([
+      adapter.execute('a', { shared: {} }, { sessionId: 'c1:m1' }),
+      adapter.execute('b', { shared: {} }, { sessionId: 'c1:m1' }),
+    ]);
+
+    expect(createCount).toBe(1);
+    expect(r1.output).toBe('hello');
+    expect(r2.output).toBe('hello');
+  });
 });

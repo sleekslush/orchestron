@@ -212,9 +212,25 @@ export class OpencodeAdapter implements HarnessAdapter {
 
   private async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
-    if (this.initialization) return this.initialization;
+    if (this.initialization) {
+      try {
+        await this.initialization;
+      } catch {
+        this.initialization = undefined;
+        throw new HarnessError(
+          'Failed to initialize opencode client',
+          'HARNESS_FAILURE',
+        );
+      }
+      return;
+    }
     this.initialization = this.initialize(this.config);
-    return this.initialization;
+    try {
+      await this.initialization;
+    } catch (err) {
+      this.initialization = undefined;
+      throw err;
+    }
   }
 
   private async initialize(config: OpencodeAdapterConfig): Promise<void> {
