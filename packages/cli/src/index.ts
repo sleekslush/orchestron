@@ -85,7 +85,10 @@ program
   .command('status [concert-id]')
   .description('Show system status or detailed concert status')
   .action(async (concertId: string | undefined, _options: unknown, command: Command) => {
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
+    const orchestron = await createOrchestron({
+      ...getOrchestronOptions(program),
+      adapters: new Map(),
+    });
     try {
       await statusCommandHandler(orchestron, concertId, wantsJson(command));
     } finally {
@@ -99,7 +102,10 @@ program
   .option('--status <status>', 'Filter by status')
   .action(async (_options: unknown, command: Command) => {
     const opts = command.opts();
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
+    const orchestron = await createOrchestron({
+      ...getOrchestronOptions(program),
+      adapters: new Map(),
+    });
     try {
       await listCommandHandler(
         orchestron,
@@ -117,7 +123,10 @@ program
   .option('--validate', 'Validate all registered scores')
   .action(async (_options: unknown, command: Command) => {
     const opts = command.opts();
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
+    const orchestron = await createOrchestron({
+      ...getOrchestronOptions(program),
+      adapters: new Map(),
+    });
     try {
       await scoresCommandHandler(orchestron, opts.validate === true, wantsJson(command));
     } finally {

@@ -2,10 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
-import { SqliteLoge, ScoreRegistry, ConcertHall, FakeEvaluator } from '@orchestron/core';
-import { PiAdapter } from '@orchestron/adapter-pi';
-import { OpencodeAdapter } from '@orchestron/adapter-opencode';
-import type { HarnessAdapter } from '@orchestron/core';
+import type { HarnessAdapter, SqliteLoge, ScoreRegistry, ConcertHall } from '@orchestron/core';
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
 export const DEFAULT_STORE_PATH = join(DEFAULT_CONFIG_DIR, 'store.db');
@@ -32,6 +29,8 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     ensureDir(dir);
   }
 
+  const { SqliteLoge, ScoreRegistry, ConcertHall, FakeEvaluator } = await import('@orchestron/core');
+
   const store = new SqliteLoge(storePath);
   const registry = new ScoreRegistry();
 
@@ -39,7 +38,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     loadScoresFromDir(dir, registry);
   }
 
-  const adapters = options.adapters ?? defaultAdapters();
+  const adapters = options.adapters ?? (await defaultAdapters());
   const hall = new ConcertHall({
     store,
     scoreRegistry: registry,
@@ -77,7 +76,12 @@ function loadScoresFromDir(dir: string, registry: ScoreRegistry): void {
   }
 }
 
-function defaultAdapters(): Map<string, HarnessAdapter> {
+async function defaultAdapters(): Promise<Map<string, HarnessAdapter>> {
+  const [{ PiAdapter }, { OpencodeAdapter }] = await Promise.all([
+    import('@orchestron/adapter-pi'),
+    import('@orchestron/adapter-opencode'),
+  ]);
+
   return new Map<string, HarnessAdapter>([
     ['pi', new PiAdapter()],
     ['opencode', new OpencodeAdapter()],
