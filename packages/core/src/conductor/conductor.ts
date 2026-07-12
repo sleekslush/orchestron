@@ -1,13 +1,8 @@
-import { nanoid } from 'nanoid';
 import type {
   Concert,
   ConcertID,
-  ConcertContext,
   ConcertStatus,
-  GoalEvaluation,
   MovementRecord,
-  MovementStatus,
-  ResourceUsage,
   SerializedError,
 } from '../types/concert.js';
 import type {
@@ -21,7 +16,6 @@ import type { HarnessAdapter } from '../types/adapter.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
 import type { ConcertStore } from '../store/concert-store.js';
 import type { ConcertHall } from '../hall/concert-hall.js';
-import type { ConcertEvent } from '../types/events.js';
 import {
   ConstraintBreachError,
   ConductorPanic,
@@ -104,124 +98,104 @@ export class Conductor {
     });
 
     const signal = this.abortController.signal;
+    const previousOutputs = new Map<MovementID, MovementRecord>();
 
     try {
-      let currentId: MovementID | '__end__' | '__fail__' = this.score.startMovement;
+      await this.runLoop(this.score.startMovement, previousOutputs, 0, signal);
+    } catch (err) {
+      await this.handleExecutionError(err);
+    }
+  }
+
+  async recover(): Promise<void> {
+    const stored = await this.store.getConcert(this.concert.id);
+    if (stored) {
+      this.concert = stored;
+    }
+
+    if (this._status !== 'running' && this._status !== 'paused') {
+      throw new ConductorPanic(
+        `Cannot recover concert '${this.concert.id}': status is ${this._status}`,
+        'STATE_CORRUPTION',
+        this.concert.id,
+      );
+    }
+
+    this._status = 'running';
+    this.concert.status = 'running';
+    this.startedAt = Date.now();
+
+    await this.store.updateConcert({ id: this.concert.id, status: 'running' });
+    await this.store.pushEvent({
+      type: 'concert:started',
+      concertId: this.concert.id,
+      scoreId: this.score.id,
+      timestamp: new Date(),
+    });
+
+    const signal = this.abortController.signal;
+    const previousOutputs = new Map<MovementID, MovementRecord>();
+
+    try {
+      let currentId: MovementID | '__end__' | '__fail__';
       let movementCount = 0;
-      const previousOutputs = new Map<MovementID, MovementRecord>();
 
-      while (currentId !== '__end__' && currentId !== '__fail__') {
-        if (signal.aborted) {
-          await this.finalize('cancelled', 'Concert cancelled');
-          return;
-        }
-
-        if ((this._status as ConcertStatus) === 'paused') {
-          await this.waitForResume(signal);
-        }
-
-        const movement = this.score.movements.find((m) => m.id === currentId);
-        if (!movement) {
-          throw new ConductorPanic(
-            `Movement '${currentId}' not found in score '${this.score.id}'`,
-            'INTERNAL_ERROR',
-            this.concert.id,
-          );
-        }
-
-        movementCount++;
-        this.checkMovementLimit(movementCount, movement.id);
-
-        this.concert.currentMovement = movement.id;
-        await this.store.updateConcert({
-          id: this.concert.id,
-          currentMovement: movement.id,
-        });
-
-        const record = await this.executeMovement(movement, previousOutputs, signal);
-
-        if (record.status === 'failed' && movement.retryOnFailure) {
-          const maxRetries = movement.budget?.maxRetries ?? 2;
-          for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            await this.store.pushEvent({
-              type: 'movement:failed',
-              concertId: this.concert.id,
-              movementId: movement.id,
-              error: record.error ?? { code: 'UNKNOWN', message: 'Unknown error', retryable: false },
-              retryCount: attempt,
-              timestamp: new Date(),
-            });
-            const retryRecord = await this.executeMovement(movement, previousOutputs, signal);
-            if (retryRecord.status === 'completed') {
-              Object.assign(record, retryRecord);
-              break;
-            }
-            Object.assign(record, retryRecord);
-          }
-        }
-
-        const evaluation = await this.evaluator.evaluate(
-          movement.goal,
-          record.output,
-          this.concert.context,
-          movement.id,
+      if (this.concert.currentMovement) {
+        const failedMovement = this.score.movements.find(
+          (m) => m.id === this.concert.currentMovement,
         );
-        record.goalEvaluation = evaluation;
-        record.completedAt = new Date();
 
-        const achieved = evaluation.achieved && record.status === 'completed';
-        record.status = achieved ? 'completed' : 'failed';
+        if (failedMovement) {
+          movementCount++;
+          this.checkMovementLimit(movementCount, failedMovement.id);
 
-        await this.store.appendMovement(this.concert.id, record);
-        if (achieved) {
-          await this.store.pushEvent({
-            type: 'movement:completed',
+          const error: SerializedError = {
+            code: 'STATE_CORRUPTION',
+            message: 'Process crashed during this movement',
+            retryable: false,
             concertId: this.concert.id,
-            movementId: movement.id,
-            result: record,
-            timestamp: new Date(),
-          });
-        } else {
+            movementId: failedMovement.id,
+          };
+
+          const failedRecord: MovementRecord = {
+            movementId: failedMovement.id,
+            movementName: failedMovement.name,
+            status: 'failed',
+            output: '',
+            summary: 'Movement failed during crash recovery',
+            goalEvaluation: { achieved: false, confidence: 0, summary: 'Interrupted by crash' },
+            usage: {},
+            durationMs: 0,
+            startedAt: new Date(),
+            completedAt: new Date(),
+            error,
+          };
+
+          await this.store.appendMovement(this.concert.id, failedRecord);
           await this.store.pushEvent({
             type: 'movement:failed',
             concertId: this.concert.id,
-            movementId: movement.id,
-            error: record.error ?? { code: 'GOAL_FAILURE', message: 'Goal not achieved', retryable: false },
+            movementId: failedMovement.id,
+            error,
             retryCount: 0,
             timestamp: new Date(),
           });
+
+          this.concert.history.push(failedRecord);
+          previousOutputs.set(failedMovement.id, failedRecord);
+
+          const transition = this.matchTransition(failedMovement, false);
+          currentId = transition?.to ?? '__fail__';
+        } else {
+          currentId = '__fail__';
         }
-
-        this.concert.history.push(record);
-        previousOutputs.set(movement.id, record);
-
-        this.checkProgramConstraints(movement, record);
-
-        const transition = this.matchTransition(movement, achieved);
-        currentId = transition?.to ?? '__fail__';
-      }
-
-      if (currentId === '__end__') {
-        await this.finalize('completed');
       } else {
-        await this.finalize('failed', 'Reached __fail__ terminal');
+        currentId = this.score.startMovement;
       }
+
+      await this.runLoop(currentId, previousOutputs, movementCount, signal);
     } catch (err) {
-      if (err instanceof ConstraintBreachError) {
-        await this.store.pushEvent({
-          type: 'constraint:breached',
-          concertId: this.concert.id,
-          constraint: err.constraint,
-          limit: err.limit,
-          actual: err.actual,
-          timestamp: new Date(),
-        });
-        await this.finalize('failed', err.message);
-      } else if (err instanceof OrchestronError) {
-        await this.finalize('failed', err.message);
-      } else {
-        await this.finalize('failed', (err as Error).message ?? 'Unknown error');
-      }
+      await this.handleExecutionError(err);
     }
   }
 
@@ -568,6 +542,131 @@ export class Conductor {
 
     this.concert.usage.spend = totalSpend;
     this.concert.usage.tokens = totalTokens;
+  }
+
+  private async runLoop(
+    startId: MovementID | '__end__' | '__fail__',
+    previousOutputs: Map<MovementID, MovementRecord>,
+    startCount: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    let currentId = startId;
+    let movementCount = startCount;
+
+    while (currentId !== '__end__' && currentId !== '__fail__') {
+      if (signal.aborted) {
+        await this.finalize('cancelled', 'Concert cancelled');
+        return;
+      }
+
+      if ((this._status as ConcertStatus) === 'paused') {
+        await this.waitForResume(signal);
+      }
+
+      const movement = this.score.movements.find((m) => m.id === currentId);
+      if (!movement) {
+        throw new ConductorPanic(
+          `Movement '${currentId}' not found in score '${this.score.id}'`,
+          'INTERNAL_ERROR',
+          this.concert.id,
+        );
+      }
+
+      movementCount++;
+      this.checkMovementLimit(movementCount, movement.id);
+
+      this.concert.currentMovement = movement.id;
+      await this.store.updateConcert({
+        id: this.concert.id,
+        currentMovement: movement.id,
+      });
+
+      const record = await this.executeMovement(movement, previousOutputs, signal);
+
+      if (record.status === 'failed' && movement.retryOnFailure) {
+        const maxRetries = movement.budget?.maxRetries ?? 2;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          await this.store.pushEvent({
+            type: 'movement:failed',
+            concertId: this.concert.id,
+            movementId: movement.id,
+            error: record.error ?? { code: 'UNKNOWN', message: 'Unknown error', retryable: false },
+            retryCount: attempt,
+            timestamp: new Date(),
+          });
+          const retryRecord = await this.executeMovement(movement, previousOutputs, signal);
+          if (retryRecord.status === 'completed') {
+            Object.assign(record, retryRecord);
+            break;
+          }
+          Object.assign(record, retryRecord);
+        }
+      }
+
+      const evaluation = await this.evaluator.evaluate(
+        movement.goal,
+        record.output,
+        this.concert.context,
+        movement.id,
+      );
+      record.goalEvaluation = evaluation;
+      record.completedAt = new Date();
+
+      const achieved = evaluation.achieved && record.status === 'completed';
+      record.status = achieved ? 'completed' : 'failed';
+
+      await this.store.appendMovement(this.concert.id, record);
+      if (achieved) {
+        await this.store.pushEvent({
+          type: 'movement:completed',
+          concertId: this.concert.id,
+          movementId: movement.id,
+          result: record,
+          timestamp: new Date(),
+        });
+      } else {
+        await this.store.pushEvent({
+          type: 'movement:failed',
+          concertId: this.concert.id,
+          movementId: movement.id,
+          error: record.error ?? { code: 'GOAL_FAILURE', message: 'Goal not achieved', retryable: false },
+          retryCount: 0,
+          timestamp: new Date(),
+        });
+      }
+
+      this.concert.history.push(record);
+      previousOutputs.set(movement.id, record);
+
+      this.checkProgramConstraints(movement, record);
+
+      const transition = this.matchTransition(movement, achieved);
+      currentId = transition?.to ?? '__fail__';
+    }
+
+    if (currentId === '__end__') {
+      await this.finalize('completed');
+    } else {
+      await this.finalize('failed', 'Reached __fail__ terminal');
+    }
+  }
+
+  private async handleExecutionError(err: unknown): Promise<void> {
+    if (err instanceof ConstraintBreachError) {
+      await this.store.pushEvent({
+        type: 'constraint:breached',
+        concertId: this.concert.id,
+        constraint: err.constraint,
+        limit: err.limit,
+        actual: err.actual,
+        timestamp: new Date(),
+      });
+      await this.finalize('failed', err.message);
+    } else if (err instanceof OrchestronError) {
+      await this.finalize('failed', err.message);
+    } else {
+      await this.finalize('failed', (err as Error).message ?? 'Unknown error');
+    }
   }
 
   private async waitForResume(signal: AbortSignal): Promise<void> {

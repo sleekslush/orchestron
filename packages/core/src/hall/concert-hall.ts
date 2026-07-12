@@ -110,13 +110,14 @@ export class ConcertHall {
   }
 
   async rehydrate(): Promise<void> {
-    const pendingConcerts = await this.store.listConcerts({
+    const runningConcerts = await this.store.listConcerts({
       status: 'running',
     });
     const pausedConcerts = await this.store.listConcerts({
       status: 'paused',
     });
-    const all = [...pendingConcerts, ...pausedConcerts];
+
+    const all = [...runningConcerts, ...pausedConcerts];
 
     for (const concert of all) {
       try {
@@ -141,6 +142,19 @@ export class ConcertHall {
           id: concert.id,
           status: 'failed',
           completedAt: new Date(),
+        });
+      }
+    }
+
+    for (const concert of runningConcerts) {
+      const conductor = this.conductors.get(concert.id);
+      if (conductor) {
+        conductor.recover().catch((err) => {
+          this.store.updateConcert({
+            id: concert.id,
+            status: 'failed',
+            completedAt: new Date(),
+          }).catch(() => {});
         });
       }
     }

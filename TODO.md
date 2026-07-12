@@ -46,6 +46,7 @@
   - [x] Optional `disposeSession()` on `HarnessAdapter`
   - [x] Conductor passes `concertId:movementId` as sessionId, tracks active sessions, disposes on finalize
   - [x] PiAdapter reuses sessions per sessionId, implements `disposeSession()`
+  - [x] Bug fix: PiAdapter no longer disposes newly-created persisted sessions — correctly retains them for subsequent execute() calls
 - [ ] Integration test: run a real 2-movement score against Pi
 
 ## Phase 4: CLI

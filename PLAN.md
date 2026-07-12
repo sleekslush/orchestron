@@ -179,7 +179,16 @@ interface ResourceUsage {
 
 ### 6. Crash recovery: play it simple
 
-State is persisted after every completed movement transition. If the process crashes mid-movement, the movement is marked as `failed` on recovery. The `on: failure` transition handles what happens next. Re-execution is the default retry behavior — no mid-air resumption.
+State is persisted after every completed movement transition. If the process crashes mid-movement, recovery is handled via `Conductor.recover()`:
+
+1. `Conductor.recover()` loads the stored concert state, creates a synthetic `MovementRecord` with code `STATE_CORRUPTION`, appends it to the store, and matches the `on: failure` transition to determine the next movement.
+2. If no `currentMovement` was set, execution starts from `score.startMovement`.
+3. After the synthetic failure is recorded, the normal execution loop resumes — following transitions, executing movements, and evaluating goals.
+4. `ConcertHall.rehydrate()` calls `recover()` on every `running` concert (paused concerts are rehydrated but not recovered).
+5. Recovery is async and non-blocking — rehydration fires all recoveries in the background.
+6. Retry loops triggered by `on: failure` transitions work the same as runtime failures — no special recovery path needed for re-execution.
+
+Paused concerts are rehydrated into memory for observation/cancellation but are not auto-recovered.
 
 ### 7. Secrets are out of scope
 
