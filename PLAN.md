@@ -567,7 +567,10 @@ orchestron/
 │   │   │   └── index.ts
 │   │   └── package.json
 │   │
-│   ├── adapter-opencode/       # (future) Opencode harness adapter
+│   ├── adapter-opencode/       # Opencode harness adapter
+│   │   ├── src/
+│   │   │   ├── opencode-adapter.ts
+│   │   │   └── index.ts
 │   │   └── package.json
 │   │
 │   ├── adapter-claude/         # (future) Claude harness adapter

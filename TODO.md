@@ -49,7 +49,26 @@
   - [x] Bug fix: PiAdapter no longer disposes newly-created persisted sessions — correctly retains them for subsequent execute() calls
 - [ ] Integration test: run a real 2-movement score against Pi
 
-## Phase 4: CLI
+## Phase 4: Opencode Harness Adapter
+
+**Goal**: Second harness adapter via `@opencode-ai/sdk`; works alongside Pi.
+
+- [ ] Scaffold `packages/adapter-opencode/` — `package.json`, `src/index.ts`, `src/opencode-adapter.ts`
+- [ ] Implement `OpencodeAdapter`:
+  - Connect to existing server via `createOpencodeClient()`, or start embedded via `createOpencode()`
+  - Native structured output via `format: { type: "json_schema", schema }`
+  - Session persistence (reuse sessions per `sessionId`, same pattern as PiAdapter)
+  - Abort signal → `client.session.abort()`
+  - Usage extraction from response metadata (fall back to `{}` when unavailable)
+  - `disposeSession()` → `client.session.delete()`
+  - Global `dispose()` for embedded server cleanup
+- [ ] Add optional `dispose(): Promise<void>` to `HarnessAdapter` interface in core types
+- [ ] Unit tests: session lifecycle, structured output, abort, session reuse
+- [ ] Integration test: run a real 2-movement score against opencode
+- [ ] Update example scores to show `harness: opencode`
+- [ ] Document decisions in `docs/decisions/opencode-adapter.md`
+
+## Phase 5: CLI
 
 **Goal**: `orchestron start|pause|status|list|scores` from the terminal.
 
@@ -66,7 +85,7 @@
 - [ ] Output: human-readable by default, `--json` for programmatic use
 - [ ] Config: `--store` flag for custom SQLite path, default `~/.orchestron/store.db`
 
-## Phase 5: Dashboard
+## Phase 6: Dashboard
 
 **Goal**: Real-time web UI for monitoring Concerts, drilling into movements.
 
@@ -82,7 +101,7 @@
   - **Score Library**: Browse scores, inspect movement DAGs
   - **Live View**: Real-time event stream
 
-## Phase 6: Pi Session Plugin
+## Phase 7: Pi Session Plugin
 
 **Goal**: Start and monitor concerts from within a Pi session using natural language.
 
@@ -97,7 +116,7 @@
 - [ ] Tools return structured data (JSON) so Pi can summarize for the user
 - [ ] Example: "Run the jira-to-mr workflow for PROJ-123" → tool call → concert starts in background → user can check status
 
-## Phase 7: Score Examples + Docs
+## Phase 8: Score Examples + Docs
 
 **Goal**: Working example scores and enough docs for someone to author their own.
 
@@ -106,16 +125,6 @@
 - [ ] `examples/notion-clarify.score.yaml`
 - [ ] `examples/plan-to-markdown.score.yaml`
 - [ ] Score authoring guide (README or AGENTS.md)
-
-## Phase 8: Opencode Adapter + Polish
-
-**Goal**: Second harness adapter; hardening.
-
-- [ ] Create `packages/adapter-opencode/`
-  - `createOpencodeClient()` → `client.session.create()` → `.prompt()` → `.delete()`
-- [ ] Concurrent safety — document or resolve command races
-- [ ] Performance — backpressure, timeout propagation
-- [ ] End-to-end test with both Pi and opencode adapters
 
 ## Phase 9: V1 (Future)
 
