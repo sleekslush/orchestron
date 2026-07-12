@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@orchestron/cli':
+        specifier: workspace:*
+        version: link:packages/cli
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
