@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { createOrchestron, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR } from './orchestron.js';
 import { startCommandHandler } from './commands/start.js';
 import {
@@ -96,7 +96,16 @@ program
 program
   .command('list')
   .description('List concerts')
-  .option('--status <status>', 'Filter by status')
+  .addOption(
+    new Option('--status <status>', 'Filter by status').choices([
+      'pending',
+      'running',
+      'paused',
+      'completed',
+      'failed',
+      'cancelled',
+    ]),
+  )
   .action(async (_options: unknown, command: Command) => {
     const opts = command.opts();
     const orchestron = await createOrchestron(getOrchestronOptions(program));
@@ -131,8 +140,13 @@ program
   .option('--port <port>', 'Port to run the dashboard server on', '3000')
   .action(async (_options: unknown, command: Command) => {
     const opts = command.opts();
+    const port = Number(opts.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      console.error(`error: option '--port <port>' argument '${opts.port}' is invalid. Must be an integer between 1 and 65535.`);
+      process.exit(1);
+    }
     const orchestron = await createOrchestron(getOrchestronOptions(program));
-    await dashboardCommandHandler(orchestron, Number(opts.port));
+    await dashboardCommandHandler(orchestron, port);
   });
 
 function getOrchestronOptions(program: Command): {
