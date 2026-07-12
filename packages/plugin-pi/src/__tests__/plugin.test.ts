@@ -183,7 +183,7 @@ describe('Orchestron Pi plugin tools', () => {
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),
     });
-    const orchestron2: Orchestron = { store, registry, hall };
+    const orchestron2: Orchestron = { store, registry, hall, scoresDirs: [] };
 
     const { concertId } = await startConcert(orchestron2, { scoreId: 'linear-test' });
     await new Promise((r) => setTimeout(r, 50));
@@ -229,7 +229,7 @@ describe('Orchestron Pi plugin tools', () => {
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),
     });
-    const orchestron2: Orchestron = { store, registry, hall };
+    const orchestron2: Orchestron = { store, registry, hall, scoresDirs: [] };
 
     const { concertId } = await startConcert(orchestron2, { scoreId: 'linear-test' });
 
@@ -262,7 +262,7 @@ describe('Orchestron Pi plugin tools', () => {
 });
 
 describe('Orchestron Pi plugin extension', () => {
-  it('registers all six orchestron tools', () => {
+  it('registers all orchestron tools', () => {
     const registered: string[] = [];
     const pi = {
       registerTool: vi.fn((tool) => {
@@ -280,6 +280,10 @@ describe('Orchestron Pi plugin extension', () => {
       'orchestron_pause_concert',
       'orchestron_cancel_concert',
       'orchestron_list_scores',
+      'orchestron_create_score',
+      'orchestron_edit_score',
+      'orchestron_get_score',
+      'orchestron_validate_score',
     ]);
     expect(pi.on).toHaveBeenCalledWith('session_shutdown', expect.any(Function));
   });

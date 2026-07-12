@@ -24,6 +24,7 @@ export interface Orchestron {
   store: SqliteLoge;
   registry: ScoreRegistry;
   hall: ConcertHall;
+  scoresDirs: string[];
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
@@ -58,7 +59,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
 
-  return { store, registry, hall };
+  return { store, registry, hall, scoresDirs };
 }
 
 class LazyAdapterResolver implements HarnessAdapterResolver {

@@ -1,6 +1,7 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 import type { Orchestron } from '../orchestron.js';
+import { findScoreFile } from './_score-helpers.js';
 
 export async function listScores(
   orchestron: Orchestron,
@@ -11,6 +12,7 @@ export async function listScores(
     version: string;
     description?: string;
     movements: string[];
+    persisted: boolean;
   }>;
 }> {
   const scores = orchestron.registry.list();
@@ -21,6 +23,7 @@ export async function listScores(
       version: s.version,
       description: s.description,
       movements: s.movements.map((m) => m.id),
+      persisted: findScoreFile(orchestron.scoresDirs, s.id) !== undefined,
     })),
   };
 }

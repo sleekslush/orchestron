@@ -99,8 +99,14 @@
   - `orchestron_pause_concert(concertId)`
   - `orchestron_cancel_concert(concertId)`
   - `orchestron_list_scores()`
+  - `orchestron_create_score(scoreId, yaml, persist?, saveLocation?)`
+  - `orchestron_edit_score(scoreId, yaml, persist?, saveLocation?)`
+  - `orchestron_get_score(scoreId)`
+  - `orchestron_validate_score(scoreId)`
 - [x] Tools return structured data (JSON) so Pi can summarize for the user
 - [x] Example: "Run the jira-to-mr workflow for PROJ-123" → tool call → concert starts in background → user can check status
+- [x] Add `orchestron-score-authoring` skill to the Pi plugin package
+- [x] In-memory score drafts: validate and register without persisting, test via `orchestron_start_concert`, then persist when asked
 
 ## Phase 7: Opencode Session Plugin
 
@@ -141,7 +147,7 @@
 - [x] `examples/simple-plan-review.score.yaml`
 - [ ] `examples/notion-clarify.score.yaml`
 - [ ] `examples/plan-to-markdown.score.yaml`
-- [ ] Score authoring guide (README or AGENTS.md)
+- [x] Score authoring guide (skill: `packages/plugin-pi/skills/orchestron-score-authoring/SKILL.md`)
 
 ## Phase 10: V1 (Future)
 

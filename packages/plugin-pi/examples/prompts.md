@@ -33,3 +33,14 @@ the registered tools.
 
 - "Pause my running orchestron concert `<concert-id>`."
 - "Cancel the orchestron concert `<concert-id>`."
+
+## Score authoring
+
+- "Create a score that analyzes a topic and summarizes it."
+- "Create an orchestron workflow that plans a task, reviews the plan, and revises it if needed."
+- "Show me the YAML for the simple-plan-review score."
+- "Edit the simple-plan-review score to add a final delivery step."
+- "Run the draft of my new score to test it."
+- "Save the score I just created."
+- "Validate the jira-to-mr score for errors."
+- "List my orchestron scores and tell me which ones are saved to disk."
