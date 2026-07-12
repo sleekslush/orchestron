@@ -124,9 +124,6 @@ export class PiAdapter implements HarnessAdapter {
       unsub();
       if (!options?.sessionId) {
         session.dispose();
-        if (options?.sessionId) {
-          this.sessions.delete(options.sessionId);
-        }
       }
     }
 

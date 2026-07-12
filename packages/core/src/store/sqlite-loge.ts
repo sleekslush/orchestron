@@ -39,6 +39,7 @@ interface ConcertRow {
   triggered_by: string;
   parent_concert_id: string | null;
   child_concert_ids: string;
+  nesting_depth: number | null;
 }
 
 interface MovementRow {
@@ -91,7 +92,8 @@ export class SqliteLoge implements ConcertStore {
         usage TEXT NOT NULL DEFAULT '{}',
         triggered_by TEXT NOT NULL DEFAULT 'cli',
         parent_concert_id TEXT,
-        child_concert_ids TEXT NOT NULL DEFAULT '[]'
+        child_concert_ids TEXT NOT NULL DEFAULT '[]',
+        nesting_depth INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS movements (
@@ -129,8 +131,8 @@ export class SqliteLoge implements ConcertStore {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO concerts
         (id, score_id, status, started_at, completed_at, current_movement,
-         context, usage, triggered_by, parent_concert_id, child_concert_ids)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         context, usage, triggered_by, parent_concert_id, child_concert_ids, nesting_depth)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       concert.id,
@@ -144,6 +146,7 @@ export class SqliteLoge implements ConcertStore {
       concert.triggeredBy,
       concert.parentConcertId ?? null,
       JSON.stringify(concert.childConcertIds),
+      concert.nestingDepth ?? null,
     );
 
     this.db.prepare('DELETE FROM movements WHERE concert_id = ?').run(concert.id);
@@ -180,6 +183,10 @@ export class SqliteLoge implements ConcertStore {
     if (concert.childConcertIds !== undefined) {
       fields.push('child_concert_ids = ?');
       values.push(JSON.stringify(concert.childConcertIds));
+    }
+    if (concert.nestingDepth !== undefined) {
+      fields.push('nesting_depth = ?');
+      values.push(concert.nestingDepth);
     }
 
     if (fields.length === 0) return;
@@ -327,9 +334,20 @@ export class SqliteLoge implements ConcertStore {
 
     if (fields.length === 0) return;
 
-    values.push(concertId, record.movementId);
+    let whereClause = 'concert_id = ?';
+    const whereValues: unknown[] = [concertId];
+
+    if (record.startedAt !== undefined) {
+      whereClause += ' AND started_at = ?';
+      whereValues.push(serializeDate(record.startedAt));
+    }
+
+    whereClause += ' AND movement_id = ?';
+    whereValues.push(record.movementId);
+
+    values.push(...whereValues);
     const stmt = this.db.prepare(
-      `UPDATE movements SET ${fields.join(', ')} WHERE concert_id = ? AND movement_id = ?`,
+      `UPDATE movements SET ${fields.join(', ')} WHERE ${whereClause}`,
     );
     stmt.run(...values);
   }
@@ -432,6 +450,7 @@ function rowToConcert(row: ConcertRow, history: MovementRecord[]): Concert {
     triggeredBy: row.triggered_by as Concert['triggeredBy'],
     parentConcertId: row.parent_concert_id ?? undefined,
     childConcertIds: jsonParse<string[]>(row.child_concert_ids, []),
+    nestingDepth: row.nesting_depth ?? undefined,
   };
 }
 
@@ -472,6 +491,8 @@ function rowToEvent(row: EventRow): ConcertEvent {
       return { type: 'concert:failed', ...base, error: parsed.error as never };
     case 'concert:cancelled':
       return { type: 'concert:cancelled', ...base };
+    case 'concert:recovered':
+      return { type: 'concert:recovered', ...base };
     case 'movement:started':
       return { type: 'movement:started', ...base, movementId: parsed.movementId as string };
     case 'movement:completed':

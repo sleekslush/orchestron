@@ -8,6 +8,7 @@ export type ConcertEvent =
   | { type: 'concert:completed'; concertId: ConcertID; timestamp: Date }
   | { type: 'concert:failed'; concertId: ConcertID; error: SerializedError; timestamp: Date }
   | { type: 'concert:cancelled'; concertId: ConcertID; timestamp: Date }
+  | { type: 'concert:recovered'; concertId: ConcertID; timestamp: Date }
   | { type: 'movement:started'; concertId: ConcertID; movementId: MovementID; timestamp: Date }
   | { type: 'movement:completed'; concertId: ConcertID; movementId: MovementID; result: import('./concert.js').MovementRecord; timestamp: Date }
   | { type: 'movement:failed'; concertId: ConcertID; movementId: MovementID; error: SerializedError; retryCount: number; timestamp: Date }

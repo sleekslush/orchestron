@@ -174,6 +174,7 @@ describe('SqliteLoge', () => {
 
     await store.updateMovement('test-concert-1', {
       movementId: 'step_1',
+      startedAt: movement.startedAt,
       status: 'completed',
       output: 'Done',
       summary: 'Completed',

@@ -41,6 +41,7 @@ export interface Concert {
   triggeredBy: 'cli' | 'api' | 'harness' | 'agent';
   parentConcertId?: ConcertID;
   childConcertIds: ConcertID[];
+  nestingDepth?: number;
 }
 
 export interface MovementRecord {

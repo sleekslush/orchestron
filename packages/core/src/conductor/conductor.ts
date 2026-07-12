@@ -81,6 +81,7 @@ export class Conductor {
     } else if (this.concert.parentConcertId) {
       this.nestingDepth = 1;
     }
+    this.concert.nestingDepth = this.nestingDepth;
 
     this.concert.status = 'running';
     this._status = 'running';
@@ -89,6 +90,7 @@ export class Conductor {
       id: this.concert.id,
       status: 'running',
       context: this.concert.context,
+      nestingDepth: this.nestingDepth,
     });
     await this.store.pushEvent({
       type: 'concert:started',
@@ -124,12 +126,12 @@ export class Conductor {
     this._status = 'running';
     this.concert.status = 'running';
     this.startedAt = Date.now();
+    this.nestingDepth = this.concert.nestingDepth ?? (this.concert.parentConcertId ? 1 : 0);
 
     await this.store.updateConcert({ id: this.concert.id, status: 'running' });
     await this.store.pushEvent({
-      type: 'concert:started',
+      type: 'concert:recovered',
       concertId: this.concert.id,
-      scoreId: this.score.id,
       timestamp: new Date(),
     });
 
