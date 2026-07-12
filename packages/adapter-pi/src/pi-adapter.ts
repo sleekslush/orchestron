@@ -13,8 +13,14 @@ import { getBuiltinModel } from '@earendil-works/pi-ai/providers/all';
 import type { Model, Usage, Api } from '@earendil-works/pi-ai';
 
 export interface PiAdapterConfig {
+  /** Built-in provider id (e.g. `openai`, `anthropic`). If omitted, Pi selects from settings. */
   provider?: string;
+  /** Built-in model id. Required only when `provider` is also provided. */
   modelId?: string;
+  /** Optional allowlist of tool names. Omit to enable Pi defaults (read, bash, edit, write). */
+  tools?: string[];
+  /** Optional denylist of tool names. */
+  excludeTools?: string[];
 }
 
 interface PiSessionData {
@@ -26,13 +32,18 @@ interface PiSessionData {
 export class PiAdapter implements HarnessAdapter {
   readonly type = 'pi';
   private model: Model<Api> | undefined;
-  private modelId: string;
-  private provider: string;
+  private modelId: string | undefined;
+  private provider: string | undefined;
+  private tools: string[] | undefined;
+  private excludeTools: string[] | undefined;
   private sessions = new Map<string, PiSessionData>();
+  private sessionLocks = new Map<string, Promise<PiSessionData>>();
 
   constructor(config: PiAdapterConfig = {}) {
-    this.provider = config.provider ?? 'openai';
-    this.modelId = config.modelId ?? 'gpt-4o-mini';
+    this.provider = config.provider;
+    this.modelId = config.modelId;
+    this.tools = config.tools;
+    this.excludeTools = config.excludeTools;
   }
 
   async execute(
@@ -50,102 +61,83 @@ export class PiAdapter implements HarnessAdapter {
       finalPrompt =
         prompt +
         `\n\nYou MUST return your response as a JSON object conforming to this schema:\n` +
-        `${JSON.stringify(options.output.schema, null, 2)}`;
+        `${JSON.stringify(options.output.schema, null, 2)}\n` +
+        `Return only the JSON object, optionally wrapped in a markdown code block.`;
     }
 
-    if (!this.model) {
-      this.model = getBuiltinModel(this.provider as never, this.modelId as never) as unknown as Model<Api>;
-    }
+    await this.resolveModel();
 
-    let session: AgentSession;
-    let unsub: () => void;
+    let session: AgentSession | undefined;
+    let abortListener: (() => void) | undefined;
     let ownSession = false;
 
-    if (options?.sessionId && this.sessions.has(options.sessionId)) {
-      const existing = this.sessions.get(options.sessionId)!;
-      session = existing.session;
-      unsub = () => {};
-    } else {
-      ownSession = true;
-      const authStorage = AuthStorage.create();
-      const modelRegistry = ModelRegistry.create(authStorage);
-      const created = await createAgentSession({
-        model: this.model as never,
-        sessionManager: SessionManager.inMemory(),
-        authStorage,
-        modelRegistry,
-        tools: [],
-      });
-      session = created.session;
-
+    try {
       if (options?.sessionId) {
-        this.sessions.set(options.sessionId, { session, authStorage, modelRegistry });
+        const existing = await this.getOrCreateSession(options.sessionId);
+        session = existing.session;
+      } else {
+        ownSession = true;
+        const fresh = await this.createPiSession();
+        session = fresh.session;
       }
-      unsub = () => {};
-    }
 
-    let output = '';
-    let finalUsage: Usage | undefined;
+      let output = '';
+      let finalUsage: Usage | undefined;
 
-    const subUnsub = session.subscribe((event: AgentSessionEvent) => {
-      if (event.type === 'message_update') {
-        const ame = event.assistantMessageEvent;
-        if (ame.type === 'text_delta') {
-          output += ame.delta;
-        }
-      }
-      if (event.type === 'agent_end') {
-        for (const msg of event.messages) {
-          if ('usage' in msg && msg.usage) {
-            finalUsage = msg.usage as Usage;
+      const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+        if (event.type === 'message_update') {
+          const ame = event.assistantMessageEvent;
+          if (ame.type === 'text_delta') {
+            output += ame.delta;
           }
         }
-      }
-    });
+        if (event.type === 'agent_end') {
+          for (const msg of event.messages) {
+            if ('usage' in msg && msg.usage) {
+              finalUsage = msg.usage as Usage;
+            }
+          }
+        }
+      });
 
-    if (options?.signal) {
-      options.signal.addEventListener('abort', () => {
-        session.abort().catch(() => {});
-      }, { once: true });
-    }
-
-    try {
-      await session.prompt(finalPrompt);
-    } catch (err) {
-      if (options?.signal?.aborted) {
-        throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
+      if (options?.signal) {
+        abortListener = () => {
+          Promise.resolve(session?.abort()).catch(() => {});
+        };
+        options.signal.addEventListener('abort', abortListener, { once: true });
       }
-      throw new HarnessError(
-        `Pi harness execution failed: ${(err as Error).message ?? String(err)}`,
-        'HARNESS_FAILURE',
-      );
+
+      try {
+        await session.prompt(finalPrompt);
+      } catch (err) {
+        if (options?.signal?.aborted) {
+          throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
+        }
+        throw new HarnessError(
+          `Pi harness execution failed: ${(err as Error).message ?? String(err)}`,
+          'HARNESS_FAILURE',
+        );
+      } finally {
+        unsubscribe();
+        if (abortListener && options?.signal) {
+          options.signal.removeEventListener('abort', abortListener);
+        }
+      }
+
+      let structured: Record<string, unknown> | undefined;
+      if (options?.output?.mode === 'structured') {
+        structured = this.tryParseStructured(output);
+      }
+
+      const usage = this.toResourceUsage(finalUsage);
+      const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
+
+      return { output, structured, summary, usage };
     } finally {
-      subUnsub();
-      unsub();
-      if (!options?.sessionId) {
+      if (ownSession && session) {
         session.dispose();
       }
     }
-
-    let structured: Record<string, unknown> | undefined;
-    if (options?.output?.mode === 'structured') {
-      structured = this.tryParseStructured(output);
-    }
-
-    const usage = {
-      spend: finalUsage?.cost?.total
-        ? Math.round(finalUsage.cost.total * 1_000_000)
-        : undefined,
-      tokens: finalUsage
-        ? (finalUsage.input ?? 0) + (finalUsage.output ?? 0)
-        : undefined,
-      inputTokens: finalUsage?.input,
-      outputTokens: finalUsage?.output,
-    };
-
-    const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
-
-    return { output, structured, summary, usage };
   }
 
   async disposeSession(sessionId: string): Promise<void> {
@@ -156,19 +148,171 @@ export class PiAdapter implements HarnessAdapter {
     }
   }
 
+  /** Dispose every tracked session. Useful for graceful shutdown. */
+  async dispose(): Promise<void> {
+    const ids = Array.from(this.sessions.keys());
+    await Promise.all(ids.map((id) => this.disposeSession(id).catch(() => {})));
+  }
+
+  private async resolveModel(): Promise<void> {
+    if (this.model) return;
+    if (!this.provider || !this.modelId) return;
+
+    try {
+      const getModel = getBuiltinModel as (
+        provider: string,
+        modelId: string,
+      ) => Model<Api> | undefined;
+      const resolved = getModel(this.provider, this.modelId);
+      if (!resolved) {
+        throw new HarnessError(
+          `Unknown Pi model '${this.modelId}' for provider '${this.provider}'`,
+          'HARNESS_FAILURE',
+        );
+      }
+      this.model = resolved;
+    } catch (err) {
+      if (err instanceof HarnessError) throw err;
+      throw new HarnessError(
+        `Failed to resolve Pi model: ${(err as Error).message ?? String(err)}`,
+        'HARNESS_FAILURE',
+      );
+    }
+  }
+
+  private async getOrCreateSession(sessionId: string): Promise<PiSessionData> {
+    const existing = this.sessions.get(sessionId);
+    if (existing) return existing;
+
+    const inFlight = this.sessionLocks.get(sessionId);
+    if (inFlight) return inFlight;
+
+    const promise = this.createPiSession()
+      .then((data) => {
+        this.sessions.set(sessionId, data);
+        this.sessionLocks.delete(sessionId);
+        return data;
+      })
+      .catch((err) => {
+        this.sessionLocks.delete(sessionId);
+        throw err;
+      });
+
+    this.sessionLocks.set(sessionId, promise);
+    return promise;
+  }
+
+  private async createPiSession(): Promise<PiSessionData> {
+    const authStorage = AuthStorage.create();
+    const modelRegistry = ModelRegistry.create(authStorage);
+
+    const sessionOptions: Parameters<typeof createAgentSession>[0] = {
+      model: this.model as never,
+      sessionManager: SessionManager.inMemory(),
+      authStorage,
+      modelRegistry,
+    };
+
+    if (this.tools !== undefined) {
+      sessionOptions.tools = this.tools;
+    }
+    if (this.excludeTools !== undefined) {
+      sessionOptions.excludeTools = this.excludeTools;
+    }
+
+    const { session } = await createAgentSession(sessionOptions);
+    return { session, authStorage, modelRegistry };
+  }
+
+  private toResourceUsage(finalUsage: Usage | undefined) {
+    return {
+      spend: finalUsage?.cost?.total
+        ? Math.round(finalUsage.cost.total * 1_000_000)
+        : undefined,
+      tokens: finalUsage
+        ? (finalUsage.input ?? 0) + (finalUsage.output ?? 0)
+        : undefined,
+      inputTokens: finalUsage?.input,
+      outputTokens: finalUsage?.output,
+    };
+  }
+
   private tryParseStructured(
     output: string,
   ): Record<string, unknown> | undefined {
-    const jsonMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/) ?? output.match(/\{[\s\S]*\}/);
-    const jsonStr = jsonMatch ? (jsonMatch[1] ?? jsonMatch[0]) : output;
+    const isObject = (value: unknown): value is Record<string, unknown> =>
+      typeof value === 'object' && value !== null && !Array.isArray(value);
+
+    // 1. Try a markdown JSON block.
+    const blockMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (blockMatch) {
+      const parsed = this.safeJsonParse(blockMatch[1].trim());
+      if (isObject(parsed)) return parsed;
+    }
+
+    // 2. Find the first balanced JSON object in the text.
+    const balanced = this.extractBalancedJson(output);
+    if (balanced) {
+      const parsed = this.safeJsonParse(balanced);
+      if (isObject(parsed)) return parsed;
+    }
+
+    // 3. Fallback: parse the whole string.
+    const parsed = this.safeJsonParse(output.trim());
+    if (isObject(parsed)) return parsed;
+
+    return undefined;
+  }
+
+  private safeJsonParse(text: string): unknown {
     try {
-      const parsed = JSON.parse(jsonStr);
-      if (parsed && typeof parsed === 'object') {
-        return parsed as Record<string, unknown>;
-      }
+      return JSON.parse(text);
     } catch {
-      // Fall through
+      return undefined;
+    }
+  }
+
+  private extractBalancedJson(text: string): string | undefined {
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '{' || ch === '[') {
+        const end = this.findMatchingClose(text, i);
+        if (end !== -1) return text.slice(i, end + 1);
+      }
     }
     return undefined;
+  }
+
+  private findMatchingClose(text: string, start: number): number {
+    const open = text[start];
+    const close = open === '{' ? '}' : ']';
+    let depth = 1;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start + 1; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === open) {
+        depth++;
+      } else if (ch === close) {
+        depth--;
+        if (depth === 0) return i;
+      }
+    }
+
+    return -1;
   }
 }

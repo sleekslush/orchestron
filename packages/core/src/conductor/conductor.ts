@@ -434,13 +434,8 @@ export class Conductor {
   ): string {
     if (!movement.prompt) return '';
 
-    if (movement.output?.mode === 'structured' && movement.output.schema) {
-      const schemaAppendix =
-        `\n\nYou MUST return your response in the following JSON structure that conforms to this schema:\n` +
-        `${JSON.stringify(movement.output.schema, null, 2)}`;
-      return this.resolveTemplate(movement.prompt, movement.id, previousOutputs) + schemaAppendix;
-    }
-
+    // Structured output formatting/parsing is an adapter concern per the session-persistence
+    // decision; the adapter injects the schema instructions and parses the result.
     return this.resolveTemplate(movement.prompt, movement.id, previousOutputs);
   }
 
