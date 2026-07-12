@@ -1,0 +1,135 @@
+id: jira-to-mr
+name: "Jira Ticket to Merge Request"
+description: |
+  Fetches a Jira ticket, clarifies requirements, implements the solution,
+  reviews the code, creates an MR, and updates the ticket.
+version: "1.0.0"
+evaluator:
+  harness: pi
+  model: pi-4-mini
+program:
+  maxSpend: 5000
+  maxTokens: 500000
+  maxMovements: 20
+startMovement: clarify
+
+movements:
+  - id: clarify
+    name: "Clarify Ticket"
+    section: planning
+    harness: pi
+    prompt: >
+      Given the Jira ticket {{context.ticket}}:
+      
+      1. Read the ticket description and comments
+      2. Clarify any ambiguous requirements
+      3. List clear, actionable requirements
+    output:
+      mode: structured
+      schema:
+        type: object
+        properties:
+          summary:
+            type: string
+          requirements:
+            type: array
+            items:
+              type: string
+          acceptance_criteria:
+            type: array
+            items:
+              type: string
+          questions:
+            type: array
+            items:
+              type: string
+    goal:
+      description: "Requirements are clear and actionable"
+      strategy: llm_judge
+    transitions:
+      - on: success -> implement
+      - on: failure -> __fail__
+
+  - id: implement
+    name: "Implement Solution"
+    section: execution
+    harness: pi
+    budget:
+      maxSpend: 3000
+      maxTokens: 300000
+    prompt: >
+      Implement the solution based on these requirements:
+      
+      Requirements: {{context.previousOutputs.clarify}}
+      
+      Produce:
+      - Working code
+      - Tests
+      - Documentation
+    goal:
+      description: "Working implementation with tests"
+      strategy: llm_judge
+    transitions:
+      - on: success -> review
+      - on: failure -> __fail__
+
+  - id: review
+    name: "Code Review"
+    section: review
+    harness: pi
+    prompt: >
+      Review this implementation for issues:
+      
+      {{context.previousOutputs.implement}}
+      
+      Check for:
+      - Correctness
+      - Edge cases
+      - Code quality
+      - Test coverage
+    goal:
+      description: "All issues identified"
+      strategy: llm_judge
+    transitions:
+      - on: success -> create_mr
+      - on: failure -> implement
+
+  - id: create_mr
+    name: "Create Merge Request"
+    section: delivery
+    harness: pi
+    prompt: >
+      Create a merge request for this implementation:
+      
+      {{context.previousOutputs.implement}}
+      
+      Include:
+      - Description of changes
+      - Related ticket
+      - Testing notes
+      - Changelog entry
+    goal:
+      description: "MR created with proper description"
+      strategy: llm_judge
+    transitions:
+      - on: success -> update_jira
+      - on: failure -> __fail__
+
+  - id: update_jira
+    name: "Update Jira Ticket"
+    section: delivery
+    harness: pi
+    prompt: >
+      Update Jira ticket {{context.ticket}}:
+      
+      - Add MR link
+      - Add implementation summary
+      - Move to "In Review" status
+      
+      MR Details: {{context.previousOutputs.create_mr}}
+    goal:
+      description: "Ticket updated with MR reference"
+      strategy: llm_judge
+    transitions:
+      - on: success -> __end__
+      - on: failure -> __fail__

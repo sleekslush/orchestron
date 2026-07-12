@@ -99,7 +99,7 @@ describe('ScoreRegistry', () => {
     ).toThrow('unknown movement');
   });
 
-  it('should detect cycles in the movement graph', () => {
+  it('should detect deadlock cycles with no terminal exit', () => {
     const registry = new ScoreRegistry();
     expect(() =>
       registry.register(
@@ -123,13 +123,47 @@ describe('ScoreRegistry', () => {
               harness: 'pi',
               prompt: 'Do B',
               goal: { description: 'B done', strategy: 'llm_judge' },
-              transitions: [{ to: 'a', on: 'success' }, { to: '__end__', on: 'failure' }],
+              transitions: [{ to: 'a', on: 'success' }],
             },
           ],
           startMovement: 'a',
         }),
       ),
     ).toThrow('cycle detected');
+  });
+
+  it('should allow retry loops that have a terminal exit', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          id: 'retry-loop',
+          movements: [
+            {
+              id: 'implement',
+              name: 'Implement',
+              section: 'execution',
+              description: 'Write code',
+              harness: 'pi',
+              prompt: 'Implement',
+              goal: { description: 'Done', strategy: 'llm_judge' },
+              transitions: [{ to: 'review', on: 'success' }, { to: '__fail__', on: 'failure' }],
+            },
+            {
+              id: 'review',
+              name: 'Review',
+              section: 'review',
+              description: 'Review code',
+              harness: 'pi',
+              prompt: 'Review',
+              goal: { description: 'Done', strategy: 'llm_judge' },
+              transitions: [{ to: 'implement', on: 'failure' }, { to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'implement',
+        }),
+      ),
+    ).not.toThrow();
   });
 
   it('should warn about unreachable movements', () => {

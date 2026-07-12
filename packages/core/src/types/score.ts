@@ -36,7 +36,7 @@ export interface Movement {
   id: MovementID;
   name: string;
   section: SectionID;
-  description: string;
+  description?: string;
   harness?: string;
   subscore?: {
     scoreId: ScoreID;
@@ -60,7 +60,7 @@ export interface MovementBudget {
 export interface Score {
   id: ScoreID;
   name: string;
-  description: string;
+  description?: string;
   version: string;
   evaluator?: EvaluatorConfig;
   movements: Movement[];

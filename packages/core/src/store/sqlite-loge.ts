@@ -439,7 +439,7 @@ function rowToMovementRecord(row: MovementRow): MovementRecord {
     movementName: row.movement_name,
     status: row.status as MovementStatus,
     output: row.output,
-    structured: row.structured ? jsonParse<Record<string, unknown>>(row.structured, undefined) : undefined,
+    structured: row.structured ? jsonParse<Record<string, unknown> | undefined>(row.structured, undefined) : undefined,
     summary: row.summary,
     goalEvaluation: jsonParse(row.goal_evaluation, { achieved: false, confidence: 0, summary: '' }),
     usage: jsonParse(row.usage, {}),
@@ -499,14 +499,12 @@ function rowToEvent(row: EventRow): ConcertEvent {
       return {
         type: 'child:created',
         ...base,
-        parentConcertId: parsed.parentConcertId as string,
         childConcertId: parsed.childConcertId as string,
       };
     case 'child:completed':
       return {
         type: 'child:completed',
         ...base,
-        parentConcertId: parsed.parentConcertId as string,
         childConcertId: parsed.childConcertId as string,
       };
     default:

@@ -1,4 +1,4 @@
-import type { ScoreID, MovementID, GoalEvaluation } from './score.js';
+import type { ScoreID, MovementID } from './score.js';
 
 export type ConcertID = string;
 

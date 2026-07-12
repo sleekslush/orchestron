@@ -133,6 +133,11 @@ export class ScoreRegistry {
     movements: Movement[],
     startId: MovementID,
   ): MovementID[] | null {
+    const movementMap = new Map<MovementID, Movement>();
+    for (const m of movements) {
+      movementMap.set(m.id, m);
+    }
+
     const graph = new Map<MovementID, MovementID[]>();
     for (const m of movements) {
       graph.set(
@@ -141,6 +146,21 @@ export class ScoreRegistry {
           .filter((t) => t.to !== '__end__' && t.to !== '__fail__')
           .map((t) => t.to),
       );
+    }
+
+    function hasPathToTerminal(
+      node: MovementID,
+      visited: Set<MovementID>,
+    ): boolean {
+      if (visited.has(node)) return false;
+      visited.add(node);
+      const movement = movementMap.get(node);
+      if (!movement) return false;
+      if (movement.transitions.some((t) => t.to === '__end__' || t.to === '__fail__')) {
+        return true;
+      }
+      const neighbors = graph.get(node) ?? [];
+      return neighbors.some((n) => hasPathToTerminal(n, visited));
     }
 
     const visited = new Set<MovementID>();
@@ -159,7 +179,13 @@ export class ScoreRegistry {
           if (result) return result;
         } else if (inStack.has(neighbor)) {
           const cycleStart = path.indexOf(neighbor);
-          return path.slice(cycleStart);
+          const cycle = path.slice(cycleStart);
+          if (cycle.some((n) => hasPathToTerminal(n, new Set()))) {
+            path.pop();
+            inStack.delete(node);
+            return null;
+          }
+          return cycle;
         }
       }
 

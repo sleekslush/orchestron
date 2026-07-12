@@ -1,0 +1,132 @@
+import { nanoid } from 'nanoid';
+import type { Concert, ConcertID, ConcertFilter } from '../types/concert.js';
+import type { ScoreID, Program } from '../types/score.js';
+import type { HarnessAdapter } from '../types/adapter.js';
+import type { ConcertStore } from '../store/concert-store.js';
+import { ScoreRegistry } from '../registry/score-registry.js';
+import { Conductor, type StartOptions } from '../conductor/conductor.js';
+import { FakeEvaluator, type Evaluator } from '../evaluator/index.js';
+
+export interface ConcertHallOptions {
+  store: ConcertStore;
+  scoreRegistry: ScoreRegistry;
+  adapters: Map<string, HarnessAdapter>;
+  evaluator?: Evaluator;
+}
+
+export class ConcertHall {
+  private conductors = new Map<ConcertID, Conductor>();
+  private store: ConcertStore;
+  private scoreRegistry: ScoreRegistry;
+  private adapters: ReadonlyMap<string, HarnessAdapter>;
+  private evaluator: Evaluator;
+
+  constructor(options: ConcertHallOptions) {
+    this.store = options.store;
+    this.scoreRegistry = options.scoreRegistry;
+    this.adapters = options.adapters;
+    this.evaluator = options.evaluator ?? new FakeEvaluator({ alwaysSucceed: true });
+  }
+
+  async createConcert(
+    scoreId: ScoreID,
+    options?: StartOptions,
+  ): Promise<Conductor> {
+    const score = this.scoreRegistry.get(scoreId);
+
+    const concert: Concert = {
+      id: nanoid(12),
+      scoreId: score.id,
+      status: 'pending',
+      startedAt: new Date(),
+      currentMovement: null,
+      history: [],
+      context: { shared: { ...options?.initialContext } },
+      usage: {},
+      triggeredBy: options?.triggeredBy ?? 'cli',
+      parentConcertId: options?.parentConcertId,
+      childConcertIds: [],
+    };
+
+    await this.store.saveConcert(concert);
+
+    const conductor = new Conductor(
+      concert,
+      score,
+      this.store,
+      this,
+      this.adapters,
+      this.evaluator,
+    );
+
+    this.conductors.set(concert.id, conductor);
+    return conductor;
+  }
+
+  getConcert(id: ConcertID): Conductor | undefined {
+    return this.conductors.get(id);
+  }
+
+  list(filter?: ConcertFilter): Conductor[] {
+    let results = Array.from(this.conductors.values());
+    if (filter?.status) {
+      results = results.filter((c) => c.status === filter.status);
+    }
+    if (filter?.limit) {
+      results = results.slice(0, filter.limit);
+    }
+    return results;
+  }
+
+  async waitForConcert(id: ConcertID): Promise<Concert> {
+    const conductor = this.conductors.get(id);
+    if (!conductor) {
+      throw new Error(`Concert '${id}' not found in hall`);
+    }
+
+    while (conductor.status === 'running' || conductor.status === 'pending') {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    return conductor.getState();
+  }
+
+  getChildConcerts(parentId: ConcertID): ConcertID[] {
+    const children: ConcertID[] = [];
+    for (const [id, _conductor] of this.conductors) {
+      children.push(id);
+    }
+    return children;
+  }
+
+  async rehydrate(): Promise<void> {
+    const pendingConcerts = await this.store.listConcerts({
+      status: 'running',
+    });
+    const pausedConcerts = await this.store.listConcerts({
+      status: 'paused',
+    });
+    const all = [...pendingConcerts, ...pausedConcerts];
+
+    for (const concert of all) {
+      try {
+        const score = this.scoreRegistry.get(concert.scoreId);
+        const conductor = new Conductor(
+          concert,
+          score,
+          this.store,
+          this,
+          this.adapters,
+          this.evaluator,
+        );
+        this.conductors.set(concert.id, conductor);
+      } catch {
+        await this.store.updateConcert({
+          id: concert.id,
+          status: 'failed',
+          completedAt: new Date(),
+        });
+      }
+    }
+  }
+}

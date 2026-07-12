@@ -1,0 +1,64 @@
+id: simple-plan-review
+name: "Simple Plan & Review"
+description: |
+  Creates a plan, reviews it, then either revises or finalizes.
+version: "1.0.0"
+evaluator:
+  harness: pi
+  model: pi-4-mini
+program:
+  maxMovements: 10
+startMovement: plan
+
+movements:
+  - id: plan
+    name: "Create Plan"
+    section: planning
+    harness: pi
+    prompt: >
+      Create a detailed implementation plan for:
+      {{context.task}}
+      
+      Include:
+      - Approach overview
+      - Key steps
+      - Estimated effort
+    output:
+      mode: structured
+      schema:
+        type: object
+        properties:
+          approach:
+            type: string
+          steps:
+            type: array
+            items:
+              type: string
+          effort:
+            type: string
+    goal:
+      description: "Plan is detailed and actionable"
+      strategy: llm_judge
+    transitions:
+      - on: success -> review
+      - on: failure -> __fail__
+
+  - id: review
+    name: "Review Plan"
+    section: review
+    harness: pi
+    prompt: >
+      Review this plan:
+      
+      {{context.previousOutputs.plan}}
+      
+      Check for:
+      - Completeness
+      - Feasibility
+      - Potential issues
+    goal:
+      description: "Plan is approved or needs revision"
+      strategy: llm_judge
+    transitions:
+      - on: success -> __end__
+      - on: failure -> plan

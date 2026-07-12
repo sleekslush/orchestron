@@ -1,5 +1,19 @@
 export * from './types/index.js';
+
 export { SqliteLoge } from './store/sqlite-loge.js';
 export type { ConcertStore } from './store/concert-store.js';
+
 export { ScoreRegistry } from './registry/score-registry.js';
 export type { ScoreValidationResult } from './registry/score-registry.js';
+
+export { Conductor } from './conductor/conductor.js';
+export type { StartOptions } from './conductor/conductor.js';
+export { FakeHarnessAdapter } from './conductor/fake-harness.js';
+export type { FakeHarnessConfig, FakeHarnessScenario } from './conductor/fake-harness.js';
+
+export { ConcertHall } from './hall/concert-hall.js';
+export type { ConcertHallOptions } from './hall/concert-hall.js';
+
+export { FakeEvaluator } from './evaluator/fake-evaluator.js';
+export type { Evaluator } from './evaluator/evaluator.js';
+export type { FakeEvaluatorConfig } from './evaluator/fake-evaluator.js';
