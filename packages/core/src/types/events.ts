@@ -1,0 +1,17 @@
+import type { ConcertID } from './concert.js';
+import type { MovementID, ScoreID } from './score.js';
+import type { OrchestronError } from './errors.js';
+
+export type ConcertEvent =
+  | { type: 'concert:started'; concertId: ConcertID; scoreId: ScoreID; timestamp: Date }
+  | { type: 'concert:paused'; concertId: ConcertID; timestamp: Date }
+  | { type: 'concert:resumed'; concertId: ConcertID; timestamp: Date }
+  | { type: 'concert:completed'; concertId: ConcertID; timestamp: Date }
+  | { type: 'concert:failed'; concertId: ConcertID; error: OrchestronError; timestamp: Date }
+  | { type: 'concert:cancelled'; concertId: ConcertID; timestamp: Date }
+  | { type: 'movement:started'; concertId: ConcertID; movementId: MovementID; timestamp: Date }
+  | { type: 'movement:completed'; concertId: ConcertID; movementId: MovementID; result: import('./concert.js').MovementRecord; timestamp: Date }
+  | { type: 'movement:failed'; concertId: ConcertID; movementId: MovementID; error: OrchestronError; retryCount: number; timestamp: Date }
+  | { type: 'constraint:breached'; concertId: ConcertID; constraint: string; limit: number; actual: number; timestamp: Date }
+  | { type: 'child:created'; parentConcertId: ConcertID; childConcertId: ConcertID; timestamp: Date }
+  | { type: 'child:completed'; parentConcertId: ConcertID; childConcertId: ConcertID; timestamp: Date };

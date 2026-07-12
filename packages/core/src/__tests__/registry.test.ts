@@ -1,0 +1,167 @@
+import { describe, it, expect } from 'vitest';
+import { ScoreRegistry } from '../registry/score-registry.js';
+import type { Score } from '../types/score.js';
+
+const validScore = (overrides: Partial<Score> = {}): Score => ({
+  id: 'test-workflow',
+  name: 'Test Workflow',
+  description: 'A test workflow',
+  version: '1.0.0',
+  startMovement: 'step_a',
+  movements: [
+    {
+      id: 'step_a',
+      name: 'Step A',
+      section: 'default',
+      description: 'First step',
+      harness: 'pi',
+      prompt: 'Do step A',
+      goal: { description: 'Step A complete', strategy: 'llm_judge' },
+      transitions: [{ to: 'step_b', on: 'success' }],
+    },
+    {
+      id: 'step_b',
+      name: 'Step B',
+      section: 'default',
+      description: 'Second step',
+      harness: 'pi',
+      prompt: 'Do step B',
+      goal: { description: 'Step B complete', strategy: 'llm_judge' },
+      transitions: [{ to: '__end__', on: 'success' }],
+    },
+  ],
+  program: {},
+  ...overrides,
+});
+
+describe('ScoreRegistry', () => {
+  it('should register and retrieve a valid score', () => {
+    const registry = new ScoreRegistry();
+    const score = validScore();
+    registry.register(score);
+
+    const retrieved = registry.get('test-workflow');
+    expect(retrieved.id).toBe('test-workflow');
+    expect(retrieved.movements).toHaveLength(2);
+  });
+
+  it('should list all registered scores', () => {
+    const registry = new ScoreRegistry();
+    registry.register(validScore({ id: 'score-1' }));
+    registry.register(validScore({ id: 'score-2' }));
+
+    const list = registry.list();
+    expect(list).toHaveLength(2);
+  });
+
+  it('should remove a score', () => {
+    const registry = new ScoreRegistry();
+    registry.register(validScore());
+    registry.remove('test-workflow');
+
+    expect(() => registry.get('test-workflow')).toThrow();
+  });
+
+  it('should reject a score without movements', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ movements: [] })),
+    ).toThrow('must have at least one movement');
+  });
+
+  it('should reject a score with unknown start movement', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ startMovement: 'nonexistent' })),
+    ).toThrow('not found in movements');
+  });
+
+  it('should reject a score with dangling transition target', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              description: 'First step',
+              harness: 'pi',
+              prompt: 'Do step A',
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: 'ghost', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow('unknown movement');
+  });
+
+  it('should detect cycles in the movement graph', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'a',
+              name: 'A',
+              section: 'default',
+              description: 'Step A',
+              harness: 'pi',
+              prompt: 'Do A',
+              goal: { description: 'A done', strategy: 'llm_judge' },
+              transitions: [{ to: 'b', on: 'success' }],
+            },
+            {
+              id: 'b',
+              name: 'B',
+              section: 'default',
+              description: 'Step B',
+              harness: 'pi',
+              prompt: 'Do B',
+              goal: { description: 'B done', strategy: 'llm_judge' },
+              transitions: [{ to: 'a', on: 'success' }, { to: '__end__', on: 'failure' }],
+            },
+          ],
+          startMovement: 'a',
+        }),
+      ),
+    ).toThrow('cycle detected');
+  });
+
+  it('should warn about unreachable movements', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'a',
+              name: 'A',
+              section: 'default',
+              description: 'Start',
+              harness: 'pi',
+              prompt: 'Do A',
+              goal: { description: 'A done', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+            {
+              id: 'b',
+              name: 'B',
+              section: 'default',
+              description: 'Unreachable',
+              harness: 'pi',
+              prompt: 'Do B',
+              goal: { description: 'B done', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'a',
+        }),
+      ),
+    ).toThrow('unreachable');
+  });
+});
