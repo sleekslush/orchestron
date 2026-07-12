@@ -47,8 +47,10 @@ movements:
       description: "Requirements are clear and actionable"
       strategy: llm_judge
     transitions:
-      - on: success -> implement
-      - on: failure -> __fail__
+      - to: implement
+        on: success
+      - to: __fail__
+        on: failure
 
   - id: implement
     name: "Implement Solution"
@@ -70,8 +72,10 @@ movements:
       description: "Working implementation with tests"
       strategy: llm_judge
     transitions:
-      - on: success -> review
-      - on: failure -> __fail__
+      - to: review
+        on: success
+      - to: __fail__
+        on: failure
 
   - id: review
     name: "Code Review"
@@ -91,8 +95,10 @@ movements:
       description: "All issues identified"
       strategy: llm_judge
     transitions:
-      - on: success -> create_mr
-      - on: failure -> implement
+      - to: create_mr
+        on: success
+      - to: implement
+        on: failure
 
   - id: create_mr
     name: "Create Merge Request"
@@ -112,8 +118,10 @@ movements:
       description: "MR created with proper description"
       strategy: llm_judge
     transitions:
-      - on: success -> update_jira
-      - on: failure -> __fail__
+      - to: update_jira
+        on: success
+      - to: __fail__
+        on: failure
 
   - id: update_jira
     name: "Update Jira Ticket"
@@ -131,5 +139,7 @@ movements:
       description: "Ticket updated with MR reference"
       strategy: llm_judge
     transitions:
-      - on: success -> __end__
-      - on: failure -> __fail__
+      - to: __end__
+        on: success
+      - to: __fail__
+        on: failure

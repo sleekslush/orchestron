@@ -146,6 +146,8 @@ export class SqliteLoge implements ConcertStore {
       JSON.stringify(concert.childConcertIds),
     );
 
+    this.db.prepare('DELETE FROM movements WHERE concert_id = ?').run(concert.id);
+
     for (const m of concert.history) {
       await this.appendMovement(concert.id, m);
     }
@@ -340,7 +342,7 @@ export class SqliteLoge implements ConcertStore {
   }
 
   async pushEvent(event: ConcertEvent): Promise<void> {
-    const { concertId, type, ...rest } = event as ConcertEvent & Record<string, unknown>;
+    const { concertId, type, timestamp, ...rest } = event as ConcertEvent & { timestamp: Date };
     this.db
       .prepare(
         `INSERT INTO events (concert_id, type, data, timestamp) VALUES (?, ?, ?, ?)`,
@@ -349,7 +351,7 @@ export class SqliteLoge implements ConcertStore {
         concertId,
         type,
         JSON.stringify(rest),
-        serializeDate(new Date()),
+        serializeDate(timestamp ?? new Date()),
       );
   }
 

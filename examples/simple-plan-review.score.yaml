@@ -40,8 +40,10 @@ movements:
       description: "Plan is detailed and actionable"
       strategy: llm_judge
     transitions:
-      - on: success -> review
-      - on: failure -> __fail__
+      - to: review
+        on: success
+      - to: __fail__
+        on: failure
 
   - id: review
     name: "Review Plan"
@@ -60,5 +62,7 @@ movements:
       description: "Plan is approved or needs revision"
       strategy: llm_judge
     transitions:
-      - on: success -> __end__
-      - on: failure -> plan
+      - to: __end__
+        on: success
+      - to: plan
+        on: failure

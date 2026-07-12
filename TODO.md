@@ -1,35 +1,36 @@
 # Orchestron — Implementation Phases
 
-## Phase 1: Foundation (Core Types + Store)
+## Phase 1: Foundation (Core Types + Store) ✅
 
 **Goal**: Types, SQLite store, Score Registry, error taxonomy — everything the rest compiles against.
 
-- [ ] Scaffold monorepo (pnpm workspaces, `tsconfig.json`)
-- [ ] `packages/core/src/types/` — all domain types and interfaces
-- [ ] `packages/core/src/types/errors.ts` — full error taxonomy
-- [ ] `packages/core/src/store/` — `ConcertStore` interface + `SqliteLoge` implementation
+- [x] Scaffold monorepo (pnpm workspaces, `tsconfig.json`)
+- [x] `packages/core/src/types/` — all domain types and interfaces
+- [x] `packages/core/src/types/errors.ts` — full error taxonomy
+- [x] `packages/core/src/store/` — `ConcertStore` interface + `SqliteLoge` implementation
   - Schema creation, CRUD for concerts, movement history, events, aggregates
-- [ ] `packages/core/src/registry/` — `ScoreRegistry` with YAML/JSON loading
+- [x] `packages/core/src/registry/` — `ScoreRegistry` with YAML/JSON loading
   - `validate()` — cycle detection, dangling transitions, unknown movements
-- [ ] `packages/core/src/index.ts` — re-exports everything
+- [x] `packages/core/src/index.ts` — re-exports everything
 
-## Phase 2: Conductor Engine
+## Phase 2: Conductor Engine ✅
 
 **Goal**: Conductor can load a Score, walk the movement DAG, call an in-memory fake harness.
 
-- [ ] `packages/core/src/evaluator/` — `Evaluator` interface + default `LlmJudgeEvaluator`
-- [ ] `packages/core/src/conductor/` — `Conductor` class
+- [x] `packages/core/src/evaluator/` — `Evaluator` interface + `FakeEvaluator`
+- [x] `packages/core/src/conductor/` — `Conductor` class
   - Movement resolution, prompt building with context
   - Goal delegation to Evaluator
   - Transition matching
   - Constraint checking (spend, tokens, movements, duration)
   - Sub-score spawning (hooks into ConcertHall)
   - Crash recovery: fail mid-flight movement, let transitions decide
-- [ ] `packages/core/src/hall/` — `ConcertHall` class
+- [x] `packages/core/src/hall/` — `ConcertHall` class
   - `createConcert()`, `getConcert()`, `list()`, `waitForConcert()`
   - Rehydration of incomplete Concerts on restart
   - Child concert tracking
-- [ ] `packages/core/src/__tests__/` — Conductor unit tests with mock harness
+- [x] `packages/core/src/__tests__/` — Conductor unit tests with mock harness
+- [x] `packages/core/src/__tests__/use-cases.test.ts` — 6 integration use cases
 
 ## Phase 3: Pi Harness Adapter
 
@@ -94,7 +95,8 @@
 
 **Goal**: Working example scores and enough docs for someone to author their own.
 
-- [ ] `examples/jira-to-mr.score.yaml`
+- [x] `examples/jira-to-mr.score.yaml`
+- [x] `examples/simple-plan-review.score.yaml`
 - [ ] `examples/notion-clarify.score.yaml`
 - [ ] `examples/plan-to-markdown.score.yaml`
 - [ ] Score authoring guide (README or AGENTS.md)

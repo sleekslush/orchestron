@@ -16,6 +16,7 @@ export interface ConcertHallOptions {
 
 export class ConcertHall {
   private conductors = new Map<ConcertID, Conductor>();
+  private parentToChildren = new Map<ConcertID, ConcertID[]>();
   private store: ConcertStore;
   private scoreRegistry: ScoreRegistry;
   private adapters: ReadonlyMap<string, HarnessAdapter>;
@@ -60,6 +61,13 @@ export class ConcertHall {
     );
 
     this.conductors.set(concert.id, conductor);
+
+    if (concert.parentConcertId) {
+      const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
+      siblings.push(concert.id);
+      this.parentToChildren.set(concert.parentConcertId, siblings);
+    }
+
     return conductor;
   }
 
@@ -71,6 +79,12 @@ export class ConcertHall {
     let results = Array.from(this.conductors.values());
     if (filter?.status) {
       results = results.filter((c) => c.status === filter.status);
+    }
+    if (filter?.scoreId) {
+      results = results.filter((c) => c.scoreId === filter.scoreId);
+    }
+    if (filter?.offset) {
+      results = results.slice(filter.offset);
     }
     if (filter?.limit) {
       results = results.slice(0, filter.limit);
@@ -92,11 +106,7 @@ export class ConcertHall {
   }
 
   getChildConcerts(parentId: ConcertID): ConcertID[] {
-    const children: ConcertID[] = [];
-    for (const [id, _conductor] of this.conductors) {
-      children.push(id);
-    }
-    return children;
+    return [...(this.parentToChildren.get(parentId) ?? [])];
   }
 
   async rehydrate(): Promise<void> {
@@ -120,6 +130,12 @@ export class ConcertHall {
           this.evaluator,
         );
         this.conductors.set(concert.id, conductor);
+
+        if (concert.parentConcertId) {
+          const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
+          siblings.push(concert.id);
+          this.parentToChildren.set(concert.parentConcertId, siblings);
+        }
       } catch {
         await this.store.updateConcert({
           id: concert.id,

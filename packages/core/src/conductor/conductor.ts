@@ -34,12 +34,15 @@ export interface StartOptions {
   programOverride?: Partial<Program>;
   triggeredBy?: Concert['triggeredBy'];
   parentConcertId?: ConcertID;
+  nestingDepth?: number;
 }
 
 export class Conductor {
   private abortController = new AbortController();
   private pauseResolver: (() => void) | null = null;
   private _status: ConcertStatus = 'pending';
+  private startedAt = 0;
+  private nestingDepth: number;
 
   constructor(
     private concert: Concert,
@@ -50,10 +53,15 @@ export class Conductor {
     private evaluator: Evaluator,
   ) {
     this._status = concert.status;
+    this.nestingDepth = 0;
   }
 
   get concertId(): ConcertID {
     return this.concert.id;
+  }
+
+  get scoreId(): string {
+    return this.score.id;
   }
 
   get status(): ConcertStatus {
@@ -73,8 +81,15 @@ export class Conductor {
       };
     }
 
+    if (options?.nestingDepth !== undefined) {
+      this.nestingDepth = options.nestingDepth;
+    } else if (this.concert.parentConcertId) {
+      this.nestingDepth = 1;
+    }
+
     this.concert.status = 'running';
     this._status = 'running';
+    this.startedAt = Date.now();
     await this.store.updateConcert({
       id: this.concert.id,
       status: 'running',
@@ -127,7 +142,7 @@ export class Conductor {
         if (record.status === 'failed' && movement.retryOnFailure) {
           const maxRetries = movement.budget?.maxRetries ?? 2;
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            this.store.pushEvent({
+            await this.store.pushEvent({
               type: 'movement:failed',
               concertId: this.concert.id,
               movementId: movement.id,
@@ -330,6 +345,18 @@ export class Conductor {
   ): Promise<MovementRecord> {
     if (!movement.subscore) return record;
 
+    const maxDepth = this.score.program.maxNestingDepth ?? 5;
+    if (this.nestingDepth >= maxDepth) {
+      throw new ConstraintBreachError(
+        `Max nesting depth exceeded: ${this.nestingDepth + 1} > ${maxDepth}`,
+        'MOVEMENT_LIMIT',
+        maxDepth,
+        this.nestingDepth + 1,
+        'maxNestingDepth',
+        this.concert.id,
+      );
+    }
+
     const childContext: Record<string, unknown> = {};
     for (const [key, sourcePath] of Object.entries(movement.subscore.contextMapping)) {
       const parts = sourcePath.split('.');
@@ -349,6 +376,7 @@ export class Conductor {
       initialContext: childContext,
       triggeredBy: this.concert.triggeredBy,
       parentConcertId: this.concert.id,
+      nestingDepth: this.nestingDepth + 1,
     };
 
     const childConductor = await this.hall.createConcert(
@@ -516,6 +544,19 @@ export class Conductor {
         this.concert.id,
       );
     }
+    if (program.maxDurationMs && this.startedAt > 0) {
+      const elapsed = Date.now() - this.startedAt;
+      if (elapsed > program.maxDurationMs) {
+        throw new ConstraintBreachError(
+          `Duration limit exceeded: ${elapsed}ms > ${program.maxDurationMs}ms`,
+          'DURATION_LIMIT',
+          program.maxDurationMs,
+          elapsed,
+          'maxDurationMs',
+          this.concert.id,
+        );
+      }
+    }
 
     this.concert.usage.spend = totalSpend;
     this.concert.usage.tokens = totalTokens;
@@ -545,18 +586,25 @@ export class Conductor {
       usage: this.concert.usage,
     });
 
-    const eventType =
-      status === 'completed'
-        ? 'concert:completed'
-        : status === 'cancelled'
-          ? 'concert:cancelled'
-          : 'concert:failed';
-
-    await this.store.pushEvent({
-      type: eventType,
-      concertId: this.concert.id,
-      timestamp: new Date(),
-      ...(reason ? { error: { code: 'CONCERT_' + status.toUpperCase(), message: reason, retryable: false, concertId: this.concert.id } } : {}),
-    } as ConcertEvent);
+    if (status === 'completed') {
+      await this.store.pushEvent({
+        type: 'concert:completed',
+        concertId: this.concert.id,
+        timestamp: new Date(),
+      });
+    } else if (status === 'cancelled') {
+      await this.store.pushEvent({
+        type: 'concert:cancelled',
+        concertId: this.concert.id,
+        timestamp: new Date(),
+      });
+    } else {
+      await this.store.pushEvent({
+        type: 'concert:failed',
+        concertId: this.concert.id,
+        error: { code: 'CONCERT_FAILED', message: reason ?? 'Unknown error', retryable: false, concertId: this.concert.id },
+        timestamp: new Date(),
+      });
+    }
   }
 }
