@@ -2,40 +2,30 @@ import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { OutputConfig } from '@orchestron/core';
 import { HarnessError } from '@orchestron/core';
-import { createModels } from '@earendil-works/pi-ai';
-import type { Context, Model, Api, StreamOptions } from '@earendil-works/pi-ai';
-import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
+import {
+  AuthStorage,
+  createAgentSession,
+  ModelRegistry,
+  SessionManager,
+} from '@earendil-works/pi-coding-agent';
+import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
+import { getBuiltinModel } from '@earendil-works/pi-ai/providers/all';
+import type { Model, Usage, Api } from '@earendil-works/pi-ai';
 
 export interface PiAdapterConfig {
   provider?: string;
-  model?: string;
-  apiKey?: string;
+  modelId?: string;
 }
 
 export class PiAdapter implements HarnessAdapter {
   readonly type = 'pi';
-  private models: ReturnType<typeof createModels>;
-  private model: Model<Api>;
-  private apiKey?: string;
+  private model: Model<Api> | undefined;
+  private modelId: string;
+  private provider: string;
 
   constructor(config: PiAdapterConfig = {}) {
-    const providerId = config.provider ?? 'openai';
-    const modelId = config.model ?? 'gpt-4o-mini';
-    this.apiKey = config.apiKey;
-
-    this.models = createModels();
-    for (const provider of builtinProviders()) {
-      this.models.setProvider(provider);
-    }
-
-    const resolved = this.models.getModel(providerId, modelId);
-    if (!resolved) {
-      throw new HarnessError(
-        `Pi model '${providerId}/${modelId}' not found. Available providers: ${this.models.getProviders().map(p => p.id).join(', ')}`,
-      );
-    }
-
-    this.model = resolved;
+    this.provider = config.provider ?? 'openai';
+    this.modelId = config.modelId ?? 'gpt-4o-mini';
   }
 
   async execute(
@@ -55,60 +45,80 @@ export class PiAdapter implements HarnessAdapter {
         `${JSON.stringify(options.output.schema, null, 2)}`;
     }
 
-    const context: Context = {
-      messages: [
-        { role: 'user', content: finalPrompt, timestamp: Date.now() },
-      ],
-    };
+    const authStorage = AuthStorage.create();
+    const modelRegistry = ModelRegistry.create(authStorage);
 
-    const streamOptions: StreamOptions = {
-      ...(this.apiKey ? { apiKey: this.apiKey } : {}),
-      ...(options?.signal ? { signal: options.signal } : {}),
-    };
+    if (!this.model) {
+      this.model = getBuiltinModel(this.provider as never, this.modelId as never) as unknown as Model<Api>;
+    }
 
-    try {
-      const response = await this.models.complete(this.model, context, streamOptions);
+    let output = '';
+    let finalUsage: Usage | undefined;
 
-      let output = '';
-      for (const block of response.content) {
-        if (block.type === 'text') {
-          output += block.text;
+    const { session } = await createAgentSession({
+      model: this.model as never,
+      sessionManager: SessionManager.inMemory(),
+      authStorage,
+      modelRegistry,
+      tools: [],
+    });
+
+    const unsub = session.subscribe((event: AgentSessionEvent) => {
+      if (event.type === 'message_update') {
+        const ame = event.assistantMessageEvent;
+        if (ame.type === 'text_delta') {
+          output += ame.delta;
         }
       }
-
-      let structured: Record<string, unknown> | undefined;
-      if (options?.output?.mode === 'structured') {
-        structured = this.tryParseStructured(output);
+      if (event.type === 'agent_end') {
+        for (const msg of event.messages) {
+          if ('usage' in msg && msg.usage) {
+            finalUsage = msg.usage as Usage;
+          }
+        }
       }
+    });
 
-      const usage = {
-        spend: response.usage?.cost?.total
-          ? Math.round(response.usage.cost.total * 1_000_000)
-          : undefined,
-        tokens: response.usage
-          ? (response.usage.input ?? 0) + (response.usage.output ?? 0)
-          : undefined,
-        inputTokens: response.usage?.input,
-        outputTokens: response.usage?.output,
-      };
+    if (options?.signal) {
+      options.signal.addEventListener('abort', () => {
+        session.abort().catch(() => {});
+      }, { once: true });
+    }
 
-      const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
-
-      return {
-        output,
-        structured,
-        summary,
-        usage,
-      };
+    try {
+      await session.prompt(finalPrompt);
     } catch (err) {
-      if (err && typeof err === 'object' && 'name' in err && (err as Error).name === 'AbortError') {
+      if (options?.signal?.aborted) {
         throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
       }
       throw new HarnessError(
         `Pi harness execution failed: ${(err as Error).message ?? String(err)}`,
         'HARNESS_FAILURE',
       );
+    } finally {
+      unsub();
+      session.dispose();
     }
+
+    let structured: Record<string, unknown> | undefined;
+    if (options?.output?.mode === 'structured') {
+      structured = this.tryParseStructured(output);
+    }
+
+    const usage = {
+      spend: finalUsage?.cost?.total
+        ? Math.round(finalUsage.cost.total * 1_000_000)
+        : undefined,
+      tokens: finalUsage
+        ? (finalUsage.input ?? 0) + (finalUsage.output ?? 0)
+        : undefined,
+      inputTokens: finalUsage?.input,
+      outputTokens: finalUsage?.output,
+    };
+
+    const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
+
+    return { output, structured, summary, usage };
   }
 
   private tryParseStructured(

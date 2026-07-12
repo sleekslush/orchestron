@@ -37,10 +37,10 @@
 **Goal**: Real movement execution via Pi SDK.
 
 - [x] Create `packages/adapter-pi/`
-- [x] Implement `PiAdapter` — wraps `@earendil-works/pi-ai` models.complete()
+- [x] Implement `PiAdapter` — wraps `@earendil-works/pi-coding-agent` `createAgentSession()` / `session.prompt()` / `session.dispose()`
   - Handle `OutputConfig.mode === 'structured'` — inject schema into prompt, parse result
-  - Extract `ResourceUsage` from response metadata (input/output tokens, cost → spend)
-  - Streaming event bridge: (stretch — uses complete() for now, stream() available for later)
+  - Extract `ResourceUsage` from agent_end event (input/output tokens, cost → spend)
+  - Abort signal bridges to `session.abort()`
 - [ ] Integration test: run a real 2-movement score against Pi
 
 ## Phase 4: CLI
