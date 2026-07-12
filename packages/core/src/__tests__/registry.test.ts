@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import type { Score } from '../types/score.js';
 
@@ -197,5 +200,79 @@ describe('ScoreRegistry', () => {
         }),
       ),
     ).toThrow('unreachable');
+  });
+
+  it('should reject a score without an id', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ id: '' })),
+    ).toThrow();
+  });
+
+  it('should reject a score without a name', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ name: '' })),
+    ).toThrow();
+  });
+
+  it('should throw on get for an unregistered score', () => {
+    const registry = new ScoreRegistry();
+    expect(() => registry.get('nonexistent')).toThrow('not found');
+  });
+
+  it('should load a score from a YAML file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orchestron-test-'));
+    const path = join(dir, 'test-score.yaml');
+    writeFileSync(path, `
+id: yaml-score
+name: "YAML Score"
+description: "Loaded from YAML"
+version: "1.0.0"
+startMovement: step_a
+movements:
+  - id: step_a
+    name: "Step A"
+    section: default
+    harness: pi
+    prompt: "Do step A"
+    goal:
+      description: "done"
+      strategy: llm_judge
+    transitions:
+      - to: __end__
+        on: success
+program: {}
+`, 'utf-8');
+
+    const registry = new ScoreRegistry();
+    registry.loadFrom(path);
+    const score = registry.get('yaml-score');
+    expect(score.name).toBe('YAML Score');
+    expect(score.movements).toHaveLength(1);
+  });
+
+  it('should throw when loading from a nonexistent file', () => {
+    const registry = new ScoreRegistry();
+    expect(() => registry.loadFrom('/nonexistent/path.yaml')).toThrow('not found');
+  });
+
+  it('should register multiple scores at once', () => {
+    const registry = new ScoreRegistry();
+    registry.registerMany([
+      validScore({ id: 'multi-a' }),
+      validScore({ id: 'multi-b' }),
+    ]);
+    expect(registry.list()).toHaveLength(2);
+    expect(registry.get('multi-a').id).toBe('multi-a');
+    expect(registry.get('multi-b').id).toBe('multi-b');
+  });
+
+  it('should overwrite on duplicate registration', () => {
+    const registry = new ScoreRegistry();
+    registry.register(validScore({ name: 'Original' }));
+    registry.register(validScore({ name: 'Overwrite' }));
+    const score = registry.get('test-workflow');
+    expect(score.name).toBe('Overwrite');
   });
 });

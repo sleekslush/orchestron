@@ -214,6 +214,426 @@ it('sub-scores', async () => {
   expect((await conductor.getState()).childConcertIds).toHaveLength(1);
 });
 
+// ─── Conductor Lifecycle Tests ───────────────────────────────
+
+describe('Conductor lifecycle', () => {
+  it('pauses and resumes a running concert', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'lifecycle', name: 'Lifecycle', version: '1.0.0',
+      startMovement: 'slow',
+      movements: [{
+        id: 'slow', name: 'Slow', section: 'x', harness: 'fake', prompt: 'S',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 200 },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('lifecycle');
+    const startPromise = conductor.start();
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(conductor.status).toBe('running');
+
+    await conductor.pause();
+    expect(conductor.status).toBe('paused');
+    const pausedState = await store.getConcert(conductor.concertId);
+    expect(pausedState!.status).toBe('paused');
+
+    await conductor.resume();
+    expect(conductor.status).toBe('running');
+
+    await startPromise;
+    expect(conductor.status).toBe('completed');
+  });
+
+  it('cancels a running concert mid-movement', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'cancel-test', name: 'Cancel Test', version: '1.0.0',
+      startMovement: 'slow',
+      movements: [{
+        id: 'slow', name: 'Slow', section: 'x', harness: 'fake', prompt: 'S',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 1000 },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('cancel-test');
+    const startPromise = conductor.start();
+
+    await new Promise((r) => setTimeout(r, 10));
+    await conductor.cancel();
+
+    await startPromise;
+    // Cancel during execution causes a HARNESS_TIMEOUT → movement fails → __fail__
+    expect(conductor.status).toBe('failed');
+    const state = await conductor.getState();
+    expect(state.history[0].error?.code).toBe('HARNESS_TIMEOUT');
+  });
+
+  it('pause is idempotent', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'idempotent', name: 'Idempotent', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map(),
+    });
+    const conductor = await hall.createConcert('idempotent');
+    await conductor.pause();
+    // Pending → pause is a no-op
+    expect(conductor.status).toBe('pending');
+  });
+
+  it('resume on non-paused is a no-op', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'noop-resume', name: 'Noop Resume', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map(),
+    });
+    const conductor = await hall.createConcert('noop-resume');
+    await conductor.resume();
+    expect(conductor.status).toBe('pending');
+  });
+});
+
+// ─── Duration Constraint Tests ───────────────────────────────
+
+describe('Conductor constraints', () => {
+  it('fails when duration limit is exceeded', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'duration-limit', name: 'Duration Limit', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: 'b', on: 'success' }],
+      }, {
+        id: 'b', name: 'B', section: 'x', harness: 'fake', prompt: 'B',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: { maxDurationMs: 50 },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 100 },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('duration-limit');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
+});
+
+// ─── ConcertHall Tests ───────────────────────────────────────
+
+describe('ConcertHall', () => {
+  it('waitForConcert resolves when concert completes', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'quick', name: 'Quick', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('quick');
+    const resultPromise = hall.waitForConcert(conductor.concertId);
+    conductor.start().catch(() => {});
+    const concert = await resultPromise;
+    expect(concert.status).toBe('completed');
+  });
+
+  it('waitForConcert throws for unknown concert', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const hall = new ConcertHall({ store, scoreRegistry: registry, adapters: new Map() });
+    await expect(hall.waitForConcert('nonexistent')).rejects.toThrow('not found');
+  });
+
+  it('lists concerts with combined filters', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'filter-score', name: 'Filter', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const c1 = await hall.createConcert('filter-score');
+    await c1.start();
+    const c2 = await hall.createConcert('filter-score');
+    await c2.start();
+
+    const running = hall.list({ status: 'completed' });
+    expect(running).toHaveLength(2);
+
+    const limited = hall.list({ limit: 1 });
+    expect(limited).toHaveLength(1);
+
+    const withStatus = hall.list({ status: 'completed', limit: 1 });
+    expect(withStatus).toHaveLength(1);
+  });
+
+  it('getChildConcerts returns children', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'parent', name: 'Parent', version: '1.0.0',
+      startMovement: 'p',
+      movements: [{
+        id: 'p', name: 'P', section: 'x',
+        subscore: { scoreId: 'child', contextMapping: {} },
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    registry.register({
+      id: 'child', name: 'Child', version: '1.0.0',
+      startMovement: 'c',
+      movements: [{
+        id: 'c', name: 'C', section: 'x', harness: 'fake', prompt: 'C',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('parent');
+    await conductor.start();
+
+    const children = hall.getChildConcerts(conductor.concertId);
+    expect(children).toHaveLength(1);
+    const childConductor = hall.getConcert(children[0]);
+    expect(childConductor).toBeDefined();
+  });
+});
+
+// ─── FakeHarnessAdapter Direct Tests ─────────────────────────
+
+describe('FakeHarnessAdapter', () => {
+  it('returns default output with no config', async () => {
+    const adapter = new FakeHarnessAdapter({});
+    const result = await adapter.execute('prompt', { shared: {} });
+    expect(result.output).toBe('Default fake output');
+    expect(result.summary).toBe('Executed successfully');
+    expect(result.usage.spend).toBe(10);
+  });
+
+  it('uses per-movement config when movementId matches', async () => {
+    const adapter = new FakeHarnessAdapter({
+      perMovement: {
+        step_a: { output: 'Step A output', summary: 'Step A done', usage: { spend: 5, tokens: 50 } },
+      },
+    });
+    const result = await adapter.execute('p', { shared: {} }, { movementId: 'step_a' });
+    expect(result.output).toBe('Step A output');
+    expect(result.usage.spend).toBe(5);
+  });
+
+  it('falls back to default when movementId has no per-movement config', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'default', summary: 's', usage: { spend: 1, tokens: 10 } },
+      perMovement: { other: { output: 'other' } },
+    });
+    const result = await adapter.execute('p', { shared: {} }, { movementId: 'unknown' });
+    expect(result.output).toBe('default');
+  });
+
+  it('throws HarnessError when fail is true', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { fail: true },
+    });
+    await expect(adapter.execute('p', { shared: {} })).rejects.toThrow('Fake harness failure');
+  });
+
+  it('respects delayMs', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { delayMs: 50 },
+    });
+    const start = Date.now();
+    await adapter.execute('p', { shared: {} });
+    expect(Date.now() - start).toBeGreaterThanOrEqual(45);
+  });
+
+  it('respects globalDelayMs', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o' },
+      globalDelayMs: 30,
+    });
+    const start = Date.now();
+    await adapter.execute('p', { shared: {} });
+    expect(Date.now() - start).toBeGreaterThanOrEqual(25);
+  });
+
+  it('fills synthetic structured data when output mode is structured', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'raw' },
+    });
+    const result = await adapter.execute('p', { shared: {} }, {
+      output: { mode: 'structured', schema: { type: 'object' } },
+    });
+    expect(result.structured).toEqual({ parsed: true, from: 'fake-harness' });
+  });
+
+  it('uses provided structured data when present', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'raw', structured: { key: 'val' } },
+    });
+    const result = await adapter.execute('p', { shared: {} }, {
+      output: { mode: 'structured' },
+    });
+    expect(result.structured).toEqual({ key: 'val' });
+  });
+});
+
+// ─── FakeEvaluator Direct Tests ──────────────────────────────
+
+describe('FakeEvaluator', () => {
+  it('alwaysSucceed returns achieved: true', async () => {
+    const evaluator = new FakeEvaluator({ alwaysSucceed: true });
+    const result = await evaluator.evaluate(
+      { description: 'x', strategy: 'llm_judge' }, '', { shared: {} },
+    );
+    expect(result.achieved).toBe(true);
+    expect(result.confidence).toBe(1);
+  });
+
+  it('perMovement returns configured evaluation for matching movement', async () => {
+    const evaluator = new FakeEvaluator({
+      perMovement: {
+        step_x: { achieved: false, confidence: 0, summary: 'custom fail', evidence: 'nope' },
+      },
+    });
+    const result = await evaluator.evaluate(
+      { description: 'x', strategy: 'llm_judge' }, '', { shared: {} }, 'step_x',
+    );
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toBe('custom fail');
+    expect(result.evidence).toBe('nope');
+  });
+
+  it('failOn returns failed evaluation for listed movements', async () => {
+    const evaluator = new FakeEvaluator({ failOn: ['bad-step'] });
+    const result = await evaluator.evaluate(
+      { description: 'x', strategy: 'llm_judge' }, '', { shared: {} }, 'bad-step',
+    );
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toBe('Configured to fail');
+  });
+
+  it('defaultResult returns configured default', async () => {
+    const evaluator = new FakeEvaluator({
+      defaultResult: { achieved: false, confidence: 0.5, summary: 'maybe' },
+    });
+    const result = await evaluator.evaluate(
+      { description: 'x', strategy: 'llm_judge' }, '', { shared: {} }, 'unknown',
+    );
+    expect(result.achieved).toBe(false);
+    expect(result.confidence).toBe(0.5);
+  });
+
+  it('empty config returns default true', async () => {
+    const evaluator = new FakeEvaluator();
+    const result = await evaluator.evaluate(
+      { description: 'x', strategy: 'llm_judge' }, '', { shared: {} },
+    );
+    expect(result.achieved).toBe(true);
+    expect(result.summary).toBe('Goal met (default)');
+  });
+
+  it('alwaysSucceed takes priority over perMovement', async () => {
+    const evaluator = new FakeEvaluator({
+      alwaysSucceed: true,
+      perMovement: {
+        failer: { achieved: false, confidence: 0, summary: 'nope' },
+      },
+    });
+    const result = await evaluator.evaluate(
+      { description: 'x', strategy: 'llm_judge' }, '', { shared: {} }, 'failer',
+    );
+    expect(result.achieved).toBe(true);
+    expect(result.summary).toBe('Always succeeds');
+  });
+});
+
 // ─── Crash Recovery Tests ────────────────────────────────────
 
 describe('Conductor.recover()', () => {
