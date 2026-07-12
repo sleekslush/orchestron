@@ -18,6 +18,7 @@
 **Goal**: Conductor can load a Score, walk the movement DAG, call an in-memory fake harness.
 
 - [x] `packages/core/src/evaluator/` — `Evaluator` interface + `FakeEvaluator`
+- [x] `HarnessEvaluator` — real harness-based evaluator using `Score.evaluator` config
 - [x] `packages/core/src/conductor/` — `Conductor` class
   - Movement resolution, prompt building with context
   - Goal delegation to Evaluator
@@ -29,6 +30,7 @@
   - `createConcert()`, `getConcert()`, `list()`, `waitForConcert()`
   - Rehydration of incomplete Concerts on restart
   - Child concert tracking
+- [ ] **Deferred**: cascading pause/cancel/resume to child concerts (see `docs/decisions/child-concert-lifecycle.md`)
 - [x] `packages/core/src/__tests__/` — Conductor unit tests with mock harness
 - [x] `packages/core/src/__tests__/use-cases.test.ts` — 6 integration use cases
 

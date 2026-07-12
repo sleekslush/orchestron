@@ -15,7 +15,9 @@ import type {
 import type { HarnessAdapter } from '../types/adapter.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
 import type { ConcertStore } from '../store/concert-store.js';
-import type { ConcertHall } from '../hall/concert-hall.js';
+import type { ChildConcertFactory } from './child-concert-factory.js';
+import type { IConductor } from './conductor-interface.js';
+import type { StartOptions } from './start-options.js';
 import {
   ConstraintBreachError,
   ConductorPanic,
@@ -23,15 +25,9 @@ import {
   OrchestronError,
 } from '../types/errors.js';
 
-export interface StartOptions {
-  initialContext?: Record<string, unknown>;
-  programOverride?: Partial<Program>;
-  triggeredBy?: Concert['triggeredBy'];
-  parentConcertId?: ConcertID;
-  nestingDepth?: number;
-}
+export { StartOptions };
 
-export class Conductor {
+export class Conductor implements IConductor {
   private abortController = new AbortController();
   private pauseResolver: (() => void) | null = null;
   private _status: ConcertStatus = 'pending';
@@ -43,12 +39,12 @@ export class Conductor {
     private concert: Concert,
     private score: Score,
     private store: ConcertStore,
-    private hall: ConcertHall,
+    private childFactory: ChildConcertFactory,
     private adapters: ReadonlyMap<string, HarnessAdapter>,
     private evaluator: Evaluator,
   ) {
     this._status = concert.status;
-    this.nestingDepth = 0;
+    this.nestingDepth = concert.nestingDepth ?? 0;
   }
 
   get concertId(): ConcertID {
@@ -363,7 +359,7 @@ export class Conductor {
       nestingDepth: this.nestingDepth + 1,
     };
 
-    const childConductor = await this.hall.createConcert(
+    const childConductor = await this.childFactory.createChildConcert(
       movement.subscore.scoreId,
       childOptions,
     );

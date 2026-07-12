@@ -1,11 +1,15 @@
 import { nanoid } from 'nanoid';
 import type { Concert, ConcertID, ConcertFilter } from '../types/concert.js';
-import type { ScoreID, Program } from '../types/score.js';
+import type { Score, ScoreID } from '../types/score.js';
 import type { HarnessAdapter } from '../types/adapter.js';
 import type { ConcertStore } from '../store/concert-store.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
-import { Conductor, type StartOptions } from '../conductor/conductor.js';
-import { FakeEvaluator, type Evaluator } from '../evaluator/index.js';
+import { Conductor } from '../conductor/conductor.js';
+import type { IConductor } from '../conductor/conductor-interface.js';
+import type { ChildConcertFactory } from '../conductor/child-concert-factory.js';
+import type { StartOptions } from '../conductor/start-options.js';
+import { FakeEvaluator, HarnessEvaluator, type Evaluator } from '../evaluator/index.js';
+import { ConductorPanic } from '../types/errors.js';
 
 export interface ConcertHallOptions {
   store: ConcertStore;
@@ -14,7 +18,7 @@ export interface ConcertHallOptions {
   evaluator?: Evaluator;
 }
 
-export class ConcertHall {
+export class ConcertHall implements ChildConcertFactory {
   private conductors = new Map<ConcertID, Conductor>();
   private parentToChildren = new Map<ConcertID, ConcertID[]>();
   private store: ConcertStore;
@@ -29,7 +33,38 @@ export class ConcertHall {
     this.evaluator = options.evaluator ?? new FakeEvaluator({ alwaysSucceed: true });
   }
 
+  private resolveEvaluator(score: Score): Evaluator {
+    if (score.evaluator?.harness) {
+      const adapter = this.adapters.get(score.evaluator.harness);
+      if (!adapter) {
+        throw new ConductorPanic(
+          `No adapter registered for evaluator harness '${score.evaluator.harness}' in score '${score.id}'`,
+          'INTERNAL_ERROR',
+        );
+      }
+      return new HarnessEvaluator({
+        adapter,
+        promptTemplate: score.evaluator.prompt,
+      });
+    }
+    return this.evaluator;
+  }
+
   async createConcert(
+    scoreId: ScoreID,
+    options?: StartOptions,
+  ): Promise<Conductor> {
+    return this.doCreateConcert(scoreId, options);
+  }
+
+  async createChildConcert(
+    scoreId: ScoreID,
+    options?: StartOptions,
+  ): Promise<IConductor> {
+    return this.doCreateConcert(scoreId, options);
+  }
+
+  private async doCreateConcert(
     scoreId: ScoreID,
     options?: StartOptions,
   ): Promise<Conductor> {
@@ -57,7 +92,7 @@ export class ConcertHall {
       this.store,
       this,
       this.adapters,
-      this.evaluator,
+      this.resolveEvaluator(score),
     );
 
     this.conductors.set(concert.id, conductor);
@@ -128,7 +163,7 @@ export class ConcertHall {
           this.store,
           this,
           this.adapters,
-          this.evaluator,
+          this.resolveEvaluator(score),
         );
         this.conductors.set(concert.id, conductor);
 
