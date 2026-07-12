@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command, Option } from 'commander';
-import { createOrchestron, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR } from './orchestron.js';
+import { createOrchestron, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR } from './orchestron.js';
 import { startCommandHandler } from './commands/start.js';
 import {
   pauseCommandHandler,
@@ -24,9 +24,9 @@ const program = new Command()
   .option('--store <path>', 'Path to the SQLite store', DEFAULT_STORE_PATH)
   .option(
     '--scores-dir <dir>',
-    'Directory containing .score.yaml/.score.json files (can be used multiple times)',
+    'Directory containing .score.yaml/.score.json files (can be used multiple times). Local ./orchestron/scores takes priority over ~/.orchestron/scores.',
     collect,
-    [DEFAULT_SCORES_DIR],
+    [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
   )
   .option('--json', 'Output JSON instead of human-readable text');
 

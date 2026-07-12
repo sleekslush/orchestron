@@ -87,7 +87,37 @@
 - [x] Output: human-readable by default, `--json` for programmatic use
 - [x] Config: `--store` flag for custom SQLite path, default `~/.orchestron/store.db`
 
-## Phase 6: Dashboard
+## Phase 6: Pi Session Plugin
+
+**Goal**: Start and monitor concerts from within a Pi session using natural language.
+
+- [ ] Create `packages/plugin-pi/`
+- [ ] Define orchestron tools for Pi:
+  - `orchestron_start_concert(scoreId, context?)`
+  - `orchestron_get_concert_status(concertId)`
+  - `orchestron_list_concerts(filter?)`
+  - `orchestron_pause_concert(concertId)`
+  - `orchestron_cancel_concert(concertId)`
+  - `orchestron_list_scores()`
+- [ ] Tools return structured data (JSON) so Pi can summarize for the user
+- [ ] Example: "Run the jira-to-mr workflow for PROJ-123" → tool call → concert starts in background → user can check status
+
+## Phase 7: Opencode Session Plugin
+
+**Goal**: Start and monitor concerts from within an opencode session using natural language.
+
+- [ ] Create `packages/plugin-opencode/`
+- [ ] Define orchestron tools for opencode:
+  - `orchestron_start_concert(scoreId, context?)`
+  - `orchestron_get_concert_status(concertId)`
+  - `orchestron_list_concerts(filter?)`
+  - `orchestron_pause_concert(concertId)`
+  - `orchestron_cancel_concert(concertId)`
+  - `orchestron_list_scores()`
+- [ ] Tools return structured data (JSON) so opencode can summarize for the user
+- [ ] Reuse the same tool definitions and orchestron integration as the Pi plugin
+
+## Phase 8: Dashboard
 
 **Goal**: Real-time web UI for monitoring Concerts, drilling into movements.
 
@@ -103,22 +133,7 @@
   - **Score Library**: Browse scores, inspect movement DAGs
   - **Live View**: Real-time event stream
 
-## Phase 7: Pi Session Plugin
-
-**Goal**: Start and monitor concerts from within a Pi session using natural language.
-
-- [ ] Create `packages/plugin-pi/`
-- [ ] Define orchestron tools for Pi:
-  - `orchestron_start_concert(scoreId, context?)`
-  - `orchestron_get_concert_status(concertId)`
-  - `orchestron_list_concerts(filter?)`
-  - `orchestron_pause_concert(concertId)`
-  - `orchestron_cancel_concert(concertId)`
-  - `orchestron_list_scores()`
-- [ ] Tools return structured data (JSON) so Pi can summarize for the user
-- [ ] Example: "Run the jira-to-mr workflow for PROJ-123" → tool call → concert starts in background → user can check status
-
-## Phase 8: Score Examples + Docs
+## Phase 9: Score Examples + Docs
 
 **Goal**: Working example scores and enough docs for someone to author their own.
 
@@ -128,7 +143,7 @@
 - [ ] `examples/plan-to-markdown.score.yaml`
 - [ ] Score authoring guide (README or AGENTS.md)
 
-## Phase 9: V1 (Future)
+## Phase 10: V1 (Future)
 
 - [ ] Claude harness adapter
 - [ ] Scheduled/cron-triggered Concerts

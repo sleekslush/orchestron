@@ -56,8 +56,21 @@ pnpm test
 
 ### Run a concert from the CLI
 
+Orchestron looks for score files (`*.score.yaml`/`*.score.json`) in two places
+by default:
+
+1. `./orchestron/scores/` — project-local scores, checked first
+2. `~/.orchestron/scores/` — global scores, checked second
+
+Local scores take priority over global scores when the same score ID is present
+in both.
+
 ```bash
-# Copy or write a .score.yaml file to the default scores directory
+# Copy an example to the project-local scores directory
+mkdir -p ./orchestron/scores
+cp examples/opencode-demo.score.yaml ./orchestron/scores/
+
+# Or use the global directory
 mkdir -p ~/.orchestron/scores
 cp examples/opencode-demo.score.yaml ~/.orchestron/scores/
 
@@ -74,7 +87,8 @@ pnpm orchestron dashboard --port 3000
 
 Use `--json` for scriptable output and `--store <path>` for a custom SQLite
 path. Pass `--context.key=value` arguments to populate the concert's initial
-context.
+context. Use `--scores-dir <dir>` to add a custom directory (can be passed
+multiple times).
 
 ### Run a score programmatically
 

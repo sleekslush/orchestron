@@ -7,6 +7,7 @@ import type { HarnessAdapter, HarnessAdapterResolver, SqliteLoge, ScoreRegistry,
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
 export const DEFAULT_STORE_PATH = join(DEFAULT_CONFIG_DIR, 'store.db');
 export const DEFAULT_SCORES_DIR = join(DEFAULT_CONFIG_DIR, 'scores');
+export const LOCAL_SCORES_DIR = join(process.cwd(), 'orchestron', 'scores');
 
 export interface OrchestronOptions {
   storePath?: string;
@@ -22,7 +23,7 @@ export interface Orchestron {
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
   const storePath = options.storePath ?? DEFAULT_STORE_PATH;
-  const scoresDirs = options.scoresDirs ?? [DEFAULT_SCORES_DIR];
+  const scoresDirs = options.scoresDirs ?? [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR];
 
   ensureDir(DEFAULT_CONFIG_DIR);
   for (const dir of scoresDirs) {
