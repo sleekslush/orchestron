@@ -2,6 +2,7 @@ import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 import type { AgentToolUpdateCallback } from '@earendil-works/pi-coding-agent';
 import type { Orchestron } from '../orchestron.js';
+import { toUsageView, type UsageView } from './util.js';
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -22,10 +23,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function usageEqual(
-  a: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number },
-  b: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number },
-): boolean {
+function usageEqual(a: UsageView, b: UsageView): boolean {
   return (
     a.spend === b.spend &&
     a.tokens === b.tokens &&
@@ -73,7 +71,7 @@ export async function waitForConcert(
   startedAt: string;
   completedAt?: string;
   currentMovement: string | null;
-  usage: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number };
+  usage: UsageView;
   movements: Array<{
     movementId: string;
     movementName: string;
@@ -107,10 +105,7 @@ export async function waitForConcert(
   let lastMovement = initial.currentMovement;
   let lastUsage = initial.usage;
 
-  function emitUsage(
-    usage: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number },
-    maxDollars?: number,
-  ) {
+  function emitUsage(usage: UsageView, maxDollars?: number) {
     const parts: string[] = [];
     if (usage.spend !== undefined) {
       const spendDollars = usage.spend / 1_000_000;
@@ -210,7 +205,7 @@ function buildResult(
     startedAt: Date;
     completedAt?: Date;
     currentMovement: string | null;
-    usage: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number };
+    usage: UsageView;
   },
   history: Array<{
     movementId: string;
@@ -228,7 +223,7 @@ function buildResult(
     startedAt: state.startedAt.toISOString(),
     completedAt: state.completedAt?.toISOString(),
     currentMovement: state.currentMovement,
-    usage: state.usage,
+    usage: toUsageView(state.usage),
     movements: history.map((h) => ({
       movementId: h.movementId,
       movementName: h.movementName,

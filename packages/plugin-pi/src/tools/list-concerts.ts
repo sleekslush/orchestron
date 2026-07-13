@@ -2,6 +2,7 @@ import { Type } from 'typebox';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 import type { Orchestron } from '../orchestron.js';
+import { toUsageView, type UsageView } from './util.js';
 
 export interface ListConcertsInput {
   status?:
@@ -25,7 +26,7 @@ export async function listConcerts(
     status: string;
     startedAt: string;
     completedAt?: string;
-    usage: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number };
+    usage: UsageView;
   }>;
 }> {
   const concerts = await orchestron.store.listConcerts({
@@ -41,7 +42,7 @@ export async function listConcerts(
       status: c.status,
       startedAt: c.startedAt.toISOString(),
       completedAt: c.completedAt?.toISOString(),
-      usage: c.usage,
+      usage: toUsageView(c.usage),
     })),
   };
 }

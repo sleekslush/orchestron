@@ -1,6 +1,7 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 import type { Orchestron } from '../orchestron.js';
+import { toUsageView, type UsageView } from './util.js';
 
 export interface GetStatusInput {
   concertId: string;
@@ -26,7 +27,7 @@ export async function getConcertStatus(
     result?: unknown;
     error?: string;
   };
-  usage: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number };
+  usage: UsageView;
   movements: Array<{
     movementId: string;
     movementName: string;
@@ -73,7 +74,7 @@ export async function getConcertStatus(
     completedAt: state.completedAt?.toISOString(),
     currentMovement: state.currentMovement,
     currentMovementProgress,
-    usage: state.usage,
+    usage: toUsageView(state.usage),
     movements: history.map((h) => ({
       movementId: h.movementId,
       movementName: h.movementName,

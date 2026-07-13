@@ -111,7 +111,7 @@ describe('Orchestron Pi plugin tools', () => {
     expect(status.movements).toHaveLength(2);
     expect(status.movements[0].movementId).toBe('step_a');
     expect(status.movements[1].movementId).toBe('step_b');
-    expect(status.usage.spend).toBe(20);
+    expect(status.usage.spend).toBe(0.00002);
   });
 
   it('streams progress updates when starting a concert', async () => {
