@@ -15,8 +15,26 @@ export async function statusCommandHandler(
 
     const history = await orchestron.store.getMovementHistory(concertId);
     const events = await orchestron.store.getEvents(concertId);
+    const progressEvents = await orchestron.store.getEvents(concertId, {
+      types: ['movement:progress'],
+      limit: 5,
+      order: 'desc',
+    });
+    const startedEvents = await orchestron.store.getEvents(concertId, {
+      types: ['movement:started'],
+      limit: 1,
+      order: 'desc',
+    });
 
     const failure = extractFailure(events);
+
+    const latestProgress = progressEvents[0] as { payload?: { toolName?: string; args?: Record<string, unknown>; message?: string } } | undefined;
+    const currentCommand = latestProgress?.payload?.toolName
+      ? `${latestProgress.payload.toolName}${latestProgress.payload.args ? ` ${JSON.stringify(latestProgress.payload.args)}` : ''}`
+      : latestProgress?.payload?.message;
+
+    const startedEvent = startedEvents[0] as { type: 'movement:started'; prompt?: string } | undefined;
+    const currentPrompt = startedEvent?.prompt;
 
     const output = {
       concertId: state.id,
@@ -25,6 +43,8 @@ export async function statusCommandHandler(
       startedAt: state.startedAt.toISOString(),
       completedAt: state.completedAt?.toISOString(),
       currentMovement: state.currentMovement,
+      currentCommand,
+      currentPrompt,
       usage: state.usage,
       failure,
       movements: history.map((h) => ({
@@ -41,7 +61,7 @@ export async function statusCommandHandler(
       })),
     };
 
-    printOutput(json, output, () => formatConcertHuman(state, history, events, verbose));
+    printOutput(json, output, () => formatConcertHuman(state, history, events, verbose, currentCommand, currentPrompt));
   } else {
     const aggregates = await orchestron.store.getAggregates();
     const recent = await orchestron.store.listConcerts({ limit: 10 });

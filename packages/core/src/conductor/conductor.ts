@@ -321,13 +321,6 @@ export class Conductor implements IConductor {
   ): Promise<MovementRecord> {
     const startedAt = new Date();
 
-    await this.store.pushEvent({
-      type: 'movement:started',
-      concertId: this.concert.id,
-      movementId: movement.id,
-      timestamp: startedAt,
-    });
-
     const record: MovementRecord = {
       movementId: movement.id,
       movementName: movement.name,
@@ -360,6 +353,14 @@ export class Conductor implements IConductor {
       if (sessionId) {
         this.activeSessions.set(sessionId, harnessAdapter);
       }
+
+      await this.store.pushEvent({
+        type: 'movement:started',
+        concertId: this.concert.id,
+        movementId: movement.id,
+        prompt: prompt.slice(0, 5000),
+        timestamp: startedAt,
+      });
 
       const movementController = new AbortController();
       const movementSignal = movementController.signal;
