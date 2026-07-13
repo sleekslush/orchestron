@@ -24,7 +24,7 @@ export interface Orchestron {
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
-  const { storePath, scoresDirs, opencodeProvider, opencodeModelId } = resolveOrchestronConfig(
+  const { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId } = resolveOrchestronConfig(
     options,
     {
       storePath: DEFAULT_STORE_PATH,
@@ -51,6 +51,10 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
   const opencodeAdapter = new OpencodeAdapter({ embedded: { port: 0 }, provider: opencodeProvider, modelId: opencodeModelId });
   if (adapterResolver instanceof LazyAdapterResolver) {
     adapterResolver.register('opencode', opencodeAdapter);
+    if (piProvider || piModelId) {
+      const { PiAdapter } = await import('@orchestron/adapter-pi');
+      adapterResolver.register('pi', new PiAdapter({ provider: piProvider, modelId: piModelId }));
+    }
   }
 
   const evaluator = options.evaluator ?? new HarnessEvaluator({ adapter: opencodeAdapter });
