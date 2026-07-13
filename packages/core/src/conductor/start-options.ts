@@ -7,4 +7,6 @@ export interface StartOptions {
   triggeredBy?: Concert['triggeredBy'];
   parentConcertId?: ConcertID;
   nestingDepth?: number;
+  /** Explicit harness for this concert, overriding the global defaultHarness. */
+  harness?: string;
 }

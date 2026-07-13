@@ -5,6 +5,8 @@ export type ProgressCallback = (text: string) => void;
 export interface StartConcertInput {
   scoreId: string;
   context?: Record<string, unknown>;
+  /** Explicit harness for this concert, overriding the global default. */
+  harness?: string;
 }
 
 export async function startConcert(
@@ -20,6 +22,7 @@ export async function startConcert(
   const conductor = await orchestron.hall.createConcert(input.scoreId, {
     initialContext: input.context,
     triggeredBy: 'agent',
+    harness: input.harness,
   });
 
   conductor.start().catch(() => {});

@@ -43,6 +43,7 @@ export interface Concert {
   parentConcertId?: ConcertID;
   childConcertIds: ConcertID[];
   nestingDepth?: number;
+  explicitHarness?: string;
 }
 
 export interface MovementRecord {

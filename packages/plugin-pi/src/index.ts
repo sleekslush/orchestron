@@ -26,6 +26,7 @@ export default function orchestronPlugin(
     if (!orchestronPromise) {
       orchestronPromise = createOrchestron({
         ...config,
+        defaultHarness: config.defaultHarness ?? 'pi',
         adapters: config.adapters ?? new Map<string, HarnessAdapter>([
           ['pi', new PiAdapter()],
           ['opencode', new OpencodeAdapter({ embedded: { port: 0 } })],

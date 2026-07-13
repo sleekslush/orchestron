@@ -1181,4 +1181,292 @@ describe('Conductor.recover()', () => {
     const state = await store.getConcert('paused-1');
     expect(state!.status).toBe('paused');
   });
+
+  it('uses defaultHarness when movement.harness is omitted', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'default-harness-test',
+      name: 'Default Harness Test',
+      version: '1.0.0',
+      startMovement: 'step1',
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'default',
+          prompt: 'Do step 1',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'ok',
+        summary: 'ok',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const conductor = await hall.createConcert('default-harness-test');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+  });
+
+  it('movement.harness overrides defaultHarness', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+
+    const primaryAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: 'primary',
+        summary: 'primary',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+    const secondaryAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: 'secondary',
+        summary: 'secondary',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+
+    const score: Score = {
+      id: 'override-test',
+      name: 'Override Test',
+      version: '1.0.0',
+      startMovement: 'step1',
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'default',
+          harness: 'secondary',
+          prompt: 'Do step 1',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([
+        ['primary', primaryAdapter],
+        ['secondary', secondaryAdapter],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'primary',
+    });
+
+    const conductor = await hall.createConcert('override-test');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    expect(secondaryAdapter.prompts).toHaveLength(1);
+    expect(primaryAdapter.prompts).toHaveLength(0);
+  });
+
+  it('score.evaluator.harness overrides defaultHarness for evaluation', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+
+    const evalAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"Goal achieved"}',
+        summary: 'evaluated',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+    const moveAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'moved', summary: 'moved', usage: { spend: 1, tokens: 1 } },
+    });
+
+    const score: Score = {
+      id: 'eval-override-test',
+      name: 'Eval Override Test',
+      version: '1.0.0',
+      startMovement: 'step1',
+      evaluator: { harness: 'eval', model: 'test-model' },
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'default',
+          harness: 'move',
+          prompt: 'Do step 1',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([
+        ['move', moveAdapter],
+        ['eval', evalAdapter],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: false }), // global evaluator should NOT be used
+      defaultHarness: 'move',
+    });
+
+    const conductor = await hall.createConcert('eval-override-test');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    expect(evalAdapter.prompts.length).toBeGreaterThan(0);
+    expect(moveAdapter.prompts).toHaveLength(1);
+  });
+
+  it('explicit StartOptions.harness overrides defaultHarness for movements', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+
+    const primaryAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: 'primary',
+        summary: 'primary',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+    const secondaryAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: 'secondary',
+        summary: 'secondary',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+
+    const score: Score = {
+      id: 'explicit-harness-test',
+      name: 'Explicit Harness Test',
+      version: '1.0.0',
+      startMovement: 'step1',
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'default',
+          prompt: 'Do step 1',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([
+        ['primary', primaryAdapter],
+        ['secondary', secondaryAdapter],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'primary',
+    });
+
+    const conductor = await hall.createConcert('explicit-harness-test', { harness: 'secondary' });
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    expect(secondaryAdapter.prompts.length).toBeGreaterThanOrEqual(1);
+    expect(primaryAdapter.prompts).toHaveLength(0);
+  });
+
+  it('persists explicitHarness across loadConcert', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+
+    const primaryAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: 'primary',
+        summary: 'primary',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+    const secondaryAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: 'secondary',
+        summary: 'secondary',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+
+    const score: Score = {
+      id: 'persist-harness-test',
+      name: 'Persist Harness Test',
+      version: '1.0.0',
+      startMovement: 'step1',
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'default',
+          prompt: 'Do step 1',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([
+        ['primary', primaryAdapter],
+        ['secondary', secondaryAdapter],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'primary',
+    });
+
+    const conductor = await hall.createConcert('persist-harness-test', { harness: 'secondary' });
+    const concertId = conductor.concertId;
+
+    // Simulate process restart by creating a new hall and loading the concert
+    const hall2 = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([
+        ['primary', primaryAdapter],
+        ['secondary', secondaryAdapter],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'primary',
+    });
+
+    const loaded = await hall2.loadConcert(concertId);
+    expect(loaded).toBeDefined();
+    await loaded!.start();
+    expect(loaded!.status).toBe('completed');
+    expect(secondaryAdapter.prompts.length).toBeGreaterThanOrEqual(1);
+  });
 });

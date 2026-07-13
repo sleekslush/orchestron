@@ -21,6 +21,7 @@ export interface OrchestronOptions {
   scoresDirs?: string[];
   adapters?: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
+  defaultHarness?: string;
 }
 
 export interface Orchestron {
@@ -31,7 +32,7 @@ export interface Orchestron {
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
-  const { storePath, scoresDirs } = resolveOrchestronConfig(options, {
+  const { storePath, scoresDirs, defaultHarness } = resolveOrchestronConfig(options, {
     storePath: DEFAULT_STORE_PATH,
     scoresDirs: [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
   });
@@ -54,24 +55,32 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
 
   const adapterResolver = options.adapters ?? new Map<string, HarnessAdapter>();
 
-  const evaluator = options.evaluator ?? (() => {
-    if (adapterResolver instanceof Map && adapterResolver.size > 0) {
-      const first = adapterResolver.values().next().value;
-      if (!first) {
-        throw new Error('No adapters available to create a default HarnessEvaluator');
+  const evaluator = options.evaluator ?? (await (async () => {
+    if (adapterResolver instanceof Map) {
+      const target = defaultHarness;
+      const adapter = adapterResolver.get(target);
+      if (adapter) {
+        return new HarnessEvaluator({ adapter });
       }
-      return new HarnessEvaluator({ adapter: first });
+      const first = adapterResolver.values().next().value;
+      if (first) {
+        return new HarnessEvaluator({ adapter: first });
+      }
+      throw new Error(
+        `Default harness '${target}' not found in adapters and no fallback is available.`,
+      );
     }
-    throw new Error(
-      'createOrchestron requires an evaluator. Pass one via options.evaluator or provide adapters so a default HarnessEvaluator can be created.',
-    );
-  })();
+
+    const adapter = await adapterResolver.resolve(defaultHarness);
+    return new HarnessEvaluator({ adapter });
+  })());
 
   const hall = new ConcertHall({
     store,
     scoreRegistry: registry,
     adapters: adapterResolver,
     evaluator,
+    defaultHarness,
   });
 
   return { store, registry, hall, scoresDirs };

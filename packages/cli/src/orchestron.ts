@@ -15,6 +15,7 @@ export interface OrchestronOptions {
   scoresDirs?: string[];
   adapters?: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
+  defaultHarness?: string;
 }
 
 export interface Orchestron {
@@ -24,7 +25,7 @@ export interface Orchestron {
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
-  const { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId } = resolveOrchestronConfig(
+  const { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness } = resolveOrchestronConfig(
     options,
     {
       storePath: DEFAULT_STORE_PATH,
@@ -51,13 +52,33 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
   const opencodeAdapter = new OpencodeAdapter({ embedded: { port: 0 }, provider: opencodeProvider, modelId: opencodeModelId });
   if (adapterResolver instanceof LazyAdapterResolver) {
     adapterResolver.register('opencode', opencodeAdapter);
-    if (piProvider || piModelId) {
-      const { PiAdapter } = await import('@orchestron/adapter-pi');
-      adapterResolver.register('pi', new PiAdapter({ provider: piProvider, modelId: piModelId }));
-    }
+    const { PiAdapter } = await import('@orchestron/adapter-pi');
+    adapterResolver.register('pi', new PiAdapter({ provider: piProvider, modelId: piModelId }));
   }
 
-  const evaluator = options.evaluator ?? new HarnessEvaluator({ adapter: opencodeAdapter });
+  let evaluator = options.evaluator;
+  if (!evaluator) {
+    const effectiveDefaultHarness = defaultHarness;
+    let defaultAdapter: HarnessAdapter;
+    if (adapterResolver instanceof Map) {
+      const adapter = adapterResolver.get(effectiveDefaultHarness);
+      if (adapter) {
+        defaultAdapter = adapter;
+      } else {
+        const first = adapterResolver.values().next().value;
+        if (first) {
+          defaultAdapter = first;
+        } else {
+          throw new Error(
+            `Default harness '${effectiveDefaultHarness}' is not registered and no fallback is available.`,
+          );
+        }
+      }
+    } else {
+      defaultAdapter = await adapterResolver.resolve(effectiveDefaultHarness);
+    }
+    evaluator = new HarnessEvaluator({ adapter: defaultAdapter });
+  }
 
   const tracesDir = join(dirname(storePath), 'traces');
 
@@ -67,6 +88,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     adapters: adapterResolver,
     evaluator,
     tracesDir,
+    defaultHarness,
   });
 
   return { store, registry, hall };

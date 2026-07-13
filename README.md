@@ -90,6 +90,9 @@ path. Pass `--context.key=value` arguments to populate the concert's initial
 context. Use `--scores-dir <dir>` to add a custom directory (can be passed
 multiple times).
 
+Use `--harness <name>` to set the default harness for movements that don't
+specify one. This defaults to `pi`.
+
 ### Configuration
 
 Settings are resolved with this priority (highest to lowest):
@@ -103,6 +106,7 @@ Create `~/.orchestron/config.json` to set persistent defaults:
   "storePath": "~/.orchestron/store.db",
   "scoresDirs": ["~/.orchestron/scores"],
   "tracesDir": "~/.orchestron/traces",
+  "defaultHarness": "pi",
   "opencode": {
     "provider": "opencode",
     "modelId": "kimi-k2.5"
@@ -125,6 +129,7 @@ Paths starting with `~/` are expanded to your home directory.
 |---|---|---|
 | `ORCHESTRON_STORE_PATH` | SQLite store location | `~/.orchestron/store.db` |
 | `ORCHESTRON_SCORES_DIRS` | Comma-separated score directories | `./.orchestron/scores`, `~/.orchestron/scores` |
+| `ORCHESTRON_DEFAULT_HARNESS` | Default harness for movements | `pi` |
 | `ORCHESTRON_OPENCODE_PROVIDER` | Opencode model provider | `opencode` |
 | `ORCHESTRON_OPENCODE_MODEL_ID` | Opencode model ID | `kimi-k2.5` |
 | `ORCHESTRON_PI_PROVIDER` | Pi model provider | — |
@@ -132,6 +137,16 @@ Paths starting with `~/` are expanded to your home directory.
 
 Environment variables take precedence over the config file but are overridden
 by explicit CLI flags (`--store`, etc.).
+
+#### Harness resolution
+
+Each movement picks its harness using this priority chain:
+
+1. **`movement.harness`** in the score definition
+2. **Explicit harness passed to the command** (e.g. `startConcert({ harness: 'pi' })`)
+3. **Default harness configuration** (`--harness`, `ORCHESTRON_DEFAULT_HARNESS`, or `defaultHarness` in config)
+
+The same chain applies to the evaluator: `score.evaluator.harness` → explicit harness → default harness.
 
 ### Run a score programmatically
 

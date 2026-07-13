@@ -27,7 +27,7 @@ export function startConcertTool(getOrchestron: () => Promise<import('@orchestro
       const piOnUpdate = onUpdate
         ? (text: string) => onUpdate({ content: [{ type: 'text' as const, text }], details: {} })
         : undefined;
-      const result = await startConcert(orchestron, params, piOnUpdate);
+      const result = await startConcert(orchestron, { ...params, harness: 'pi' }, piOnUpdate);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         details: result,

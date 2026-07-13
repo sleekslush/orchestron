@@ -18,6 +18,7 @@ export interface ConcertHallOptions {
   adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
   tracesDir?: string;
+  defaultHarness?: string;
 }
 
 interface AdapterResolver {
@@ -32,6 +33,7 @@ export class ConcertHall implements ChildConcertFactory {
   private adapterResolver: AdapterResolver;
   private evaluator: Evaluator;
   private tracesDir?: string;
+  private defaultHarness?: string;
 
   constructor(options: ConcertHallOptions) {
     this.store = options.store;
@@ -42,6 +44,7 @@ export class ConcertHall implements ChildConcertFactory {
     }
     this.evaluator = options.evaluator;
     this.tracesDir = options.tracesDir;
+    this.defaultHarness = options.defaultHarness;
   }
 
   private createAdapterResolver(
@@ -67,18 +70,19 @@ export class ConcertHall implements ChildConcertFactory {
     };
   }
 
-  private async resolveEvaluator(score: Score): Promise<Evaluator> {
-    if (score.evaluator?.harness) {
-      const adapter = await this.adapterResolver.get(score.evaluator.harness);
+  private async resolveEvaluator(score: Score, explicitHarness?: string): Promise<Evaluator> {
+    const harness = score.evaluator?.harness ?? explicitHarness;
+    if (harness) {
+      const adapter = await this.adapterResolver.get(harness);
       if (!adapter) {
         throw new ConductorPanic(
-          `No adapter registered for evaluator harness '${score.evaluator.harness}' in score '${score.id}'`,
+          `No adapter registered for evaluator harness '${harness}' in score '${score.id}'`,
           'INTERNAL_ERROR',
         );
       }
       return new HarnessEvaluator({
         adapter,
-        promptTemplate: score.evaluator.prompt,
+        promptTemplate: score.evaluator?.prompt,
       });
     }
     return this.evaluator;
@@ -116,6 +120,7 @@ export class ConcertHall implements ChildConcertFactory {
       triggeredBy: options?.triggeredBy ?? 'cli',
       parentConcertId: options?.parentConcertId,
       childConcertIds: [],
+      explicitHarness: options?.harness,
     };
 
     const scoreYaml = yaml.dump(score);
@@ -127,8 +132,9 @@ export class ConcertHall implements ChildConcertFactory {
       this.store,
       this,
       this.adapterResolver,
-      await this.resolveEvaluator(score),
+      await this.resolveEvaluator(score, options?.harness),
       this.tracesDir,
+      this.defaultHarness,
     );
 
     this.conductors.set(concert.id, conductor);
@@ -164,8 +170,9 @@ export class ConcertHall implements ChildConcertFactory {
         this.store,
         this,
         this.adapterResolver,
-        await this.resolveEvaluator(score),
+        await this.resolveEvaluator(score, stored.explicitHarness),
         this.tracesDir,
+        this.defaultHarness,
       );
       this.conductors.set(id, conductor);
 
@@ -247,8 +254,9 @@ export class ConcertHall implements ChildConcertFactory {
           this.store,
           this,
           this.adapterResolver,
-          await this.resolveEvaluator(score),
+          await this.resolveEvaluator(score, concert.explicitHarness),
           this.tracesDir,
+          this.defaultHarness,
         );
         this.conductors.set(concert.id, conductor);
 
