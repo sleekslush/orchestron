@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid';
+import yaml from 'js-yaml';
 import type { Concert, ConcertID, ConcertFilter } from '../types/concert.js';
 import type { Score, ScoreID } from '../types/score.js';
 import type { HarnessAdapter, HarnessAdapterResolver } from '../types/adapter.js';
@@ -117,7 +118,8 @@ export class ConcertHall implements ChildConcertFactory {
       childConcertIds: [],
     };
 
-    await this.store.saveConcert(concert);
+    const scoreYaml = yaml.dump(score);
+    await this.store.saveConcert(concert, scoreYaml);
 
     const conductor = new Conductor(
       concert,
@@ -149,7 +151,13 @@ export class ConcertHall implements ChildConcertFactory {
     if (!stored) return undefined;
 
     try {
-      const score = this.scoreRegistry.get(stored.scoreId);
+      let score: Score;
+      const scoreYaml = await this.store.getConcertScoreYaml(id);
+      if (scoreYaml) {
+        score = yaml.load(scoreYaml) as Score;
+      } else {
+        score = this.scoreRegistry.get(stored.scoreId);
+      }
       const conductor = new Conductor(
         stored,
         score,
@@ -226,7 +234,13 @@ export class ConcertHall implements ChildConcertFactory {
 
     for (const concert of all) {
       try {
-        const score = this.scoreRegistry.get(concert.scoreId);
+        let score: Score;
+        const scoreYaml = await this.store.getConcertScoreYaml(concert.id);
+        if (scoreYaml) {
+          score = yaml.load(scoreYaml) as Score;
+        } else {
+          score = this.scoreRegistry.get(concert.scoreId);
+        }
         const conductor = new Conductor(
           concert,
           score,

@@ -1128,7 +1128,7 @@ describe('Conductor.recover()', () => {
       context: { shared: {} }, usage: {}, triggeredBy: 'cli',
       childConcertIds: [],
     };
-    await store.saveConcert(concert);
+    await store.saveConcert(concert, '');
 
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 10, tokens: 100 } },
@@ -1167,7 +1167,7 @@ describe('Conductor.recover()', () => {
       context: { shared: {} }, usage: {}, triggeredBy: 'cli',
       childConcertIds: [],
     };
-    await store.saveConcert(concert);
+    await store.saveConcert(concert, '');
 
     const adapter = new FakeHarnessAdapter({});
     const evaluator = new FakeEvaluator({ alwaysSucceed: true });

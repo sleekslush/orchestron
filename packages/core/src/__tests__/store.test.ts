@@ -28,9 +28,11 @@ describe('SqliteLoge', () => {
     ...overrides,
   });
 
+  const dummyScoreYaml = '';
+
   it('should save and retrieve a concert', async () => {
     const concert = makeConcert();
-    await store.saveConcert(concert);
+    await store.saveConcert(concert, dummyScoreYaml);
 
     const retrieved = await store.getConcert('test-concert-1');
     expect(retrieved).not.toBeNull();
@@ -41,7 +43,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should update a concert', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
     await store.updateConcert({ id: 'test-concert-1', status: 'running', usage: { spend: 100 } });
 
     const retrieved = await store.getConcert('test-concert-1');
@@ -50,9 +52,9 @@ describe('SqliteLoge', () => {
   });
 
   it('should list concerts with filters', async () => {
-    await store.saveConcert(makeConcert({ id: 'c1', status: 'running' }));
-    await store.saveConcert(makeConcert({ id: 'c2', status: 'completed' }));
-    await store.saveConcert(makeConcert({ id: 'c3', status: 'failed' }));
+    await store.saveConcert(makeConcert({ id: 'c1', status: 'running' }), dummyScoreYaml);
+    await store.saveConcert(makeConcert({ id: 'c2', status: 'completed' }), dummyScoreYaml);
+    await store.saveConcert(makeConcert({ id: 'c3', status: 'failed' }), dummyScoreYaml);
 
     const all = await store.listConcerts();
     expect(all).toHaveLength(3);
@@ -66,7 +68,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should append and retrieve movement history', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
 
     const movement = {
       movementId: 'plan',
@@ -89,7 +91,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should push and retrieve events', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
 
     await store.pushEvent({
       type: 'concert:started',
@@ -115,6 +117,7 @@ describe('SqliteLoge', () => {
     const now = Date.now();
     await store.saveConcert(
       makeConcert({ id: 'c1', status: 'running', startedAt: new Date(now - 5000) }),
+      dummyScoreYaml,
     );
     await store.saveConcert(
       makeConcert({
@@ -124,6 +127,7 @@ describe('SqliteLoge', () => {
         completedAt: new Date(now - 2000),
         usage: { spend: 100, tokens: 500 },
       }),
+      dummyScoreYaml,
     );
     await store.saveConcert(
       makeConcert({
@@ -133,6 +137,7 @@ describe('SqliteLoge', () => {
         completedAt: new Date(now - 5000),
         usage: { spend: 50, tokens: 200 },
       }),
+      dummyScoreYaml,
     );
 
     const agg = await store.getAggregates();
@@ -144,7 +149,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should delete a concert and its related data', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
     await store.pushEvent({ type: 'concert:started', concertId: 'test-concert-1', scoreId: 'test-score', timestamp: new Date() });
 
     await store.deleteConcert('test-concert-1');
@@ -156,7 +161,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should update an existing movement record', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
 
     const movement = {
       movementId: 'step_1',
@@ -192,7 +197,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should filter events by type', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
     await store.pushEvent({ type: 'concert:started', concertId: 'test-concert-1', scoreId: 'ts', timestamp: new Date() });
     await store.pushEvent({ type: 'movement:started', concertId: 'test-concert-1', movementId: 'm1', timestamp: new Date() });
     await store.pushEvent({ type: 'movement:completed', concertId: 'test-concert-1', movementId: 'm1', result: { movementId: 'm1' } as any, timestamp: new Date() });
@@ -204,7 +209,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should filter events since a timestamp', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
     const before = new Date(Date.now() - 1000);
     await store.pushEvent({ type: 'concert:started', concertId: 'test-concert-1', scoreId: 'ts', timestamp: before });
 
@@ -219,7 +224,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should limit events', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
     for (let i = 0; i < 5; i++) {
       await store.pushEvent({ type: 'concert:started', concertId: 'test-concert-1', scoreId: 'ts', timestamp: new Date() });
     }
@@ -229,9 +234,9 @@ describe('SqliteLoge', () => {
   });
 
   it('should list concerts filtered by scoreId', async () => {
-    await store.saveConcert(makeConcert({ id: 'c1', scoreId: 'score-a' }));
-    await store.saveConcert(makeConcert({ id: 'c2', scoreId: 'score-b' }));
-    await store.saveConcert(makeConcert({ id: 'c3', scoreId: 'score-a' }));
+    await store.saveConcert(makeConcert({ id: 'c1', scoreId: 'score-a' }), dummyScoreYaml);
+    await store.saveConcert(makeConcert({ id: 'c2', scoreId: 'score-b' }), dummyScoreYaml);
+    await store.saveConcert(makeConcert({ id: 'c3', scoreId: 'score-a' }), dummyScoreYaml);
 
     const filtered = await store.listConcerts({ scoreId: 'score-a' });
     expect(filtered).toHaveLength(2);
@@ -240,7 +245,7 @@ describe('SqliteLoge', () => {
 
   it('should list concerts with offset', async () => {
     for (let i = 0; i < 5; i++) {
-      await store.saveConcert(makeConcert({ id: `c${i}` }));
+      await store.saveConcert(makeConcert({ id: `c${i}` }), dummyScoreYaml);
     }
 
     const offset = await store.listConcerts({ offset: 2, limit: 10 });
@@ -248,7 +253,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should return empty history for a concert with no movements', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
     const history = await store.getMovementHistory('test-concert-1');
     expect(history).toEqual([]);
   });
@@ -259,7 +264,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should store and retrieve movement records with structured data and error', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
     const movement = {
       movementId: 'analyze',
       movementName: 'Analyze',
@@ -286,7 +291,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should update movement traceId', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
 
     const movement = {
       movementId: 'step_1',
@@ -312,7 +317,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should create and retrieve session traces', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
 
     const trace = {
       id: 't1',
@@ -339,7 +344,7 @@ describe('SqliteLoge', () => {
   });
 
   it('should update session trace fields', async () => {
-    await store.saveConcert(makeConcert());
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
 
     const trace = {
       id: 't1',

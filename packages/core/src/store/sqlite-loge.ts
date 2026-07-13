@@ -41,6 +41,7 @@ interface ConcertRow {
   parent_concert_id: string | null;
   child_concert_ids: string;
   nesting_depth: number | null;
+  score_yaml: string | null;
 }
 
 interface MovementRow {
@@ -101,6 +102,7 @@ export class SqliteLoge implements ConcertStore {
       CREATE TABLE IF NOT EXISTS concerts (
         id TEXT PRIMARY KEY,
         score_id TEXT NOT NULL,
+        score_yaml TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'pending',
         started_at TEXT NOT NULL,
         completed_at TEXT,
@@ -177,6 +179,12 @@ export class SqliteLoge implements ConcertStore {
     if (!columnInfo.some((col) => col.name === 'provider')) {
       this.db.exec(`ALTER TABLE movements ADD COLUMN provider TEXT`);
     }
+    const concertColumns = this.db
+      .prepare(`PRAGMA table_info(concerts)`)
+      .all() as Array<{ name: string }>;
+    if (!concertColumns.some((col) => col.name === 'score_yaml')) {
+      this.db.exec(`ALTER TABLE concerts ADD COLUMN score_yaml TEXT NOT NULL DEFAULT ''`);
+    }
     const sessionTraceColumns = this.db
       .prepare(`PRAGMA table_info(session_traces)`)
       .all() as Array<{ name: string }>;
@@ -188,16 +196,17 @@ export class SqliteLoge implements ConcertStore {
     }
   }
 
-  async saveConcert(concert: Concert): Promise<void> {
+  async saveConcert(concert: Concert, scoreYaml: string): Promise<void> {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO concerts
-        (id, score_id, status, started_at, completed_at, current_movement,
+        (id, score_id, score_yaml, status, started_at, completed_at, current_movement,
          context, usage, triggered_by, parent_concert_id, child_concert_ids, nesting_depth)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       concert.id,
       concert.scoreId,
+      scoreYaml,
       concert.status,
       serializeDate(concert.startedAt),
       serializeDate(concert.completedAt),
@@ -266,6 +275,14 @@ export class SqliteLoge implements ConcertStore {
     const history = await this.getMovementHistory(id);
 
     return rowToConcert(row, history);
+  }
+
+  async getConcertScoreYaml(id: ConcertID): Promise<string | null> {
+    const row = this.db.prepare('SELECT score_yaml FROM concerts WHERE id = ?').get(id) as
+      | { score_yaml: string }
+      | undefined;
+    if (!row || !row.score_yaml) return null;
+    return row.score_yaml;
   }
 
   async deleteConcert(id: ConcertID): Promise<void> {
