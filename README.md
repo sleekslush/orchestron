@@ -90,6 +90,47 @@ path. Pass `--context.key=value` arguments to populate the concert's initial
 context. Use `--scores-dir <dir>` to add a custom directory (can be passed
 multiple times).
 
+### Configuration
+
+Settings are resolved with this priority (highest to lowest):
+
+> **CLI flags** → **`ORCHESTRON_*` environment variables** → **`~/.orchestron/config.json`** → **code defaults**
+
+Create `~/.orchestron/config.json` to set persistent defaults:
+
+```json
+{
+  "storePath": "~/.orchestron/store.db",
+  "scoresDirs": ["~/.orchestron/scores"],
+  "tracesDir": "~/.orchestron/traces",
+  "opencode": {
+    "provider": "opencode",
+    "modelId": "kimi-k2.5"
+  },
+  "pi": {
+    "provider": "anthropic",
+    "modelId": "claude-sonnet-4-20250514"
+  },
+  "dashboard": {
+    "port": 3000
+  }
+}
+```
+
+Paths starting with `~/` are expanded to your home directory.
+
+#### Supported environment variables
+
+| Variable | Overrides | Default |
+|---|---|---|
+| `ORCHESTRON_STORE_PATH` | SQLite store location | `~/.orchestron/store.db` |
+| `ORCHESTRON_SCORES_DIRS` | Comma-separated score directories | `./.orchestron/scores`, `~/.orchestron/scores` |
+| `ORCHESTRON_OPENCODE_PROVIDER` | Opencode model provider | `opencode` |
+| `ORCHESTRON_OPENCODE_MODEL_ID` | Opencode model ID | `kimi-k2.5` |
+
+Environment variables take precedence over the config file but are overridden
+by explicit CLI flags (`--store`, etc.).
+
 ### Run a score programmatically
 
 ```typescript
