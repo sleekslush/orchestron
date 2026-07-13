@@ -127,6 +127,8 @@ Paths starting with `~/` are expanded to your home directory.
 | `ORCHESTRON_SCORES_DIRS` | Comma-separated score directories | `./.orchestron/scores`, `~/.orchestron/scores` |
 | `ORCHESTRON_OPENCODE_PROVIDER` | Opencode model provider | `opencode` |
 | `ORCHESTRON_OPENCODE_MODEL_ID` | Opencode model ID | `kimi-k2.5` |
+| `ORCHESTRON_PI_PROVIDER` | Pi model provider | — |
+| `ORCHESTRON_PI_MODEL_ID` | Pi model ID | — |
 
 Environment variables take precedence over the config file but are overridden
 by explicit CLI flags (`--store`, etc.).
