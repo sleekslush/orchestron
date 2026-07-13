@@ -42,7 +42,6 @@ const program = new Command()
     collect,
     [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
   )
-  .option('--harness <name>', 'Default harness adapter for the evaluator (e.g. pi, opencode)')
   .option('--json', 'Output JSON instead of human-readable text');
 
 program
@@ -170,13 +169,11 @@ program
 function getOrchestronOptions(program: Command): {
   storePath: string;
   scoresDirs: string[];
-  defaultHarness?: string;
 } {
   const opts = program.opts();
   return {
     storePath: opts.store,
     scoresDirs: opts.scoresDir,
-    defaultHarness: opts.harness,
   };
 }
 

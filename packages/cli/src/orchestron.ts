@@ -15,7 +15,6 @@ export interface OrchestronOptions {
   scoresDirs?: string[];
   adapters?: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
-  defaultHarness?: string;
 }
 
 export interface Orchestron {
@@ -25,7 +24,7 @@ export interface Orchestron {
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
-  const { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness } = resolveOrchestronConfig(
+  const { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId } = resolveOrchestronConfig(
     options,
     {
       storePath: DEFAULT_STORE_PATH,
@@ -58,24 +57,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     }
   }
 
-  let evaluator = options.evaluator;
-  if (!evaluator) {
-    const effectiveDefaultHarness = defaultHarness ?? 'opencode';
-    let defaultAdapter: HarnessAdapter;
-    if (adapterResolver instanceof Map) {
-      const adapter = adapterResolver.get(effectiveDefaultHarness);
-      if (!adapter) {
-        throw new Error(
-          `Default harness '${effectiveDefaultHarness}' is not registered. ` +
-          `Available: ${Array.from(adapterResolver.keys()).join(', ')}`,
-        );
-      }
-      defaultAdapter = adapter;
-    } else {
-      defaultAdapter = await adapterResolver.resolve(effectiveDefaultHarness);
-    }
-    evaluator = new HarnessEvaluator({ adapter: defaultAdapter });
-  }
+  const evaluator = options.evaluator ?? new HarnessEvaluator({ adapter: opencodeAdapter });
 
   const tracesDir = join(dirname(storePath), 'traces');
 
@@ -85,7 +67,6 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     adapters: adapterResolver,
     evaluator,
     tracesDir,
-    defaultHarness,
   });
 
   return { store, registry, hall };
