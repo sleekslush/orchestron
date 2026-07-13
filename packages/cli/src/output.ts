@@ -80,6 +80,8 @@ export function formatConcertHuman(
   }>,
   events: ConcertEvent[],
   verbose = false,
+  currentCommand?: string,
+  currentPrompt?: string,
 ): string {
   const lines: string[] = [];
   lines.push(`Concert: ${state.id}`);
@@ -87,6 +89,13 @@ export function formatConcertHuman(
   lines.push(`Status:  ${state.status}`);
   if (state.currentMovement) {
     lines.push(`Current: ${state.currentMovement}`);
+  }
+  if (currentCommand) {
+    lines.push(`Running: ${currentCommand}`);
+  }
+  if (currentPrompt) {
+    const preview = currentPrompt.length > 200 ? currentPrompt.slice(0, 200) + '...' : currentPrompt;
+    lines.push(`Prompt:  ${preview}`);
   }
   lines.push(`Started: ${formatDate(state.startedAt)}`);
   if (state.completedAt) {
