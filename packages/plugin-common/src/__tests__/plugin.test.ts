@@ -311,6 +311,41 @@ describe('plugin-common tool functions', () => {
     expect(result.tokens).toBe(500);
   });
 
+  it('creates a default evaluator from a HarnessAdapterResolver', async () => {
+    const score = linearScore();
+    const registry = new ScoreRegistry();
+    registry.register(score);
+    const store = new SqliteLoge(':memory:');
+    const resolver: import('@orchestron/core').HarnessAdapterResolver = {
+      resolve: async (name) => {
+        if (name !== 'fake') {
+          throw new Error(`Unknown harness: ${name}`);
+        }
+        return new FakeHarnessAdapter({
+          defaultResponse: {
+            output: 'output',
+            summary: 'summary',
+            usage: { spend: 10, tokens: 100 },
+            structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+          },
+        });
+      },
+    };
+    const orchestron = await createOrchestron({
+      storePath: ':memory:',
+      scoresDirs: [],
+      adapters: resolver,
+      defaultHarness: 'fake',
+    });
+    orchestron.registry.register(score);
+
+    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
+    const result = await waitForConcert(orchestron, { concertId });
+    expect(result.concertId).toBe(concertId);
+    expect(result.status).toBe('completed');
+    expect(result.movements).toHaveLength(2);
+  });
+
   it('returns current movement progress in status', async () => {
     const score: Score = {
       ...linearScore(),

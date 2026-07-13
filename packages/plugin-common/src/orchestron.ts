@@ -55,8 +55,8 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
 
   const adapterResolver = options.adapters ?? new Map<string, HarnessAdapter>();
 
-  const evaluator = options.evaluator ?? (() => {
-    if (adapterResolver instanceof Map && adapterResolver.size > 0) {
+  const evaluator = options.evaluator ?? (await (async () => {
+    if (adapterResolver instanceof Map) {
       const target = defaultHarness;
       if (target) {
         const adapter = adapterResolver.get(target);
@@ -73,10 +73,10 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
       }
       return new HarnessEvaluator({ adapter: first });
     }
-    throw new Error(
-      'createOrchestron requires an evaluator. Pass one via options.evaluator or provide adapters so a default HarnessEvaluator can be created.',
-    );
-  })();
+
+    const adapter = await adapterResolver.resolve(defaultHarness);
+    return new HarnessEvaluator({ adapter });
+  })());
 
   const hall = new ConcertHall({
     store,
