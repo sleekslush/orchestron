@@ -8,11 +8,13 @@ import type {
 import type { ConcertEvent, EventFilter, SystemAggregates, SessionTrace } from '../types/index.js';
 
 export interface ConcertStore {
-  saveConcert(concert: Concert): Promise<void>;
+  saveConcert(concert: Concert, scoreYaml: string): Promise<void>;
   updateConcert(concert: Partial<Concert> & { id: ConcertID }): Promise<void>;
   getConcert(id: ConcertID): Promise<Concert | null>;
   deleteConcert(id: ConcertID): Promise<void>;
   listConcerts(filter?: ConcertFilter): Promise<Concert[]>;
+
+  getConcertScoreYaml(id: ConcertID): Promise<string | null>;
 
   appendMovement(concertId: ConcertID, record: MovementRecord): Promise<void>;
   updateMovement(
