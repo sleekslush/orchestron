@@ -275,4 +275,119 @@ program: {}
     const score = registry.get('test-workflow');
     expect(score.name).toBe('Overwrite');
   });
+
+  it('should reject a dual prompt missing initial', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              description: 'First step',
+              harness: 'pi',
+              prompt: { initial: '', subsequent: 'subsequent' } as any,
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow('dual prompt');
+  });
+
+  it('should reject a dual prompt missing subsequent', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              description: 'First step',
+              harness: 'pi',
+              prompt: { initial: 'initial', subsequent: '' } as any,
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow('dual prompt');
+  });
+
+  it('should reject a dual prompt with non-string initial', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              description: 'First step',
+              harness: 'pi',
+              prompt: { initial: 123 as any, subsequent: 'subsequent' },
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow('dual prompt');
+  });
+
+  it('should reject a dual prompt with non-string subsequent', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              description: 'First step',
+              harness: 'pi',
+              prompt: { initial: 'initial', subsequent: 456 as any },
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow('dual prompt');
+  });
+
+  it('should accept a valid dual prompt', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              description: 'First step',
+              harness: 'pi',
+              prompt: { initial: 'first', subsequent: 'later' },
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).not.toThrow();
+  });
 });

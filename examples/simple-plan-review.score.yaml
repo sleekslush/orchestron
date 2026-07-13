@@ -15,14 +15,20 @@ movements:
     name: "Create Plan"
     section: planning
     harness: pi
-    prompt: >
-      Create a detailed implementation plan for:
-      {{context.task}}
-      
-      Include:
-      - Approach overview
-      - Key steps
-      - Estimated effort
+    prompt:
+      initial: >
+        Create a detailed implementation plan for:
+        {{context.task}}
+        
+        Include:
+        - Approach overview
+        - Key steps
+        - Estimated effort
+      subsequent: >
+        Revisit this plan in light of the latest context:
+        {{context.previousOutputs.review}}
+        
+        Produce an updated plan incorporating any new information.
     output:
       mode: structured
       schema:

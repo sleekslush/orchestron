@@ -31,6 +31,8 @@ export interface OutputConfig {
   schema?: Record<string, unknown>;
 }
 
+export type MovementPrompt = string | { initial: string; subsequent: string };
+
 export interface Movement {
   id: MovementID;
   name: string;
@@ -41,7 +43,7 @@ export interface Movement {
     scoreId: ScoreID;
     contextMapping: Record<string, string>;
   };
-  prompt?: string;
+  prompt?: MovementPrompt;
   output?: OutputConfig;
   goal: Goal;
   transitions: Transition[];

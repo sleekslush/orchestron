@@ -41,6 +41,7 @@ export class Conductor implements IConductor {
   private adapterResolver: { get(name: string): Promise<HarnessAdapter> };
   private loopPromise?: Promise<void>;
   private traceService?: TraceService;
+  private movementVisitCount = new Map<MovementID, number>();
 
   constructor(
     private concert: Concert,
@@ -214,6 +215,7 @@ export class Conductor implements IConductor {
     }
 
     const previousOutputs = this.buildPreviousOutputs();
+    this.seedMovementVisitCounts();
 
     this.loopPromise = this.runLoop(currentId, previousOutputs, movementCount, signal).catch(
       (err) => this.handleExecutionError(err),
@@ -258,6 +260,7 @@ export class Conductor implements IConductor {
       }
       const signal = this.abortController.signal;
       const previousOutputs = this.buildPreviousOutputs();
+      this.seedMovementVisitCounts();
       const currentId = this.concert.currentMovement ?? this.score.startMovement;
       this.loopPromise = this.runLoop(
         currentId,
@@ -302,6 +305,15 @@ export class Conductor implements IConductor {
     return previousOutputs;
   }
 
+  private seedMovementVisitCounts(): void {
+    for (const record of this.concert.history) {
+      this.movementVisitCount.set(
+        record.movementId,
+        (this.movementVisitCount.get(record.movementId) ?? 0) + 1,
+      );
+    }
+  }
+
   private async executeMovement(
     movement: Movement,
     previousOutputs: Map<MovementID, MovementRecord>,
@@ -338,6 +350,10 @@ export class Conductor implements IConductor {
 
       harnessAdapter = await this.resolveAdapter(movement);
       const prompt = this.buildPrompt(movement, previousOutputs);
+      this.movementVisitCount.set(
+        movement.id,
+        (this.movementVisitCount.get(movement.id) ?? 0) + 1,
+      );
       const persistSession = this.score.program.persistSession !== false;
       sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
 
@@ -354,10 +370,18 @@ export class Conductor implements IConductor {
         signal.addEventListener('abort', onParentAbort, { once: true });
       }
 
-      const timeoutMs =
-        movement.budget?.timeoutMs && movement.budget.timeoutMs > 0
-          ? movement.budget.timeoutMs
-          : DEFAULT_MOVEMENT_TIMEOUT_MS;
+      let timeoutMs: number | undefined;
+      if (movement.budget?.timeoutMs && movement.budget.timeoutMs > 0) {
+        timeoutMs = movement.budget.timeoutMs;
+      } else if (this.score.program.maxDurationMs && this.startedAt > 0) {
+        const remaining = this.score.program.maxDurationMs - (Date.now() - this.startedAt);
+        if (remaining > 0) {
+          timeoutMs = remaining;
+        }
+      }
+      if (!timeoutMs) {
+        timeoutMs = DEFAULT_MOVEMENT_TIMEOUT_MS;
+      }
       const timeoutHandle = setTimeout(() => {
         movementController.abort();
       }, timeoutMs);
@@ -565,15 +589,27 @@ export class Conductor implements IConductor {
     return adapter;
   }
 
+  private selectMovementPrompt(movement: Movement): string {
+    if (!movement.prompt) return '';
+
+    if (typeof movement.prompt === 'object') {
+      const visits = this.movementVisitCount.get(movement.id) ?? 0;
+      return visits === 0 ? movement.prompt.initial : movement.prompt.subsequent;
+    }
+
+    return movement.prompt;
+  }
+
   private buildPrompt(
     movement: Movement,
     previousOutputs: Map<MovementID, MovementRecord>,
   ): string {
-    if (!movement.prompt) return '';
+    const raw = this.selectMovementPrompt(movement);
+    if (!raw) return '';
 
     // Structured output formatting/parsing is an adapter concern per the session-persistence
     // decision; the adapter injects the schema instructions and parses the result.
-    return this.resolveTemplate(movement.prompt, movement.id, previousOutputs);
+    return this.resolveTemplate(raw, movement.id, previousOutputs);
   }
 
   private resolveTemplate(

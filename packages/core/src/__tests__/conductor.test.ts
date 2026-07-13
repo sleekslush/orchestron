@@ -8,6 +8,14 @@ import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
 import type { Score, MovementID } from '../types/score.js';
 import type { Concert, ConcertID } from '../types/concert.js';
 
+class CapturingFakeHarnessAdapter extends FakeHarnessAdapter {
+  prompts: { movementId?: string; prompt: string }[] = [];
+  async execute(prompt: string, context: any, options?: any) {
+    this.prompts.push({ movementId: options?.movementId, prompt });
+    return super.execute(prompt, context, options);
+  }
+}
+
 function linearScore(): Score {
   return {
     id: 'linear-test',
@@ -441,6 +449,263 @@ describe('Conductor movement progress', () => {
     expect(conductor.status).toBe('failed');
     const state = await conductor.getState();
     expect(state.history[0].error?.code).toBe('HARNESS_TIMEOUT');
+  });
+
+  it('falls back to program.maxDurationMs as movement timeout when no budget is set', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'max-duration-timeout', name: 'Max Duration Timeout', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: { maxDurationMs: 100 },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 500 },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('max-duration-timeout');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const state = await conductor.getState();
+    expect(state.history[0].error?.code).toBe('HARNESS_TIMEOUT');
+  });
+});
+
+// ─── Dual Prompt Tests ─────────────────────────────────────
+
+describe('Dual prompt selection', () => {
+  function dualPromptScore(): Score {
+    return {
+      id: 'dual-prompt',
+      name: 'Dual Prompt',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: { initial: 'initial-prompt', subsequent: 'subsequent-prompt' },
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'step_b', on: 'success' }],
+        },
+        {
+          id: 'step_b', name: 'B', section: 'x', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+  }
+
+  it('selects initial prompt on first visit', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(dualPromptScore());
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('dual-prompt');
+    await conductor.start();
+    const stepAPrompts = adapter.prompts.filter((p) => p.movementId === 'step_a');
+    expect(stepAPrompts).toHaveLength(1);
+    expect(stepAPrompts[0].prompt).toBe('initial-prompt');
+  });
+
+  it('selects subsequent prompt on revisit via loop', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'loop-dual',
+      name: 'Loop Dual',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: { initial: 'initial-a', subsequent: 'subsequent-a' },
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'step_b', on: 'success' }],
+        },
+        {
+          id: 'step_b', name: 'B', section: 'x', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'step_a', on: 'failure' }, { to: '__end__', on: 'success' }],
+        },
+      ],
+      program: { maxMovements: 5 },
+    });
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({
+        perMovement: {
+          step_a: { achieved: true, confidence: 1, summary: 'ok', evidence: '' },
+          step_b: { achieved: false, confidence: 0, summary: 'fail', evidence: '' },
+        },
+      }),
+    });
+    const conductor = await hall.createConcert('loop-dual');
+    await conductor.start();
+    const stepAPrompts = adapter.prompts.filter((p) => p.movementId === 'step_a');
+    expect(stepAPrompts).toHaveLength(3);
+    expect(stepAPrompts[0].prompt).toBe('initial-a');
+    expect(stepAPrompts[1].prompt).toBe('subsequent-a');
+    expect(stepAPrompts[2].prompt).toBe('subsequent-a');
+  });
+
+  it('selects subsequent prompt during retryOnFailure retries', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'retry-dual',
+      name: 'Retry Dual',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: { initial: 'initial-a', subsequent: 'subsequent-a' },
+          goal: { description: 'done', strategy: 'llm_judge' },
+          retryOnFailure: true,
+          budget: { maxRetries: 2 },
+          transitions: [{ to: '__end__', on: 'success' }, { to: '__fail__', on: 'failure' }],
+        },
+      ],
+      program: {},
+    });
+    const adapter = new (class extends CapturingFakeHarnessAdapter {
+      failCount = 0;
+      async execute(prompt: string, context: any, options?: any) {
+        if (options?.movementId === 'step_a' && this.failCount < 2) {
+          this.failCount++;
+          this.prompts.push({ movementId: options?.movementId, prompt });
+          throw new Error('Fake failure');
+        }
+        return super.execute(prompt, context, options);
+      }
+    })({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('retry-dual');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    const stepAPrompts = adapter.prompts.filter((p) => p.movementId === 'step_a');
+    expect(stepAPrompts).toHaveLength(3);
+    expect(stepAPrompts[0].prompt).toBe('initial-a');
+    expect(stepAPrompts[1].prompt).toBe('subsequent-a');
+    expect(stepAPrompts[2].prompt).toBe('subsequent-a');
+  });
+
+  it('seeds visit counts from history during recover', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'recover-dual',
+      name: 'Recover Dual',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: { initial: 'initial-a', subsequent: 'subsequent-a' },
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'step_b', on: 'success' }],
+        },
+        {
+          id: 'step_b', name: 'B', section: 'x', harness: 'fake',
+          prompt: { initial: 'initial-b', subsequent: 'subsequent-b' },
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }, { to: 'step_b', on: 'failure' }],
+        },
+      ],
+      program: {},
+    });
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('recover-dual');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+
+    // Simulate crash on step_b by resetting currentMovement and status
+    await store.updateConcert({ id: conductor.concertId, status: 'running', currentMovement: 'step_b' });
+
+    const recovered = await store.getConcert(conductor.concertId).then((stored) => {
+      return new Conductor(
+        stored!, registry.get('recover-dual'), store, hall,
+        new Map([['fake', adapter]]), new FakeEvaluator({ alwaysSucceed: true }),
+      );
+    });
+    await recovered.recover();
+    expect(recovered.status).toBe('completed');
+
+    const stepBPrompts = adapter.prompts.filter((p) => p.movementId === 'step_b');
+    expect(stepBPrompts).toHaveLength(2);
+    expect(stepBPrompts[0].prompt).toBe('initial-b');
+    expect(stepBPrompts[1].prompt).toBe('subsequent-b');
+  });
+
+  it('seeds visit counts from history during resume', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'resume-dual',
+      name: 'Resume Dual',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: { initial: 'initial-a', subsequent: 'subsequent-a' },
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    });
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 200 },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('resume-dual');
+    const startPromise = conductor.start();
+    await new Promise((r) => setTimeout(r, 50));
+    await conductor.pause();
+    expect(conductor.status).toBe('paused');
+
+    await conductor.resume();
+    await startPromise;
+    expect(conductor.status).toBe('completed');
+
+    const stepAPrompts = adapter.prompts.filter((p) => p.movementId === 'step_a');
+    expect(stepAPrompts).toHaveLength(1);
+    expect(stepAPrompts[0].prompt).toBe('initial-a');
   });
 });
 

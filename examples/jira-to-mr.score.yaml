@@ -57,15 +57,21 @@ movements:
     harness: pi
     budget:
       maxSpendDollars: 3
-    prompt: >
-      Implement the solution based on these requirements:
-      
-      Requirements: {{context.previousOutputs.clarify}}
-      
-      Produce:
-      - Working code
-      - Tests
-      - Documentation
+    prompt:
+      initial: >
+        Implement the solution based on these requirements:
+        
+        Requirements: {{context.previousOutputs.clarify}}
+        
+        Produce:
+        - Working code
+        - Tests
+        - Documentation
+      subsequent: >
+        Revisit this implementation given the latest review:
+        {{context.previousOutputs.review}}
+        
+        Produce an updated implementation.
     goal:
       description: "Working implementation with tests"
       strategy: llm_judge

@@ -90,6 +90,17 @@ export class ScoreRegistry {
     }
 
     for (const m of score.movements) {
+      if (m.prompt && typeof m.prompt === 'object') {
+        if (typeof m.prompt.initial !== 'string' || typeof m.prompt.subsequent !== 'string' || !m.prompt.initial || !m.prompt.subsequent) {
+          errors.push(
+            new ScoreValidationError(
+              `Score '${score.id}': movement '${m.id}' has a dual prompt but 'initial' and 'subsequent' must both be non-empty strings`,
+              'INVALID_SCORE',
+            ),
+          );
+        }
+      }
+
       if (movementIds.has(m.id) && m.id !== score.startMovement) {
         const hasIncoming = score.movements.some((other) =>
           other.transitions.some((t) => t.to === m.id),
