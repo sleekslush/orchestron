@@ -86,6 +86,9 @@ export class PiAdapter implements HarnessAdapter {
       let finalUsage: Usage | undefined;
       let model: string | undefined;
       let provider: string | undefined;
+      let cumulativeCost = 0;
+      let cumulativeInput = 0;
+      let cumulativeOutput = 0;
 
       const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
         if (event.type === 'message_update') {
@@ -112,6 +115,28 @@ export class PiAdapter implements HarnessAdapter {
             error: isError ? this.extractToolError(rawResult) : undefined,
           });
         }
+        if (event.type === 'turn_end') {
+          const msg = event.message;
+          if ('usage' in msg && msg.usage) {
+            const u = msg.usage as Usage;
+            cumulativeCost += u.cost?.total ?? 0;
+            cumulativeInput += u.input ?? 0;
+            cumulativeOutput += u.output ?? 0;
+            const hasUsage = cumulativeCost > 0 || cumulativeInput > 0;
+            options?.onProgress?.({
+              type: 'usage_update',
+              usage: {
+                spend: cumulativeCost
+                  ? Math.round(cumulativeCost * 1_000_000)
+                  : undefined,
+                tokens: cumulativeInput + cumulativeOutput,
+                inputTokens: cumulativeInput,
+                outputTokens: cumulativeOutput,
+              },
+            });
+          }
+        }
+
         if (event.type === 'agent_end') {
           for (const msg of event.messages) {
             if ('usage' in msg && msg.usage) {
@@ -163,7 +188,17 @@ export class PiAdapter implements HarnessAdapter {
         structured = this.tryParseStructured(output);
       }
 
-      const usage = this.toResourceUsage(finalUsage);
+      const hasCumulative = cumulativeInput > 0 || cumulativeOutput > 0;
+      const usage = hasCumulative
+        ? {
+            spend: cumulativeCost
+              ? Math.round(cumulativeCost * 1_000_000)
+              : undefined,
+            tokens: cumulativeInput + cumulativeOutput,
+            inputTokens: cumulativeInput,
+            outputTokens: cumulativeOutput,
+          }
+        : this.toResourceUsage(finalUsage);
       const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
 
       return { output, structured, summary, usage, model, provider };

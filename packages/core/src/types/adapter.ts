@@ -5,7 +5,8 @@ import type { SessionTraceEvent } from './session-trace.js';
 export type ProgressUpdate =
   | { type: 'tool_execution_start'; toolName: string; args?: Record<string, unknown> }
   | { type: 'tool_execution_end'; toolName: string; isError: boolean; result?: unknown; error?: string }
-  | { type: 'heartbeat'; elapsedMs: number; message: string };
+  | { type: 'heartbeat'; elapsedMs: number; message: string }
+  | { type: 'usage_update'; usage: ResourceUsage };
 
 export interface HarnessAdapter {
   readonly type: string;

@@ -402,6 +402,13 @@ export class Conductor implements IConductor {
       }, HEARTBEAT_INTERVAL_MS);
 
       const onProgress = (update: ProgressUpdate) => {
+        if (update.type === 'usage_update') {
+          this.store.updateConcert({
+            id: this.concert.id,
+            usage: update.usage,
+          }).catch(() => {});
+          return;
+        }
         const payload: Record<string, unknown> = { type: update.type };
         if (update.type === 'tool_execution_start') {
           payload.toolName = update.toolName;
