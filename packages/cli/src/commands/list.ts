@@ -37,16 +37,16 @@ function formatListHuman(
 
   const lines: string[] = [];
   lines.push(
-    `${'ID'.padEnd(14)} ${'Score'.padEnd(24)} ${'Status'.padEnd(12)} ${'Started'.padEnd(24)} Usage`,
+    `${'Concert ID'.padEnd(16)} ${'Score'.padEnd(24)} ${'Status'.padEnd(12)} ${'Started'.padEnd(24)} Usage`,
   );
   lines.push(''.padEnd(100, '-'));
 
   for (const c of concerts) {
-    const id = c.id.length > 13 ? `${c.id.slice(0, 10)}...` : c.id;
+    const id = c.id.length > 15 ? `${c.id.slice(0, 12)}...` : c.id;
     const score = c.scoreId.length > 23 ? `${c.scoreId.slice(0, 20)}...` : c.scoreId;
     const started = formatDate(c.startedAt);
     lines.push(
-      `${id.padEnd(14)} ${score.padEnd(24)} ${c.status.padEnd(12)} ${started.padEnd(24)} ${formatUsage(
+      `${id.padEnd(16)} ${score.padEnd(24)} ${c.status.padEnd(12)} ${started.padEnd(24)} ${formatUsage(
         c.usage,
       )}`,
     );

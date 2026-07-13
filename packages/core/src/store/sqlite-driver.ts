@@ -17,7 +17,6 @@ let ctor: DatabaseCtor;
 const isBun = typeof Bun !== 'undefined' && Bun.version != null;
 
 if (isBun) {
-  // @ts-expect-error - bun:sqlite is a Bun built-in, supplied by the runtime
   const { Database } = await import('bun:sqlite');
   ctor = Database as unknown as DatabaseCtor;
 } else {
