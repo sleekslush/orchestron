@@ -62,13 +62,18 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     let defaultAdapter: HarnessAdapter;
     if (adapterResolver instanceof Map) {
       const adapter = adapterResolver.get(effectiveDefaultHarness);
-      if (!adapter) {
-        throw new Error(
-          `Default harness '${effectiveDefaultHarness}' is not registered. ` +
-          `Available: ${Array.from(adapterResolver.keys()).join(', ')}`,
-        );
+      if (adapter) {
+        defaultAdapter = adapter;
+      } else {
+        const first = adapterResolver.values().next().value;
+        if (first) {
+          defaultAdapter = first;
+        } else {
+          throw new Error(
+            `Default harness '${effectiveDefaultHarness}' is not registered and no fallback is available.`,
+          );
+        }
       }
-      defaultAdapter = adapter;
     } else {
       defaultAdapter = await adapterResolver.resolve(effectiveDefaultHarness);
     }

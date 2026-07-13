@@ -58,20 +58,17 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
   const evaluator = options.evaluator ?? (await (async () => {
     if (adapterResolver instanceof Map) {
       const target = defaultHarness;
-      if (target) {
-        const adapter = adapterResolver.get(target);
-        if (adapter) {
-          return new HarnessEvaluator({ adapter });
-        }
-        throw new Error(
-          `Default harness '${target}' not found in adapters. Available: ${Array.from(adapterResolver.keys()).join(', ')}`,
-        );
+      const adapter = adapterResolver.get(target);
+      if (adapter) {
+        return new HarnessEvaluator({ adapter });
       }
       const first = adapterResolver.values().next().value;
-      if (!first) {
-        throw new Error('No adapters available to create a default HarnessEvaluator');
+      if (first) {
+        return new HarnessEvaluator({ adapter: first });
       }
-      return new HarnessEvaluator({ adapter: first });
+      throw new Error(
+        `Default harness '${target}' not found in adapters and no fallback is available.`,
+      );
     }
 
     const adapter = await adapterResolver.resolve(defaultHarness);

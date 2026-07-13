@@ -346,6 +346,38 @@ describe('plugin-common tool functions', () => {
     expect(result.movements).toHaveLength(2);
   });
 
+  it('falls back to first adapter when defaultHarness is missing from Map', async () => {
+    const score = linearScore();
+    const registry = new ScoreRegistry();
+    registry.register(score);
+    const store = new SqliteLoge(':memory:');
+    const orchestron = await createOrchestron({
+      storePath: ':memory:',
+      scoresDirs: [],
+      adapters: new Map([
+        [
+          'fake',
+          new FakeHarnessAdapter({
+            defaultResponse: {
+              output: 'output',
+              summary: 'summary',
+              usage: { spend: 10, tokens: 100 },
+              structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+            },
+          }),
+        ],
+      ]),
+      // No defaultHarness and no evaluator — should fall back to first adapter
+    });
+    orchestron.registry.register(score);
+
+    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
+    const result = await waitForConcert(orchestron, { concertId });
+    expect(result.concertId).toBe(concertId);
+    expect(result.status).toBe('completed');
+    expect(result.movements).toHaveLength(2);
+  });
+
   it('returns current movement progress in status', async () => {
     const score: Score = {
       ...linearScore(),
