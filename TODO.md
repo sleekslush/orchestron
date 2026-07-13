@@ -107,20 +107,24 @@
 - [x] Add `orchestron-score-authoring` skill to the Pi plugin package
 - [x] In-memory score drafts: validate and register without persisting, test via `orchestron_start_concert`, then persist when asked
 
-## Phase 7: Opencode Session Plugin
+## Phase 7: Opencode Session Plugin ✅
 
 **Goal**: Start and monitor concerts from within an opencode session using natural language.
 
-- [ ] Create `packages/plugin-opencode/`
-- [ ] Define orchestron tools for opencode:
+- [x] Create `packages/plugin-opencode/`
+- [x] Define orchestron tools for opencode:
   - `orchestron_start_concert(scoreId, context?)`
   - `orchestron_get_concert_status(concertId)`
   - `orchestron_list_concerts(filter?)`
   - `orchestron_pause_concert(concertId)`
   - `orchestron_cancel_concert(concertId)`
+  - `orchestron_wait_for_concert(concertId)`
   - `orchestron_list_scores()`
-- [ ] Tools return structured data (JSON) so opencode can summarize for the user
-- [ ] Reuse the same tool definitions and orchestron integration as the Pi plugin
+  - `orchestron_create_score(scoreId, yaml, persist?, saveLocation?)`
+  - `orchestron_edit_score(scoreId, yaml, persist?, saveLocation?)`
+  - `orchestron_get_score(scoreId)`
+- [x] Tools return structured data (JSON) so opencode can summarize for the user
+- [x] Reuse the same tool definitions and orchestron integration as the Pi plugin
 
 ## Phase 8: Dashboard
 

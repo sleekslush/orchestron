@@ -2,11 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createOrchestron, type Orchestron } from '../orchestron.js';
-import { createScore } from '../tools/create-score.js';
-import { editScore } from '../tools/edit-score.js';
-import { getScore } from '../tools/get-score.js';
-import { listScores } from '../tools/list-scores.js';
+import { FakeEvaluator } from '@orchestron/core';
+import { createOrchestron, type Orchestron } from '@orchestron/plugin-common';
+import { createScore } from '@orchestron/plugin-common';
+import { editScore } from '@orchestron/plugin-common';
+import { getScore } from '@orchestron/plugin-common';
+import { listScores } from '@orchestron/plugin-common';
 
 const validYaml = `id: test-score
 name: "Test Score"
@@ -41,6 +42,7 @@ async function createTestOrchestron(): Promise<{ orchestron: Orchestron; tempDir
   const orchestron = await createOrchestron({
     storePath: ':memory:',
     scoresDirs: [tempDir],
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     adapters: new Map(),
   });
   return { orchestron, tempDir };

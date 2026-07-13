@@ -280,8 +280,9 @@ packages/
   adapter-pi/        # Pi harness adapter
   adapter-opencode/  # Opencode harness adapter
   cli/               # orchestron CLI + basic web dashboard
+  plugin-common/     # Shared plugin logic (tools, orchestron bootstrap)
   plugin-pi/         # Pi session plugin
-  plugin-opencode/   # (future) Opencode session plugin
+  plugin-opencode/   # Opencode session plugin
 examples/            # Example scores
 ```
 
@@ -328,7 +329,7 @@ movement A cannot see movement B's conversation history. Set
 - [x] Opencode harness adapter
 - [x] CLI (`orchestron start`, `status`, `list`, `dashboard`, etc.)
 - [x] Basic dashboard (`orchestron dashboard`)
-- [ ] Opencode session plugin
+- [x] Opencode session plugin
 - [ ] Rich dashboard (web UI + WebSocket)
 - [ ] Claude harness adapter
 - [ ] More example scores

@@ -1,79 +1,9 @@
-import { existsSync, writeFileSync } from 'node:fs';
 import { Type } from 'typebox';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { Orchestron } from '../orchestron.js';
-import {
-  parseAndValidateScore,
-  sanitizeScoreId,
-  scoreFilePath,
-} from './_score-helpers.js';
+import { createScore } from '@orchestron/plugin-common';
 
-export interface CreateScoreInput {
-  scoreId: string;
-  yaml: string;
-  persist?: boolean;
-  saveLocation?: 'local' | 'global';
-}
-
-export async function createScore(
-  orchestron: Orchestron,
-  input: CreateScoreInput,
-): Promise<{
-  scoreId: string;
-  persisted: boolean;
-  path?: string;
-  valid: boolean;
-  errors: Array<{ code: string; message: string }>;
-}> {
-  const scoreId = sanitizeScoreId(input.scoreId);
-  const { score, errors } = parseAndValidateScore(orchestron.registry, input.yaml);
-
-  if (errors.length > 0) {
-    return { scoreId, persisted: false, valid: false, errors };
-  }
-
-  if (score.id !== scoreId) {
-    return {
-      scoreId,
-      persisted: false,
-      valid: false,
-      errors: [
-        {
-          code: 'INVALID_SCORE',
-          message: `YAML id '${score.id}' does not match requested score id '${scoreId}'`,
-        },
-      ],
-    };
-  }
-
-  const path = scoreFilePath(orchestron.scoresDirs, scoreId, input.saveLocation);
-
-  if (existsSync(path)) {
-    return {
-      scoreId,
-      persisted: false,
-      valid: true,
-      errors: [
-        {
-          code: 'INVALID_SCORE',
-          message: `Score '${scoreId}' already exists at ${path}. Use orchestron_edit_score to modify it.`,
-        },
-      ],
-    };
-  }
-
-  orchestron.registry.register(score);
-
-  if (input.persist) {
-    writeFileSync(path, input.yaml, 'utf-8');
-    return { scoreId, persisted: true, path, valid: true, errors: [] };
-  }
-
-  return { scoreId, persisted: false, valid: true, errors: [] };
-}
-
-export function createScoreTool(getOrchestron: () => Promise<Orchestron>) {
+export function createScoreTool(getOrchestron: () => Promise<import('@orchestron/plugin-common').Orchestron>) {
   return defineTool({
     name: 'orchestron_create_score',
     label: 'Create Orchestron Score',

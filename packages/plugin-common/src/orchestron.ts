@@ -31,13 +31,10 @@ export interface Orchestron {
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
-  const { storePath, scoresDirs, opencodeProvider, opencodeModelId } = resolveOrchestronConfig(
-    options,
-    {
-      storePath: DEFAULT_STORE_PATH,
-      scoresDirs: [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
-    },
-  );
+  const { storePath, scoresDirs } = resolveOrchestronConfig(options, {
+    storePath: DEFAULT_STORE_PATH,
+    scoresDirs: [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
+  });
 
   ensureDir(DEFAULT_CONFIG_DIR);
   for (const dir of scoresDirs) {
@@ -47,8 +44,6 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
   const { SqliteLoge, ScoreRegistry, ConcertHall, HarnessEvaluator } = await import(
     '@orchestron/core'
   );
-  const { PiAdapter } = await import('@orchestron/adapter-pi');
-  const { OpencodeAdapter } = await import('@orchestron/adapter-opencode');
 
   const store = new SqliteLoge(storePath);
   const registry = new ScoreRegistry();
@@ -57,15 +52,20 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     loadScoresFromDir(dir, registry);
   }
 
-  const adapterResolver = options.adapters ?? new LazyAdapterResolver();
-  const piAdapter = new PiAdapter();
-  const opencodeAdapter = new OpencodeAdapter({ embedded: { port: 0 }, provider: opencodeProvider, modelId: opencodeModelId });
-  if (adapterResolver instanceof LazyAdapterResolver) {
-    adapterResolver.register('pi', piAdapter);
-    adapterResolver.register('opencode', opencodeAdapter);
-  }
+  const adapterResolver = options.adapters ?? new Map<string, HarnessAdapter>();
 
-  const evaluator = options.evaluator ?? new HarnessEvaluator({ adapter: piAdapter });
+  const evaluator = options.evaluator ?? (() => {
+    if (adapterResolver instanceof Map && adapterResolver.size > 0) {
+      const first = adapterResolver.values().next().value;
+      if (!first) {
+        throw new Error('No adapters available to create a default HarnessEvaluator');
+      }
+      return new HarnessEvaluator({ adapter: first });
+    }
+    throw new Error(
+      'createOrchestron requires an evaluator. Pass one via options.evaluator or provide adapters so a default HarnessEvaluator can be created.',
+    );
+  })();
 
   const hall = new ConcertHall({
     store,
@@ -75,35 +75,6 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
   });
 
   return { store, registry, hall, scoresDirs };
-}
-
-class LazyAdapterResolver implements HarnessAdapterResolver {
-  private adapters = new Map<string, HarnessAdapter>();
-
-  register(name: string, adapter: HarnessAdapter): void {
-    this.adapters.set(name, adapter);
-  }
-
-  async resolve(name: string): Promise<HarnessAdapter> {
-    const cached = this.adapters.get(name);
-    if (cached) return cached;
-
-    let Adapter: new () => HarnessAdapter;
-    switch (name) {
-      case 'pi':
-        ({ PiAdapter: Adapter } = await import('@orchestron/adapter-pi'));
-        break;
-      case 'opencode':
-        ({ OpencodeAdapter: Adapter } = await import('@orchestron/adapter-opencode'));
-        break;
-      default:
-        throw new Error(`Unknown harness adapter: ${name}`);
-    }
-
-    const adapter = new Adapter();
-    this.adapters.set(name, adapter);
-    return adapter;
-  }
 }
 
 function ensureDir(dir: string): void {

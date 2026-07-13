@@ -1,26 +1,8 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { Orchestron } from '../orchestron.js';
+import { pauseConcert } from '@orchestron/plugin-common';
 
-export interface PauseConcertInput {
-  concertId: string;
-}
-
-export async function pauseConcert(
-  orchestron: Orchestron,
-  input: PauseConcertInput,
-): Promise<{ concertId: string; status: string }> {
-  const conductor = await orchestron.hall.loadConcert(input.concertId);
-  if (!conductor) {
-    throw new Error(`Concert '${input.concertId}' not found`);
-  }
-
-  await conductor.pause();
-  const state = await conductor.getState();
-  return { concertId: state.id, status: state.status };
-}
-
-export function pauseConcertTool(getOrchestron: () => Promise<Orchestron>) {
+export function pauseConcertTool(getOrchestron: () => Promise<import('@orchestron/plugin-common').Orchestron>) {
   return defineTool({
     name: 'orchestron_pause_concert',
     label: 'Pause Orchestron Concert',

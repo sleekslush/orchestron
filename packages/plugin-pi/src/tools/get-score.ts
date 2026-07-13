@@ -1,39 +1,8 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { Orchestron } from '../orchestron.js';
-import { findScoreFile, readScoreFile, sanitizeScoreId } from './_score-helpers.js';
+import { getScore } from '@orchestron/plugin-common';
 
-export interface GetScoreInput {
-  scoreId: string;
-}
-
-export async function getScore(
-  orchestron: Orchestron,
-  input: GetScoreInput,
-): Promise<{
-  scoreId: string;
-  yaml: string;
-  path?: string;
-  persisted: boolean;
-}> {
-  const scoreId = sanitizeScoreId(input.scoreId);
-  const path = findScoreFile(orchestron.scoresDirs, scoreId);
-
-  if (!path) {
-    // Score might exist only in memory.
-    try {
-      orchestron.registry.get(scoreId);
-      return { scoreId, yaml: '', path: undefined, persisted: false };
-    } catch {
-      throw new Error(`Score '${scoreId}' not found`);
-    }
-  }
-
-  const yaml = readScoreFile(path);
-  return { scoreId, yaml, path, persisted: true };
-}
-
-export function getScoreTool(getOrchestron: () => Promise<Orchestron>) {
+export function getScoreTool(getOrchestron: () => Promise<import('@orchestron/plugin-common').Orchestron>) {
   return defineTool({
     name: 'orchestron_get_score',
     label: 'Get Orchestron Score',

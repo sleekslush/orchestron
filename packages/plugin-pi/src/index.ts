@@ -1,5 +1,8 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { createOrchestron, type Orchestron, type OrchestronOptions } from './orchestron.js';
+import type { HarnessAdapter } from '@orchestron/core';
+import { createOrchestron, type Orchestron, type OrchestronOptions } from '@orchestron/plugin-common';
+import { PiAdapter } from '@orchestron/adapter-pi';
+import { OpencodeAdapter } from '@orchestron/adapter-opencode';
 import { startConcertTool } from './tools/start-concert.js';
 import { getConcertStatusTool } from './tools/get-status.js';
 import { listConcertsTool } from './tools/list-concerts.js';
@@ -21,7 +24,13 @@ export default function orchestronPlugin(
 
   function getOrchestron(): Promise<Orchestron> {
     if (!orchestronPromise) {
-      orchestronPromise = createOrchestron(config).catch((err) => {
+      orchestronPromise = createOrchestron({
+        ...config,
+        adapters: config.adapters ?? new Map<string, HarnessAdapter>([
+          ['pi', new PiAdapter()],
+          ['opencode', new OpencodeAdapter({ embedded: { port: 0 } })],
+        ]),
+      }).catch((err) => {
         orchestronPromise = undefined;
         throw err;
       });

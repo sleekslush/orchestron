@@ -1,28 +1,8 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { Orchestron } from '../orchestron.js';
+import { cancelConcert } from '@orchestron/plugin-common';
 
-export interface CancelConcertInput {
-  concertId: string;
-}
-
-export async function cancelConcert(
-  orchestron: Orchestron,
-  input: CancelConcertInput,
-): Promise<{ concertId: string; status: string }> {
-  const conductor = await orchestron.hall.loadConcert(input.concertId);
-  if (!conductor) {
-    throw new Error(`Concert '${input.concertId}' not found`);
-  }
-
-  await conductor.cancel();
-  // Cancel is async and may need a moment to finalize.
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  const state = await conductor.getState();
-  return { concertId: state.id, status: state.status };
-}
-
-export function cancelConcertTool(getOrchestron: () => Promise<Orchestron>) {
+export function cancelConcertTool(getOrchestron: () => Promise<import('@orchestron/plugin-common').Orchestron>) {
   return defineTool({
     name: 'orchestron_cancel_concert',
     label: 'Cancel Orchestron Concert',

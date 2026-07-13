@@ -1,34 +1,22 @@
 {
-  "name": "@orchestron/plugin-pi",
+  "name": "@orchestron/plugin-opencode",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "pi": {
-    "extensions": [
-      "./src/index.ts"
-    ],
-    "skills": [
-      "./skills"
-    ]
-  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.80.0",
-    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@opencode-ai/plugin": "^1.17.18",
     "@orchestron/adapter-opencode": "workspace:*",
     "@orchestron/adapter-pi": "workspace:*",
-    "@orchestron/core": "workspace:*",
-    "@orchestron/plugin-common": "workspace:*",
-    "js-yaml": "^4.1.0",
-    "typebox": "^1.1.38"
+    "@orchestron/plugin-common": "workspace:*"
   },
   "devDependencies": {
-    "@types/js-yaml": "^4.0.9",
+    "@orchestron/core": "workspace:*",
     "@types/node": "^20.17.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"

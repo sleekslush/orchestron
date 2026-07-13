@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3';
 import type {
   Concert,
   ConcertID,
@@ -10,6 +9,7 @@ import type {
 } from '../types/concert.js';
 import type { ConcertEvent, EventFilter, SystemAggregates, SessionTrace } from '../types/index.js';
 import type { ConcertStore } from './concert-store.js';
+import { createSqliteDb } from './sqlite-driver.js';
 
 function serializeDate(d: Date | undefined): string | null {
   return d ? d.toISOString() : null;
@@ -84,11 +84,11 @@ interface EventRow {
 }
 
 export class SqliteLoge implements ConcertStore {
-  private db: Database.Database;
+  private db: ReturnType<typeof createSqliteDb>;
 
   constructor(dbPath: string = ':memory:') {
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
+    this.db = createSqliteDb(dbPath);
+    this.db.exec('PRAGMA journal_mode = WAL');
     this.initSchema();
   }
 

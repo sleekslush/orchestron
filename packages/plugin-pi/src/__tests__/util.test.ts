@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toUsageView, type UsageView } from '../tools/util.js';
+import { toUsageView, type UsageView } from '@orchestron/plugin-common';
 
 describe('toUsageView', () => {
   it('converts spend from micro-dollars to dollars', () => {

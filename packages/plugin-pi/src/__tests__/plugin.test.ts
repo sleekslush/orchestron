@@ -9,14 +9,14 @@ import {
 import type { Score } from '@orchestron/core';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import orchestronPlugin from '../index.js';
-import { createOrchestron, type Orchestron } from '../orchestron.js';
-import { startConcert } from '../tools/start-concert.js';
-import { getConcertStatus } from '../tools/get-status.js';
-import { listConcerts } from '../tools/list-concerts.js';
-import { pauseConcert } from '../tools/pause-concert.js';
-import { cancelConcert } from '../tools/cancel-concert.js';
-import { listScores } from '../tools/list-scores.js';
-import { waitForConcert } from '../tools/wait-for-concert.js';
+import { createOrchestron, type Orchestron } from '@orchestron/plugin-common';
+import { startConcert } from '@orchestron/plugin-common';
+import { getConcertStatus } from '@orchestron/plugin-common';
+import { listConcerts } from '@orchestron/plugin-common';
+import { pauseConcert } from '@orchestron/plugin-common';
+import { cancelConcert } from '@orchestron/plugin-common';
+import { listScores } from '@orchestron/plugin-common';
+import { waitForConcert } from '@orchestron/plugin-common';
 
 function linearScore(): Score {
   return {
@@ -159,22 +159,10 @@ describe('Orchestron Pi plugin tools', () => {
     const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' }, onUpdate);
     expect(concertId).toBeDefined();
     expect(onUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.arrayContaining([
-          expect.objectContaining({
-            text: expect.stringContaining('Started concert'),
-          }),
-        ]),
-      }),
+      expect.stringContaining('Started concert'),
     );
     expect(onUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.arrayContaining([
-          expect.objectContaining({
-            text: expect.stringContaining('git_status'),
-          }),
-        ]),
-      }),
+      expect.stringContaining('git_status'),
     );
   });
 

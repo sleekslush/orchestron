@@ -1,0 +1,1 @@
+../../../packages/plugin-common/skills/orchestron-score-authoring/SKILL.md

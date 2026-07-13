@@ -1,53 +1,9 @@
 import { Type } from 'typebox';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { Orchestron } from '../orchestron.js';
-import { toUsageView, type UsageView } from './util.js';
+import { listConcerts } from '@orchestron/plugin-common';
 
-export interface ListConcertsInput {
-  status?:
-    | 'pending'
-    | 'running'
-    | 'paused'
-    | 'completed'
-    | 'failed'
-    | 'cancelled';
-  limit?: number;
-  offset?: number;
-}
-
-export async function listConcerts(
-  orchestron: Orchestron,
-  input: ListConcertsInput,
-): Promise<{
-  concerts: Array<{
-    concertId: string;
-    scoreId: string;
-    status: string;
-    startedAt: string;
-    completedAt?: string;
-    usage: UsageView;
-  }>;
-}> {
-  const concerts = await orchestron.store.listConcerts({
-    status: input.status,
-    limit: input.limit,
-    offset: input.offset,
-  });
-
-  return {
-    concerts: concerts.map((c) => ({
-      concertId: c.id,
-      scoreId: c.scoreId,
-      status: c.status,
-      startedAt: c.startedAt.toISOString(),
-      completedAt: c.completedAt?.toISOString(),
-      usage: toUsageView(c.usage),
-    })),
-  };
-}
-
-export function listConcertsTool(getOrchestron: () => Promise<Orchestron>) {
+export function listConcertsTool(getOrchestron: () => Promise<import('@orchestron/plugin-common').Orchestron>) {
   return defineTool({
     name: 'orchestron_list_concerts',
     label: 'List Orchestron Concerts',

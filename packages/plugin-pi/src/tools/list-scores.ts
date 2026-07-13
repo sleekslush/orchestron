@@ -1,34 +1,8 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { Orchestron } from '../orchestron.js';
-import { findScoreFile } from './_score-helpers.js';
+import { listScores } from '@orchestron/plugin-common';
 
-export async function listScores(
-  orchestron: Orchestron,
-): Promise<{
-  scores: Array<{
-    id: string;
-    name: string;
-    version: string;
-    description?: string;
-    movements: string[];
-    persisted: boolean;
-  }>;
-}> {
-  const scores = orchestron.registry.list();
-  return {
-    scores: scores.map((s) => ({
-      id: s.id,
-      name: s.name,
-      version: s.version,
-      description: s.description,
-      movements: s.movements.map((m) => m.id),
-      persisted: findScoreFile(orchestron.scoresDirs, s.id) !== undefined,
-    })),
-  };
-}
-
-export function listScoresTool(getOrchestron: () => Promise<Orchestron>) {
+export function listScoresTool(getOrchestron: () => Promise<import('@orchestron/plugin-common').Orchestron>) {
   return defineTool({
     name: 'orchestron_list_scores',
     label: 'List Orchestron Scores',
