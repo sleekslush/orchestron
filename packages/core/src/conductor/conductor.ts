@@ -347,6 +347,12 @@ export class Conductor implements IConductor {
         movement.id,
         (this.movementVisitCount.get(movement.id) ?? 0) + 1,
       );
+      const persistSession = this.score.program.persistSession !== false;
+      sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
+
+      if (sessionId) {
+        this.activeSessions.set(sessionId, harnessAdapter);
+      }
 
       await this.store.pushEvent({
         type: 'movement:started',
