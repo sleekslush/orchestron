@@ -33,6 +33,8 @@ export interface ResolvedOrchestronConfig {
   scoresDirs: string[];
   opencodeProvider: string;
   opencodeModelId: string;
+  piProvider?: string;
+  piModelId?: string;
 }
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
@@ -146,5 +148,13 @@ export function resolveOrchestronConfig(
     fileConfig.opencode?.modelId ??
     'kimi-k2.5';
 
-  return { storePath, scoresDirs, opencodeProvider, opencodeModelId };
+  const piProvider =
+    e.ORCHESTRON_PI_PROVIDER ??
+    fileConfig.pi?.provider;
+
+  const piModelId =
+    e.ORCHESTRON_PI_MODEL_ID ??
+    fileConfig.pi?.modelId;
+
+  return { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId };
 }
