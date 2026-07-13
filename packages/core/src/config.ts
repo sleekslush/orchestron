@@ -6,7 +6,6 @@ export interface OrchestronConfig {
   storePath?: string;
   scoresDirs?: string[];
   tracesDir?: string;
-  defaultHarness?: string;
   opencode?: {
     provider?: string;
     modelId?: string;
@@ -36,7 +35,6 @@ export interface ResolvedOrchestronConfig {
   opencodeModelId: string;
   piProvider?: string;
   piModelId?: string;
-  defaultHarness?: string;
 }
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
@@ -78,9 +76,6 @@ function normalizeConfig(raw: unknown): OrchestronConfig | undefined {
   }
   if (typeof input.tracesDir === 'string') {
     config.tracesDir = expandTilde(input.tracesDir);
-  }
-  if (typeof input.defaultHarness === 'string') {
-    config.defaultHarness = input.defaultHarness;
   }
   if (input.opencode && typeof input.opencode === 'object') {
     const oc = input.opencode as Record<string, unknown>;
@@ -161,9 +156,5 @@ export function resolveOrchestronConfig(
     e.ORCHESTRON_PI_MODEL_ID ??
     fileConfig.pi?.modelId;
 
-  const defaultHarness =
-    e.ORCHESTRON_DEFAULT_HARNESS ??
-    fileConfig.defaultHarness;
-
-  return { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness };
+  return { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId };
 }

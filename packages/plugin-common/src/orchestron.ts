@@ -21,7 +21,6 @@ export interface OrchestronOptions {
   scoresDirs?: string[];
   adapters?: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
-  defaultHarness?: string;
 }
 
 export interface Orchestron {
@@ -32,7 +31,7 @@ export interface Orchestron {
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
-  const { storePath, scoresDirs, defaultHarness } = resolveOrchestronConfig(options, {
+  const { storePath, scoresDirs } = resolveOrchestronConfig(options, {
     storePath: DEFAULT_STORE_PATH,
     scoresDirs: [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
   });
@@ -57,16 +56,6 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
 
   const evaluator = options.evaluator ?? (() => {
     if (adapterResolver instanceof Map && adapterResolver.size > 0) {
-      const target = defaultHarness;
-      if (target) {
-        const adapter = adapterResolver.get(target);
-        if (adapter) {
-          return new HarnessEvaluator({ adapter });
-        }
-        throw new Error(
-          `Default harness '${target}' not found in adapters. Available: ${Array.from(adapterResolver.keys()).join(', ')}`,
-        );
-      }
       const first = adapterResolver.values().next().value;
       if (!first) {
         throw new Error('No adapters available to create a default HarnessEvaluator');
@@ -83,7 +72,6 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     scoreRegistry: registry,
     adapters: adapterResolver,
     evaluator,
-    defaultHarness,
   });
 
   return { store, registry, hall, scoresDirs };

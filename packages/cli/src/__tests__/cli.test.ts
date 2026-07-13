@@ -86,7 +86,6 @@ async function createTestOrchestron(dir: string) {
     scoresDirs: [scoresDir],
     adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-    defaultHarness: 'fake',
   });
 }
 
@@ -287,7 +286,6 @@ describe('CLI commands', () => {
       scoresDirs: [scoresDir],
       adapters: new Map([['fake', pausableAdapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-      defaultHarness: 'fake',
     });
 
     const conductor = await testOrchestron.hall.createConcert('pause-test', {
