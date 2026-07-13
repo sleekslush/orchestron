@@ -17,6 +17,8 @@ The plugin registers these Pi tools:
   status.
 - `orchestron_pause_concert(concertId)` — Pause a running concert.
 - `orchestron_cancel_concert(concertId)` — Cancel a running or paused concert.
+- `orchestron_wait_for_concert(concertId)` — Block until a concert reaches a
+  terminal state. Streams progress updates in real time.
 
 ### Scores
 

@@ -571,7 +571,6 @@ orchestron/
 │   │   └── package.json
 │   │
 │   ├── adapter-claude/         # (future) Claude harness adapter
-│   │   └── package.json
 │   │
 │   ├── cli/                    # orchestron CLI
 │   │   ├── src/
@@ -585,20 +584,7 @@ orchestron/
 │   │   │   └── index.ts
 │   │   └── package.json
 │   │
-│   ├── dashboard/              # Local web server + React frontend
-│   │   ├── src/
-│   │   │   ├── server/
-│   │   │   │   └── dashboard-server.ts
-│   │   │   └── ui/
-│   │   │       ├── views/
-│   │   │       │   ├── Foyer.tsx
-│   │   │       │   ├── ConcertDetail.tsx
-│   │   │       │   ├── MovementInspector.tsx
-│   │   │       │   ├── ConcertTree.tsx
-│   │   │       │   ├── ScoreLibrary.tsx
-│   │   │       │   └── LiveView.tsx
-│   │   │       └── App.tsx
-│   │   └── package.json
+│   ├── dashboard/              # (future) Web + React frontend
 │   │
 │   └── plugin-pi/              # Pi session plugin
 │       ├── src/
@@ -614,8 +600,8 @@ orchestron/
 │
 ├── examples/
 │   ├── jira-to-mr.score.yaml
-│   ├── notion-clarify.score.yaml
-│   └── plan-to-markdown.score.yaml
+│   ├── opencode-demo.score.yaml
+│   └── simple-plan-review.score.yaml
 │
 ├── package.json                # Monorepo root (pnpm workspaces)
 ├── tsconfig.json
@@ -658,8 +644,10 @@ movements:
       description: "Ticket has clear, actionable requirements"
       strategy: llm_judge
     transitions:
-      - on: success -> implement
-      - on: failure -> __fail__
+      - to: implement
+        on: success
+      - to: __fail__
+        on: failure
 
   - id: implement
     name: "Implement Code"
@@ -679,8 +667,10 @@ movements:
     budget:
       maxSpendDollars: 3 # dollars
     transitions:
-      - on: success -> review
-      - on: failure -> __fail__
+      - to: review
+        on: success
+      - to: __fail__
+        on: failure
 
   - id: review
     name: "Code Review"
@@ -691,8 +681,10 @@ movements:
       description: "All issues identified and addressed"
       strategy: llm_judge
     transitions:
-      - on: success -> create_mr
-      - on: failure -> implement
+      - to: create_mr
+        on: success
+      - to: implement
+        on: failure
 
   - id: create_mr
     name: "Create Merge Request"
@@ -703,8 +695,10 @@ movements:
       description: "MR created with description and changelog"
       strategy: llm_judge
     transitions:
-      - on: success -> update_jira
-      - on: failure -> __fail__
+      - to: update_jira
+        on: success
+      - to: __fail__
+        on: failure
 
   - id: update_jira
     name: "Update Jira Ticket"
@@ -715,5 +709,6 @@ movements:
       description: "Ticket updated with MR reference"
       strategy: llm_judge
     transitions:
-      - on: success -> __end__
+      - to: __end__
+        on: success
 ```
