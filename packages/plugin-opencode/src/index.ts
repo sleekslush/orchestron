@@ -26,6 +26,7 @@ async function getOrchestron() {
         ["pi", new PiAdapter()],
         ["opencode", new OpencodeAdapter({ embedded: { port: 0 } })],
       ]),
+      defaultHarness: 'opencode',
     });
   }
   return orchestronPromise;
