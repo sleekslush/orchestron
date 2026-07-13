@@ -15,6 +15,7 @@ export interface OrchestronOptions {
   scoresDirs?: string[];
   adapters?: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
+  defaultHarness?: string;
 }
 
 export interface Orchestron {
@@ -84,6 +85,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     adapters: adapterResolver,
     evaluator,
     tracesDir,
+    defaultHarness,
   });
 
   return { store, registry, hall };

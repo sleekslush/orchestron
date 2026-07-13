@@ -18,6 +18,7 @@ export interface ConcertHallOptions {
   adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
   tracesDir?: string;
+  defaultHarness?: string;
 }
 
 interface AdapterResolver {
@@ -32,6 +33,7 @@ export class ConcertHall implements ChildConcertFactory {
   private adapterResolver: AdapterResolver;
   private evaluator: Evaluator;
   private tracesDir?: string;
+  private defaultHarness?: string;
 
   constructor(options: ConcertHallOptions) {
     this.store = options.store;
@@ -42,6 +44,7 @@ export class ConcertHall implements ChildConcertFactory {
     }
     this.evaluator = options.evaluator;
     this.tracesDir = options.tracesDir;
+    this.defaultHarness = options.defaultHarness;
   }
 
   private createAdapterResolver(
@@ -129,6 +132,7 @@ export class ConcertHall implements ChildConcertFactory {
       this.adapterResolver,
       await this.resolveEvaluator(score),
       this.tracesDir,
+      this.defaultHarness,
     );
 
     this.conductors.set(concert.id, conductor);
@@ -166,6 +170,7 @@ export class ConcertHall implements ChildConcertFactory {
         this.adapterResolver,
         await this.resolveEvaluator(score),
         this.tracesDir,
+        this.defaultHarness,
       );
       this.conductors.set(id, conductor);
 
@@ -249,6 +254,7 @@ export class ConcertHall implements ChildConcertFactory {
           this.adapterResolver,
           await this.resolveEvaluator(score),
           this.tracesDir,
+          this.defaultHarness,
         );
         this.conductors.set(concert.id, conductor);
 

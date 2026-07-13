@@ -83,6 +83,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     scoreRegistry: registry,
     adapters: adapterResolver,
     evaluator,
+    defaultHarness,
   });
 
   return { store, registry, hall, scoresDirs };
