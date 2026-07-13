@@ -11,7 +11,6 @@ import type { ChildConcertFactory } from '../conductor/child-concert-factory.js'
 import type { StartOptions } from '../conductor/start-options.js';
 import { HarnessEvaluator, type Evaluator } from '../evaluator/index.js';
 import { ConductorPanic } from '../types/errors.js';
-import { ScoreValidationError } from '../types/errors.js';
 
 export interface ConcertHallOptions {
   store: ConcertStore;
