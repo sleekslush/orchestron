@@ -147,13 +147,35 @@ describe('CLI commands', () => {
     console.log = (msg: string) => logs.push(msg);
 
     try {
-      await statusCommandHandler(orchestron, concertId, false);
+      await statusCommandHandler(orchestron, concertId, false, false);
     } finally {
       console.log = originalLog;
       orchestron.store.close();
     }
 
     expect(logs.some((l) => l.includes(`Concert: ${concertId}`))).toBe(true);
+  });
+
+  it('shows detailed movement information with --verbose', async () => {
+    const orchestron = await createTestOrchestron(dir);
+    await startCommandHandler(orchestron, 'cli-test', { task: 'hello' }, false);
+
+    const concerts = await orchestron.store.listConcerts();
+    const concertId = concerts[0].id;
+
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (msg: string) => logs.push(msg);
+
+    try {
+      await statusCommandHandler(orchestron, concertId, false, true);
+    } finally {
+      console.log = originalLog;
+      orchestron.store.close();
+    }
+
+    expect(logs.some((l) => l.includes(`Concert: ${concertId}`))).toBe(true);
+    expect(logs.some((l) => l.includes('Goal:'))).toBe(true);
   });
 
   it('shows system status when no concert id is given', async () => {
@@ -165,7 +187,7 @@ describe('CLI commands', () => {
     console.log = (msg: string) => logs.push(msg);
 
     try {
-      await statusCommandHandler(orchestron, undefined, false);
+      await statusCommandHandler(orchestron, undefined, false, false);
     } finally {
       console.log = originalLog;
       orchestron.store.close();

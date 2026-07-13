@@ -1,5 +1,33 @@
 import type { Orchestron } from '../orchestron.js';
-import { printOutput, formatDate, formatDuration, formatUsage } from '../output.js';
+import { printOutput, formatConcertHuman, extractFailure } from '../output.js';
+
+async function pollAndPrintProgress(
+  orchestron: Orchestron,
+  concertId: string,
+  lastCount: number,
+): Promise<number> {
+  const events = await orchestron.store.getEvents(concertId);
+  for (let i = lastCount; i < events.length; i++) {
+    const e = events[i];
+    switch (e.type) {
+      case 'movement:started':
+        console.error(`→ [${e.movementId}] Running...`);
+        break;
+      case 'movement:completed':
+        console.error(`✓ [${e.movementId}] Completed`);
+        break;
+      case 'movement:failed':
+        console.error(`✗ [${e.movementId}] Failed: ${e.error?.message ?? 'Unknown error'}`);
+        break;
+      case 'movement:progress':
+        if (e.progressType === 'tool_execution_start' && typeof e.payload?.toolName === 'string') {
+          console.error(`  ↳ ${e.payload.toolName}...`);
+        }
+        break;
+    }
+  }
+  return events.length;
+}
 
 export async function startCommandHandler(
   orchestron: Orchestron,
@@ -12,9 +40,49 @@ export async function startCommandHandler(
     triggeredBy: 'cli',
   });
 
-  await conductor.start();
+  let lastEventCount = 0;
+  let polling = false;
+  let pollingDone = false;
+  let activePoll: Promise<void> | undefined;
+  const pollInterval = 1000;
+  const scheduleNextPoll = () => {
+    if (pollingDone) return;
+    setTimeout(() => {
+      if (pollingDone || polling) return;
+      polling = true;
+      activePoll = (async () => {
+        try {
+          lastEventCount = await pollAndPrintProgress(orchestron, conductor.concertId, lastEventCount);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`Progress poll failed: ${message}`);
+        } finally {
+          polling = false;
+          if (!pollingDone) {
+            scheduleNextPoll();
+          }
+          activePoll = undefined;
+        }
+      })();
+    }, pollInterval);
+  };
+  scheduleNextPoll();
+
+  try {
+    await conductor.start();
+  } finally {
+    pollingDone = true;
+    const pending = activePoll;
+    if (pending) {
+      await pending;
+    }
+  }
 
   const state = await conductor.getState();
+  const history = await orchestron.store.getMovementHistory(conductor.concertId);
+  const events = await orchestron.store.getEvents(conductor.concertId);
+
+  const failure = extractFailure(events);
 
   const output = {
     concertId: state.id,
@@ -22,55 +90,22 @@ export async function startCommandHandler(
     status: state.status,
     startedAt: state.startedAt.toISOString(),
     completedAt: state.completedAt?.toISOString(),
-    movements: state.history.map((h) => ({
+    currentMovement: state.currentMovement,
+    usage: state.usage,
+    failure,
+    movements: history.map((h) => ({
       movementId: h.movementId,
       movementName: h.movementName,
       status: h.status,
       summary: h.summary,
       durationMs: h.durationMs,
+      goalAchieved: h.goalEvaluation.achieved,
+      goalSummary: h.goalEvaluation.summary,
+      error: h.error,
+      model: h.model,
+      provider: h.provider,
     })),
-    usage: state.usage,
   };
 
-  printOutput(json, output, () => formatStartHuman(state));
-}
-
-function formatStartHuman(state: {
-  id: string;
-  scoreId: string;
-  status: string;
-  startedAt: Date;
-  completedAt?: Date;
-  history: Array<{
-    movementId: string;
-    movementName: string;
-    status: string;
-    summary: string;
-    durationMs: number;
-  }>;
-  usage: { spend?: number; tokens?: number };
-}): string {
-  const lines: string[] = [];
-  lines.push(`Concert: ${state.id}`);
-  lines.push(`Score:   ${state.scoreId}`);
-  lines.push(`Status:  ${state.status}`);
-  lines.push(`Started: ${formatDate(state.startedAt)}`);
-  if (state.completedAt) {
-    lines.push(`Ended:   ${formatDate(state.completedAt)}`);
-  }
-  lines.push('');
-  lines.push('Movements:');
-  for (const h of state.history) {
-    lines.push(
-      `  [${h.status.toUpperCase()}] ${h.movementName} (${h.movementId}) — ${formatDuration(
-        h.durationMs,
-      )}`,
-    );
-    if (h.summary) {
-      lines.push(`    ${h.summary}`);
-    }
-  }
-  lines.push('');
-  lines.push(`Usage: ${formatUsage(state.usage)}`);
-  return lines.join('\n');
+  printOutput(json, output, () => formatConcertHuman(state, history, events, true));
 }

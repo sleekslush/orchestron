@@ -98,10 +98,13 @@ program
 program
   .command('status [concert-id]')
   .description('Show system status or detailed concert status')
+  .option('--verbose', 'Show detailed movement information')
   .action(safeAction(async (concertId: string | undefined, _options: unknown, command: Command) => {
+    const opts = command.optsWithGlobals();
+    const verbose = opts.verbose === true;
     const orchestron = await createOrchestron(getOrchestronOptions(program));
     try {
-      await statusCommandHandler(orchestron, concertId, wantsJson(command));
+      await statusCommandHandler(orchestron, concertId, wantsJson(command), verbose);
     } finally {
       orchestron.store.close();
     }
