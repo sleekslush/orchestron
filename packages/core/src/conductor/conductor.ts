@@ -435,6 +435,8 @@ export class Conductor implements IConductor {
           output: movement.output,
           movementId: movement.id,
           sessionId,
+          model: movement.model,
+          provider: movement.provider,
           onProgress,
         });
 

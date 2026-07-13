@@ -69,6 +69,8 @@ export class OpencodeAdapter implements HarnessAdapter {
       output?: OutputConfig;
       movementId?: string;
       sessionId?: string;
+      model?: string;
+      provider?: string;
       onProgress?: (update: import('@orchestron/core').ProgressUpdate) => void;
     },
   ): Promise<HarnessResponse> {
@@ -80,6 +82,10 @@ export class OpencodeAdapter implements HarnessAdapter {
         'HARNESS_FAILURE',
       );
     }
+
+    // Use model/provider from options (per-movement) if provided, otherwise fall back to config
+    const provider = options?.provider ?? this.provider;
+    const modelId = options?.model ?? this.modelId;
 
     let sessionData: OpencodeSessionData | undefined;
     let ownSession = false;
@@ -115,8 +121,8 @@ export class OpencodeAdapter implements HarnessAdapter {
         parts: [{ type: 'text', text: prompt }],
       };
 
-      if (this.provider && this.modelId) {
-        parameters.model = { providerID: this.provider, modelID: this.modelId };
+      if (provider && modelId) {
+        parameters.model = { providerID: provider, modelID: modelId };
       }
 
       if (options?.output?.mode === 'structured' && options.output.schema) {

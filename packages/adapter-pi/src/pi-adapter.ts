@@ -54,6 +54,8 @@ export class PiAdapter implements HarnessAdapter {
       output?: OutputConfig;
       movementId?: string;
       sessionId?: string;
+      model?: string;
+      provider?: string;
       onProgress?: (update: import('@orchestron/core').ProgressUpdate) => void;
     },
   ): Promise<HarnessResponse> {
@@ -66,7 +68,11 @@ export class PiAdapter implements HarnessAdapter {
         `Return only the JSON object, optionally wrapped in a markdown code block.`;
     }
 
-    await this.resolveModel();
+    // Use model/provider from options (per-movement) if provided, otherwise fall back to config
+    const modelId = options?.model ?? this.modelId;
+    const provider = options?.provider ?? this.provider;
+
+    await this.resolveModel(provider, modelId);
 
     let session: AgentSession | undefined;
     let abortListener: (() => void) | undefined;
@@ -292,16 +298,18 @@ export class PiAdapter implements HarnessAdapter {
     await Promise.all(ids.map((id) => this.disposeSession(id).catch(() => {})));
   }
 
-  private async resolveModel(): Promise<void> {
+  private async resolveModel(provider?: string, modelId?: string): Promise<void> {
+    const targetProvider = provider ?? this.provider;
+    const targetModelId = modelId ?? this.modelId;
     if (this.model) return;
-    if (!this.provider || !this.modelId) return;
+    if (!targetProvider || !targetModelId) return;
 
     try {
       const registry = ModelRegistry.inMemory(AuthStorage.create());
-      const resolved = registry.find(this.provider, this.modelId);
+      const resolved = registry.find(targetProvider, targetModelId);
       if (!resolved) {
         throw new HarnessError(
-          `Unknown Pi model '${this.modelId}' for provider '${this.provider}'`,
+          `Unknown Pi model '${targetModelId}' for provider '${targetProvider}'`,
           'HARNESS_FAILURE',
         );
       }

@@ -49,6 +49,8 @@ export interface Movement {
   transitions: Transition[];
   budget?: MovementBudget;
   retryOnFailure?: boolean;
+  model?: string;
+  provider?: string;
 }
 
 export interface MovementBudget {
