@@ -170,7 +170,7 @@ program
 function getOrchestronOptions(program: Command): {
   storePath: string;
   scoresDirs: string[];
-  defaultHarness: string;
+  defaultHarness: string | undefined;
 } {
   const opts = program.opts();
   return {

@@ -358,7 +358,6 @@ describe('CLI commands', () => {
           structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
         },
       })]]),
-      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
       defaultHarness: 'fake',
     });
 
