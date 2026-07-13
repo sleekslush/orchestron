@@ -1,6 +1,7 @@
 import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { OutputConfig } from '@orchestron/core';
+import type { SessionTraceEvent } from '@orchestron/core';
 import { HarnessError } from '@orchestron/core';
 import {
   createOpencode,
@@ -189,6 +190,88 @@ export class OpencodeAdapter implements HarnessAdapter {
       .delete({ sessionID: data.opencodeSessionId })
       .catch(() => {});
     this.sessions.delete(sessionId);
+  }
+
+  async getSessionTraceEvents(sessionId: string, _offset?: number): Promise<SessionTraceEvent[]> {
+    const data = this.sessions.get(sessionId);
+    if (!data || !this.client) return [];
+
+    try {
+      const result = await this.client.session.messages({
+        sessionID: data.opencodeSessionId,
+      });
+
+      const allMessages = result.data ?? [];
+      const events: SessionTraceEvent[] = [];
+
+      for (const msg of allMessages) {
+        const ts = new Date(msg.info?.time?.created ?? Date.now()).toISOString();
+        const parts = Array.isArray(msg.parts) ? msg.parts : [];
+
+        if (msg.info?.role === 'user') {
+          const textParts = parts.filter(
+            (p: unknown) =>
+              p &&
+              typeof p === 'object' &&
+              (p as { type?: string }).type === 'text' &&
+              typeof (p as { text?: string }).text === 'string',
+          );
+          const content = textParts
+            .map((p) => (p as { text: string }).text)
+            .join('\n');
+          if (content) {
+            events.push({ type: 'prompt', content, timestamp: ts });
+          }
+        } else if (msg.info?.role === 'assistant') {
+          const textParts = parts.filter(
+            (p: unknown) =>
+              p &&
+              typeof p === 'object' &&
+              (p as { type?: string }).type === 'text' &&
+              typeof (p as { text?: string }).text === 'string',
+          );
+          for (const p of textParts) {
+            events.push({ type: 'text_delta', delta: (p as { text: string }).text, timestamp: ts });
+          }
+
+          const toolParts = parts.filter(
+            (p: unknown) =>
+              p &&
+              typeof p === 'object' &&
+              (p as Record<string, unknown>).type === 'tool' &&
+              typeof (p as Record<string, unknown>).tool === 'string' &&
+              (p as Record<string, unknown>).state !== undefined &&
+              (p as Record<string, unknown>).state !== null &&
+              typeof (p as Record<string, unknown>).state === 'object',
+          );
+          for (const p of toolParts) {
+            const toolPart = p as {
+              tool: string;
+              state: { status?: string; input?: Record<string, unknown>; output?: string; error?: string };
+            };
+            events.push({
+              type: 'tool_execution_start',
+              toolName: toolPart.tool,
+              args: toolPart.state.input,
+              timestamp: ts,
+            });
+            events.push({
+              type: 'tool_execution_end',
+              toolName: toolPart.tool,
+              isError: toolPart.state.status === 'error',
+              result: toolPart.state.output ?? toolPart.state.error,
+              error: toolPart.state.status === 'error' ? toolPart.state.error : undefined,
+              timestamp: ts,
+            });
+          }
+        }
+      }
+
+      return events;
+    } catch (err) {
+      console.error('Failed to get opencode session traces:', err);
+      return [];
+    }
   }
 
   async dispose(): Promise<void> {

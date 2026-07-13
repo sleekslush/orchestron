@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
 import type { Evaluator, HarnessAdapter, HarnessAdapterResolver, SqliteLoge, ScoreRegistry, ConcertHall } from '@orchestron/core';
 
@@ -49,11 +49,14 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
 
   const evaluator = options.evaluator ?? new HarnessEvaluator({ adapter: opencodeAdapter });
 
+  const tracesDir = join(dirname(storePath), 'traces');
+
   const hall = new ConcertHall({
     store,
     scoreRegistry: registry,
     adapters: adapterResolver,
     evaluator,
+    tracesDir,
   });
 
   return { store, registry, hall };

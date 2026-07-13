@@ -1,6 +1,7 @@
 import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { OutputConfig } from '@orchestron/core';
+import type { SessionTraceEvent } from '@orchestron/core';
 import { HarnessError } from '@orchestron/core';
 import {
   AuthStorage,
@@ -172,6 +173,75 @@ export class PiAdapter implements HarnessAdapter {
       data.session.dispose();
       this.sessions.delete(sessionId);
     }
+  }
+
+  getSessionTraceEvents(sessionId: string, _offset?: number): Promise<SessionTraceEvent[]> {
+    const data = this.sessions.get(sessionId);
+    if (!data) return Promise.resolve([]);
+
+    const messages = data.session.messages;
+    const events: SessionTraceEvent[] = [];
+
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object') continue;
+      const ts = new Date(
+        'timestamp' in msg && typeof (msg as { timestamp?: number }).timestamp === 'number'
+          ? (msg as { timestamp: number }).timestamp
+          : Date.now(),
+      ).toISOString();
+
+      switch (msg.role) {
+        case 'user': {
+          const raw = 'content' in msg ? (msg as { content: unknown }).content : undefined;
+          const content = typeof raw === 'string' ? raw : (raw !== undefined ? JSON.stringify(raw) : '');
+          events.push({ type: 'prompt', content, timestamp: ts });
+          break;
+        }
+        case 'assistant': {
+          if (
+            !('content' in msg) ||
+            !Array.isArray((msg as { content: unknown }).content)
+          ) {
+            break;
+          }
+          const blocks = ((msg as unknown) as { content: Array<Record<string, unknown>> }).content;
+          for (const block of blocks) {
+            if (!block || typeof block !== 'object') continue;
+            if (block.type === 'text' && typeof block.text === 'string') {
+              events.push({ type: 'text_delta', delta: block.text, timestamp: ts });
+            } else if (block.type === 'toolCall') {
+              events.push({
+                type: 'tool_execution_start',
+                toolName: typeof block.name === 'string' ? block.name : 'unknown',
+                args: typeof block.arguments === 'object' ? (block.arguments as Record<string, unknown>) : undefined,
+                timestamp: ts,
+              });
+            }
+          }
+          break;
+        }
+        case 'toolResult': {
+          if (
+            !('toolName' in msg) ||
+            !('isError' in msg) ||
+            !('content' in msg)
+          ) {
+            break;
+          }
+          events.push({
+            type: 'tool_execution_end',
+            toolName: String((msg as { toolName: unknown }).toolName),
+            isError: Boolean((msg as { isError: unknown }).isError),
+            result: (msg as { content: unknown }).content,
+            error: 'error' in msg ? String((msg as { error: unknown }).error) : undefined,
+            timestamp: ts,
+          });
+          break;
+        }
+      }
+    }
+
+    return Promise.resolve(events);
   }
 
   /** Dispose every tracked session. Useful for graceful shutdown. */

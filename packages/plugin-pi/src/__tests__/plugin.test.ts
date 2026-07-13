@@ -16,6 +16,7 @@ import { listConcerts } from '../tools/list-concerts.js';
 import { pauseConcert } from '../tools/pause-concert.js';
 import { cancelConcert } from '../tools/cancel-concert.js';
 import { listScores } from '../tools/list-scores.js';
+import { waitForConcert } from '../tools/wait-for-concert.js';
 
 function linearScore(): Score {
   return {
@@ -387,6 +388,29 @@ describe('Orchestron Pi plugin tools', () => {
 });
 
 describe('Orchestron Pi plugin extension', () => {
+  it('waits for a completed concert', async () => {
+    const orchestron = await createTestOrchestron(linearScore());
+    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
+
+    const conductor = orchestron.hall.getConcert(concertId);
+    if (conductor) {
+      await new Promise<void>((resolve) => {
+        const interval = setInterval(async () => {
+          const state = await conductor.getState();
+          if (state.status !== 'running' && state.status !== 'pending') {
+            clearInterval(interval);
+            resolve();
+          }
+        }, 10);
+      });
+    }
+
+    const result = await waitForConcert(orchestron, { concertId });
+    expect(result.concertId).toBe(concertId);
+    expect(result.status).toBe('completed');
+    expect(result.movements).toHaveLength(2);
+  });
+
   it('registers all orchestron tools', () => {
     const registered: string[] = [];
     const pi = {
@@ -408,6 +432,7 @@ describe('Orchestron Pi plugin extension', () => {
       'orchestron_create_score',
       'orchestron_edit_score',
       'orchestron_get_score',
+      'orchestron_wait_for_concert',
     ]);
     expect(pi.on).toHaveBeenCalledWith('session_shutdown', expect.any(Function));
   });

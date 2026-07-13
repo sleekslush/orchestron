@@ -8,6 +8,7 @@ const mockClient = {
     prompt: vi.fn(),
     delete: vi.fn(),
     abort: vi.fn(),
+    messages: vi.fn(),
   },
 };
 
@@ -329,6 +330,32 @@ describe('OpencodeAdapter', () => {
     expect(r2.output).toBe('hello');
     expect(r3.output).toBe('hello');
     expect(mockClient.session.delete).not.toHaveBeenCalled();
+  });
+
+  it('getSessionTraceEvents ignores tool parts with null state', async () => {
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: { role: 'assistant', time: { created: Date.now() } },
+          parts: [
+            makeTextPart('hello'),
+            { type: 'tool', tool: 'git_status', state: null },
+            { type: 'tool', tool: 'read', state: { status: 'success', input: { path: 'a.ts' }, output: 'content' } },
+          ],
+        },
+      ],
+    });
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('x', { shared: {} }, { sessionId: 'c1:m1' });
+    const events = await adapter.getSessionTraceEvents('c1:m1');
+
+    expect(events).toHaveLength(3); // text_delta + tool_execution_start + tool_execution_end
+    expect(events[0].type).toBe('text_delta');
+    expect(events[1].type).toBe('tool_execution_start');
+    expect((events[1] as any).toolName).toBe('read');
+    expect(events[2].type).toBe('tool_execution_end');
+    expect((events[2] as any).toolName).toBe('read');
   });
 
   it('handles concurrent execute calls for the same sessionId', async () => {

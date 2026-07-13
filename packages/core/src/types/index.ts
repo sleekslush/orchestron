@@ -4,3 +4,4 @@ export * from './events.js';
 export * from './adapter.js';
 export * from './store.js';
 export * from './concert.js';
+export * from './session-trace.js';

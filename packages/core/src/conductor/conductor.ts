@@ -15,6 +15,7 @@ import type {
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
 import type { ConcertStore } from '../store/concert-store.js';
+import { TraceService } from '../store/trace-service.js';
 import type { ChildConcertFactory } from './child-concert-factory.js';
 import type { IConductor } from './conductor-interface.js';
 import type { StartOptions } from './start-options.js';
@@ -39,6 +40,7 @@ export class Conductor implements IConductor {
   private activeSessions = new Map<string, HarnessAdapter>();
   private adapterResolver: { get(name: string): Promise<HarnessAdapter> };
   private loopPromise?: Promise<void>;
+  private traceService?: TraceService;
 
   constructor(
     private concert: Concert,
@@ -47,9 +49,13 @@ export class Conductor implements IConductor {
     private childFactory: ChildConcertFactory,
     adapters: Map<string, HarnessAdapter> | { get(name: string): Promise<HarnessAdapter> },
     private evaluator: Evaluator,
+    tracesDir?: string,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
+    if (tracesDir) {
+      this.traceService = new TraceService(tracesDir, store);
+    }
     this.adapterResolver =
       adapters instanceof Map
         ? {
@@ -285,10 +291,6 @@ export class Conductor implements IConductor {
   }
 
   async getState(): Promise<Concert> {
-    const stored = await this.store.getConcert(this.concert.id);
-    if (stored) {
-      this.concert = stored;
-    }
     return { ...this.concert };
   }
 
@@ -326,18 +328,21 @@ export class Conductor implements IConductor {
       startedAt,
     };
 
+    let harnessAdapter: HarnessAdapter | undefined;
+    let sessionId: string | undefined;
+
     try {
       if (movement.subscore) {
         return await this.executeSubscore(movement, previousOutputs, signal, record);
       }
 
-      const adapter = await this.resolveAdapter(movement);
+      harnessAdapter = await this.resolveAdapter(movement);
       const prompt = this.buildPrompt(movement, previousOutputs);
       const persistSession = this.score.program.persistSession !== false;
-      const sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
+      sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
 
       if (sessionId) {
-        this.activeSessions.set(sessionId, adapter);
+        this.activeSessions.set(sessionId, harnessAdapter);
       }
 
       const movementController = new AbortController();
@@ -394,7 +399,7 @@ export class Conductor implements IConductor {
       };
 
       try {
-        const response = await adapter.execute(prompt, this.concert.context, {
+        const response = await harnessAdapter.execute(prompt, this.concert.context, {
           signal: movementSignal,
           output: movement.output,
           movementId: movement.id,
@@ -432,6 +437,19 @@ export class Conductor implements IConductor {
           concertId: this.concert.id,
           movementId: movement.id,
         };
+      }
+    }
+
+    if (this.traceService && harnessAdapter && sessionId) {
+      const traceId = await this.traceService.recordFromAdapter(
+        harnessAdapter,
+        sessionId,
+        this.concert.id,
+        movement.id,
+        record.status,
+      );
+      if (traceId) {
+        record.traceId = traceId;
       }
     }
 
@@ -747,6 +765,11 @@ export class Conductor implements IConductor {
       previousOutputs.set(movement.id, record);
 
       this.checkProgramConstraints(movement, record);
+
+      await this.store.updateConcert({
+        id: this.concert.id,
+        usage: this.concert.usage,
+      });
 
       const transition = this.matchTransition(movement, achieved);
       currentId = transition?.to ?? '__fail__';

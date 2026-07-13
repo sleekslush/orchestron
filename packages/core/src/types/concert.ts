@@ -1,4 +1,5 @@
 import type { ScoreID, MovementID } from './score.js';
+export type { MovementID };
 
 export type ConcertID = string;
 
@@ -57,6 +58,7 @@ export interface MovementRecord {
   startedAt: Date;
   completedAt?: Date;
   error?: SerializedError;
+  traceId?: string;
 }
 
 export interface GoalEvaluation {

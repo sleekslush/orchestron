@@ -2,9 +2,10 @@ import type {
   Concert,
   ConcertID,
   ConcertFilter,
+  MovementID,
   MovementRecord,
 } from '../types/concert.js';
-import type { ConcertEvent, EventFilter, SystemAggregates } from '../types/index.js';
+import type { ConcertEvent, EventFilter, SystemAggregates, SessionTrace } from '../types/index.js';
 
 export interface ConcertStore {
   saveConcert(concert: Concert): Promise<void>;
@@ -24,4 +25,9 @@ export interface ConcertStore {
   getEvents(concertId: ConcertID, filter?: EventFilter): Promise<ConcertEvent[]>;
 
   getAggregates(): Promise<SystemAggregates>;
+
+  createSessionTrace(trace: SessionTrace): Promise<void>;
+  updateSessionTrace(id: string, update: Partial<SessionTrace>): Promise<void>;
+  getSessionTracesForConcert(concertId: ConcertID): Promise<SessionTrace[]>;
+  getSessionTraceForMovement(concertId: ConcertID, movementId: MovementID): Promise<SessionTrace | null>;
 }

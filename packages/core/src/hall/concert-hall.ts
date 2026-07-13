@@ -16,6 +16,7 @@ export interface ConcertHallOptions {
   scoreRegistry: ScoreRegistry;
   adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
+  tracesDir?: string;
 }
 
 interface AdapterResolver {
@@ -29,6 +30,7 @@ export class ConcertHall implements ChildConcertFactory {
   private scoreRegistry: ScoreRegistry;
   private adapterResolver: AdapterResolver;
   private evaluator: Evaluator;
+  private tracesDir?: string;
 
   constructor(options: ConcertHallOptions) {
     this.store = options.store;
@@ -38,6 +40,7 @@ export class ConcertHall implements ChildConcertFactory {
       throw new Error('ConcertHall requires an evaluator; pass one explicitly or use FakeEvaluator only in tests.');
     }
     this.evaluator = options.evaluator;
+    this.tracesDir = options.tracesDir;
   }
 
   private createAdapterResolver(
@@ -123,6 +126,7 @@ export class ConcertHall implements ChildConcertFactory {
       this,
       this.adapterResolver,
       await this.resolveEvaluator(score),
+      this.tracesDir,
     );
 
     this.conductors.set(concert.id, conductor);
@@ -194,6 +198,7 @@ export class ConcertHall implements ChildConcertFactory {
           this,
           this.adapterResolver,
           await this.resolveEvaluator(score),
+          this.tracesDir,
         );
         this.conductors.set(concert.id, conductor);
 
