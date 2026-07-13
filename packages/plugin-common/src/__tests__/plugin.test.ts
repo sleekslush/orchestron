@@ -71,6 +71,7 @@ async function createTestOrchestron(score: Score): Promise<Orchestron> {
       ],
     ]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    defaultHarness: 'fake',
   }).then((orchestron) => {
     orchestron.registry.register(score);
     return orchestron;

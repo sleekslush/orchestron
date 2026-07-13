@@ -22,6 +22,7 @@ let orchestronPromise: ReturnType<typeof createOrchestron> | undefined;
 async function getOrchestron() {
   if (!orchestronPromise) {
     orchestronPromise = createOrchestron({
+      defaultHarness: 'opencode',
       adapters: new Map<string, HarnessAdapter>([
         ["pi", new PiAdapter()],
         ["opencode", new OpencodeAdapter({ embedded: { port: 0 } })],
@@ -47,7 +48,7 @@ export const OrchestronPlugin: Plugin = async () => ({
       },
       async execute(args) {
         const o = await getOrchestron();
-        return JSON.stringify(await startConcert(o, args));
+        return JSON.stringify(await startConcert(o, { ...args, harness: 'opencode' }));
       },
     }),
 

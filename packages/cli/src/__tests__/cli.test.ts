@@ -46,8 +46,7 @@ function toYaml(score: Score): string {
     .map(
       (m) => `  - id: ${m.id}
     name: ${m.name}
-    section: ${m.section}
-    harness: ${m.harness}
+    section: ${m.section}${m.harness ? `\n    harness: ${m.harness}` : ''}
     prompt: ${m.prompt}
     goal:
       description: ${m.goal.description}
@@ -86,6 +85,7 @@ async function createTestOrchestron(dir: string) {
     scoresDirs: [scoresDir],
     adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    defaultHarness: 'fake',
   });
 }
 
@@ -321,5 +321,58 @@ describe('CLI commands', () => {
     testOrchestron.store.close();
     expect(finalState.status).toBe('completed');
     expect(finalState.history).toHaveLength(2);
+  });
+
+  it('uses defaultHarness for evaluator and movement fallback', async () => {
+    const noHarnessScore: Score = {
+      id: 'no-harness-test',
+      name: 'No Harness Test',
+      version: '1.0.0',
+      startMovement: 'step1',
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'test',
+          prompt: 'Do step 1',
+          goal: { description: 'Step 1 done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, noHarnessScore);
+
+    const storePath = join(dir, 'harness-store.db');
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', new FakeHarnessAdapter({
+        defaultResponse: {
+          output: 'ok',
+          summary: 'ok',
+          usage: { spend: 1, tokens: 1 },
+          structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+        },
+      })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (msg: string) => logs.push(msg);
+
+    try {
+      await startCommandHandler(orchestron, 'no-harness-test', {}, false);
+    } finally {
+      console.log = originalLog;
+      orchestron.store.close();
+    }
+
+    expect(logs.some((l) => l.includes('Status:  completed'))).toBe(true);
   });
 });
