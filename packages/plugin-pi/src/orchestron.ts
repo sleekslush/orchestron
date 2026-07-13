@@ -9,6 +9,7 @@ import type {
   ScoreRegistry,
   SqliteLoge,
 } from '@orchestron/core';
+import { resolveOrchestronConfig } from '@orchestron/core';
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
 export const DEFAULT_STORE_PATH = join(DEFAULT_CONFIG_DIR, 'store.db');
@@ -30,12 +31,13 @@ export interface Orchestron {
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
-  const storePath = options.storePath ?? process.env.ORCHESTRON_STORE_PATH ?? DEFAULT_STORE_PATH;
-  const scoresDirs =
-    options.scoresDirs ??
-    (process.env.ORCHESTRON_SCORES_DIRS
-      ? process.env.ORCHESTRON_SCORES_DIRS.split(',').map((s) => s.trim())
-      : [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR]);
+  const { storePath, scoresDirs, opencodeProvider, opencodeModelId } = resolveOrchestronConfig(
+    options,
+    {
+      storePath: DEFAULT_STORE_PATH,
+      scoresDirs: [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
+    },
+  );
 
   ensureDir(DEFAULT_CONFIG_DIR);
   for (const dir of scoresDirs) {
@@ -57,8 +59,6 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
 
   const adapterResolver = options.adapters ?? new LazyAdapterResolver();
   const piAdapter = new PiAdapter();
-  const opencodeProvider = process.env.ORCHESTRON_OPENCODE_PROVIDER ?? 'opencode';
-  const opencodeModelId = process.env.ORCHESTRON_OPENCODE_MODEL_ID ?? 'kimi-k2.5';
   const opencodeAdapter = new OpencodeAdapter({ embedded: { port: 0 }, provider: opencodeProvider, modelId: opencodeModelId });
   if (adapterResolver instanceof LazyAdapterResolver) {
     adapterResolver.register('pi', piAdapter);

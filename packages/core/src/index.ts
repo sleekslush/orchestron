@@ -2,6 +2,9 @@ export * from './types/index.js';
 
 export { safeJsonParse, extractBalancedJson } from './json-utils.js';
 
+export { loadConfigFile, resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH } from './config.js';
+export type { OrchestronConfig, ResolvedOrchestronConfig } from './config.js';
+
 export { SqliteLoge } from './store/sqlite-loge.js';
 export type { ConcertStore } from './store/concert-store.js';
 export { TraceService } from './store/trace-service.js';
