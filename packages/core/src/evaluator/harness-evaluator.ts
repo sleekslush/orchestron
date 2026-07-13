@@ -2,6 +2,7 @@ import type { HarnessAdapter, HarnessResponse } from '../types/adapter.js';
 import type { Goal, GoalEvaluation, ConcertContext } from '../types/index.js';
 import { GoalEvalError } from '../types/errors.js';
 import type { Evaluator } from './evaluator.js';
+import { safeJsonParse, extractBalancedJson } from '../json-utils.js';
 
 const goalEvaluationSchema = {
   type: 'object',
@@ -80,8 +81,8 @@ Return a JSON object with:
 
     const text = response.output.trim();
     if (text) {
-      const parsed = this.safeJsonParse(text);
-      if (this.isGoalEvaluation(parsed)) {
+      const parsed = this.extractGoalEvaluation(text);
+      if (parsed) {
         return parsed;
       }
     }
@@ -94,12 +95,29 @@ Return a JSON object with:
     );
   }
 
-  private safeJsonParse(text: string): unknown {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return undefined;
+  private extractGoalEvaluation(text: string): GoalEvaluation | undefined {
+    const blockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (blockMatch) {
+      const parsed = safeJsonParse(blockMatch[1].trim());
+      if (this.isGoalEvaluation(parsed)) {
+        return parsed;
+      }
     }
+
+    const balanced = extractBalancedJson(text);
+    if (balanced) {
+      const parsed = safeJsonParse(balanced);
+      if (this.isGoalEvaluation(parsed)) {
+        return parsed;
+      }
+    }
+
+    const parsed = safeJsonParse(text.trim());
+    if (this.isGoalEvaluation(parsed)) {
+      return parsed;
+    }
+
+    return undefined;
   }
 
   private isGoalEvaluation(value: unknown): value is GoalEvaluation {

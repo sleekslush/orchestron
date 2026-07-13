@@ -7,10 +7,7 @@ async function findConductor(
   action: string,
   json: boolean,
 ) {
-  if (!orchestron.hall.getConcert(concertId)) {
-    await orchestron.hall.rehydrate();
-  }
-  const conductor = orchestron.hall.getConcert(concertId);
+  const conductor = await orchestron.hall.loadConcert(concertId);
   if (conductor) return conductor;
 
   const stored = await orchestron.store.getConcert(concertId);

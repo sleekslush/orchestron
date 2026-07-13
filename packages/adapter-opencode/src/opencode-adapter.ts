@@ -2,7 +2,7 @@ import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { OutputConfig } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
-import { HarnessError } from '@orchestron/core';
+import { HarnessError, safeJsonParse, extractBalancedJson } from '@orchestron/core';
 import {
   createOpencode,
   createOpencodeClient,
@@ -164,8 +164,23 @@ export class OpencodeAdapter implements HarnessAdapter {
         );
       }
 
+      if (data.info.error) {
+        const errorData = (data.info.error as Record<string, unknown>)?.data;
+        const errorMessage =
+          typeof errorData === 'object' && errorData !== null
+            ? (errorData as Record<string, unknown>).message ?? String(data.info.error)
+            : String(data.info.error);
+        throw new HarnessError(
+          `Opencode harness execution failed: ${errorMessage}`,
+          'HARNESS_FAILURE',
+        );
+      }
+
       const output = this.extractText(data.parts);
-      const structured = this.tryParseStructured(data.info.structured);
+      let structured = this.tryParseStructured(data.info.structured);
+      if (!structured && options?.output?.mode === 'structured') {
+        structured = this.tryParseStructuredFromText(output);
+      }
       const usage = this.toResourceUsage(data.info);
       const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
 
@@ -322,11 +337,17 @@ export class OpencodeAdapter implements HarnessAdapter {
       if (config.baseUrl) {
         this.client = createOpencodeClient({ baseUrl: config.baseUrl });
       } else if (config.embedded) {
-        const opencode = await createOpencode({
-          hostname: config.embedded.hostname,
-          port: config.embedded.port,
-          config: config.embedded.config as never,
-        });
+        const serverOptions: { hostname?: string; port?: number; config?: Record<string, unknown> } = {};
+        if (config.embedded.hostname !== undefined) {
+          serverOptions.hostname = config.embedded.hostname;
+        }
+        if (config.embedded.port !== undefined) {
+          serverOptions.port = config.embedded.port;
+        }
+        if (config.embedded.config !== undefined) {
+          serverOptions.config = config.embedded.config;
+        }
+        const opencode = await createOpencode(serverOptions);
         this.client = opencode.client;
         this.server = opencode.server;
         this.ownsServer = true;
@@ -422,6 +443,40 @@ export class OpencodeAdapter implements HarnessAdapter {
     ) {
       return structured as Record<string, unknown>;
     }
+    if (typeof structured === 'string') {
+      const parsed = safeJsonParse(structured.trim());
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed)
+      ) {
+        return parsed as Record<string, unknown>;
+      }
+    }
+    return undefined;
+  }
+
+  private tryParseStructuredFromText(
+    output: string,
+  ): Record<string, unknown> | undefined {
+    const isObject = (value: unknown): value is Record<string, unknown> =>
+      typeof value === 'object' && value !== null && !Array.isArray(value);
+
+    const blockMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (blockMatch) {
+      const parsed = safeJsonParse(blockMatch[1].trim());
+      if (isObject(parsed)) return parsed;
+    }
+
+    const balanced = extractBalancedJson(output);
+    if (balanced) {
+      const parsed = safeJsonParse(balanced);
+      if (isObject(parsed)) return parsed;
+    }
+
+    const parsed = safeJsonParse(output.trim());
+    if (isObject(parsed)) return parsed;
+
     return undefined;
   }
 

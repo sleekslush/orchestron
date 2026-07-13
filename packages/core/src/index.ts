@@ -1,5 +1,7 @@
 export * from './types/index.js';
 
+export { safeJsonParse, extractBalancedJson } from './json-utils.js';
+
 export { SqliteLoge } from './store/sqlite-loge.js';
 export type { ConcertStore } from './store/concert-store.js';
 export { TraceService } from './store/trace-service.js';

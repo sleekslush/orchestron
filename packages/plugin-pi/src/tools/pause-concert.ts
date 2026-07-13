@@ -10,11 +10,7 @@ export async function pauseConcert(
   orchestron: Orchestron,
   input: PauseConcertInput,
 ): Promise<{ concertId: string; status: string }> {
-  if (!orchestron.hall.getConcert(input.concertId)) {
-    await orchestron.hall.rehydrate();
-  }
-
-  const conductor = orchestron.hall.getConcert(input.concertId);
+  const conductor = await orchestron.hall.loadConcert(input.concertId);
   if (!conductor) {
     throw new Error(`Concert '${input.concertId}' not found`);
   }

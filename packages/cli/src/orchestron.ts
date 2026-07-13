@@ -42,7 +42,9 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
   }
 
   const adapterResolver = options.adapters ?? new LazyAdapterResolver();
-  const opencodeAdapter = new OpencodeAdapter();
+  const opencodeProvider = process.env.ORCHESTRON_OPENCODE_PROVIDER ?? 'opencode';
+  const opencodeModelId = process.env.ORCHESTRON_OPENCODE_MODEL_ID ?? 'kimi-k2.5';
+  const opencodeAdapter = new OpencodeAdapter({ embedded: { port: 0 }, provider: opencodeProvider, modelId: opencodeModelId });
   if (adapterResolver instanceof LazyAdapterResolver) {
     adapterResolver.register('opencode', opencodeAdapter);
   }

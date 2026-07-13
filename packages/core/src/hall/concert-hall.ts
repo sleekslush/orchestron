@@ -140,6 +140,42 @@ export class ConcertHall implements ChildConcertFactory {
     return conductor;
   }
 
+  async loadConcert(id: ConcertID): Promise<Conductor | undefined> {
+    if (this.conductors.has(id)) {
+      return this.conductors.get(id);
+    }
+
+    const stored = await this.store.getConcert(id);
+    if (!stored) return undefined;
+
+    try {
+      const score = this.scoreRegistry.get(stored.scoreId);
+      const conductor = new Conductor(
+        stored,
+        score,
+        this.store,
+        this,
+        this.adapterResolver,
+        await this.resolveEvaluator(score),
+        this.tracesDir,
+      );
+      this.conductors.set(id, conductor);
+
+      if (stored.parentConcertId) {
+        const siblings = this.parentToChildren.get(stored.parentConcertId) ?? [];
+        if (!siblings.includes(id)) {
+          siblings.push(id);
+          this.parentToChildren.set(stored.parentConcertId, siblings);
+        }
+      }
+
+      return conductor;
+    } catch (err) {
+      console.error(`Failed to load concert '${id}':`, err);
+      return undefined;
+    }
+  }
+
   getConcert(id: ConcertID): Conductor | undefined {
     return this.conductors.get(id);
   }

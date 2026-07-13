@@ -189,6 +189,54 @@ describe('OpencodeAdapter', () => {
     expect(result.structured).toEqual({ ok: true });
   });
 
+  it('parses structured output from a string in info.structured', async () => {
+    mockClient.session.prompt.mockResolvedValue({
+      data: {
+        info: makeAssistantMessage({ structured: '{"ok":true}' }),
+        parts: [makeTextPart('{"ok":true}')],
+      },
+    });
+    const adapter = new OpencodeAdapter();
+
+    const result: HarnessResponse = await adapter.execute('do it', { shared: {} }, {
+      output: { mode: 'structured', schema: { type: 'object' } },
+    });
+
+    expect(result.structured).toEqual({ ok: true });
+  });
+
+  it('falls back to parsing structured output from text parts when info.structured is missing', async () => {
+    mockClient.session.prompt.mockResolvedValue({
+      data: {
+        info: makeAssistantMessage(),
+        parts: [makeTextPart('```json\n{"ok":true}\n```')],
+      },
+    });
+    const adapter = new OpencodeAdapter();
+
+    const result: HarnessResponse = await adapter.execute('do it', { shared: {} }, {
+      output: { mode: 'structured', schema: { type: 'object' } },
+    });
+
+    expect(result.structured).toEqual({ ok: true });
+  });
+
+  it('falls back to parsing raw JSON object from text parts', async () => {
+    mockClient.session.prompt.mockResolvedValue({
+      data: {
+        info: makeAssistantMessage(),
+        parts: [makeTextPart('Some intro {"ok":true} outro')],
+      },
+    });
+    const adapter = new OpencodeAdapter();
+
+    const result: HarnessResponse = await adapter.execute('do it', { shared: {} }, {
+      output: { mode: 'structured', schema: { type: 'object' } },
+    });
+
+    expect(result.structured).toEqual({ ok: true });
+  });
+
   it('extracts resource usage from response info', async () => {
     const adapter = new OpencodeAdapter();
 

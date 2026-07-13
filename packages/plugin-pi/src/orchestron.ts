@@ -46,6 +46,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     '@orchestron/core'
   );
   const { PiAdapter } = await import('@orchestron/adapter-pi');
+  const { OpencodeAdapter } = await import('@orchestron/adapter-opencode');
 
   const store = new SqliteLoge(storePath);
   const registry = new ScoreRegistry();
@@ -56,8 +57,12 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
 
   const adapterResolver = options.adapters ?? new LazyAdapterResolver();
   const piAdapter = new PiAdapter();
+  const opencodeProvider = process.env.ORCHESTRON_OPENCODE_PROVIDER ?? 'opencode';
+  const opencodeModelId = process.env.ORCHESTRON_OPENCODE_MODEL_ID ?? 'kimi-k2.5';
+  const opencodeAdapter = new OpencodeAdapter({ embedded: { port: 0 }, provider: opencodeProvider, modelId: opencodeModelId });
   if (adapterResolver instanceof LazyAdapterResolver) {
     adapterResolver.register('pi', piAdapter);
+    adapterResolver.register('opencode', opencodeAdapter);
   }
 
   const evaluator = options.evaluator ?? new HarnessEvaluator({ adapter: piAdapter });

@@ -40,6 +40,8 @@ export async function startCommandHandler(
     triggeredBy: 'cli',
   });
 
+  console.error(`Concert ID: ${conductor.concertId}`);
+
   let lastEventCount = 0;
   let polling = false;
   let pollingDone = false;

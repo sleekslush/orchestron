@@ -66,6 +66,38 @@ describe('HarnessEvaluator', () => {
     await expect(evaluator.evaluate(goal, 'output', context)).rejects.toBeInstanceOf(GoalEvalError);
   });
 
+  it('extracts goal evaluation from a markdown JSON block', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'Some text\n```json\n{"achieved":true,"confidence":0.9,"summary":"Good"}\n```\nMore text',
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const evaluator = new HarnessEvaluator({ adapter });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+    expect(result.achieved).toBe(true);
+    expect(result.confidence).toBe(0.9);
+    expect(result.summary).toBe('Good');
+  });
+
+  it('extracts goal evaluation from an embedded JSON object', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'Here is the result: {"achieved":false,"confidence":0.1,"summary":"Bad"} thanks!',
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const evaluator = new HarnessEvaluator({ adapter });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+    expect(result.achieved).toBe(false);
+    expect(result.confidence).toBe(0.1);
+    expect(result.summary).toBe('Bad');
+  });
+
   it('uses a custom prompt template', async () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: {
