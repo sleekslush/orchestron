@@ -412,6 +412,8 @@ export class Conductor implements IConductor {
         if (response.structured) record.structured = response.structured;
         record.summary = response.summary;
         record.usage = response.usage;
+        if (response.model) record.model = response.model;
+        if (response.provider) record.provider = response.provider;
         record.durationMs = Date.now() - startedAt.getTime();
       } finally {
         clearTimeout(timeoutHandle);

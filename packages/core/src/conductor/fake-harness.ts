@@ -8,6 +8,8 @@ export interface FakeHarnessScenario {
   structured?: Record<string, unknown>;
   summary?: string;
   usage?: { spend?: number; tokens?: number; inputTokens?: number; outputTokens?: number };
+  model?: string;
+  provider?: string;
   fail?: boolean;
   delayMs?: number;
   progressUpdates?: { atMs: number; update: ProgressUpdate }[];
@@ -86,6 +88,8 @@ export class FakeHarnessAdapter implements HarnessAdapter {
       structured: scenario.structured,
       summary: scenario.summary ?? 'Fake harness completed',
       usage: scenario.usage ?? { spend: 10, tokens: 100 },
+      model: scenario.model,
+      provider: scenario.provider,
     };
   }
 }

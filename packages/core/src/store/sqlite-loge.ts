@@ -59,6 +59,8 @@ interface MovementRow {
   completed_at: string | null;
   error: string | null;
   trace_id: string | null;
+  model: string | null;
+  provider: string | null;
 }
 
 interface SessionTraceRow {
@@ -126,7 +128,9 @@ export class SqliteLoge implements ConcertStore {
         started_at TEXT NOT NULL,
         completed_at TEXT,
         error TEXT,
-        trace_id TEXT
+        trace_id TEXT,
+        model TEXT,
+        provider TEXT
       );
 
       CREATE TABLE IF NOT EXISTS events (
@@ -166,6 +170,12 @@ export class SqliteLoge implements ConcertStore {
       .all() as Array<{ name: string }>;
     if (!columnInfo.some((col) => col.name === 'trace_id')) {
       this.db.exec(`ALTER TABLE movements ADD COLUMN trace_id TEXT`);
+    }
+    if (!columnInfo.some((col) => col.name === 'model')) {
+      this.db.exec(`ALTER TABLE movements ADD COLUMN model TEXT`);
+    }
+    if (!columnInfo.some((col) => col.name === 'provider')) {
+      this.db.exec(`ALTER TABLE movements ADD COLUMN provider TEXT`);
     }
     const sessionTraceColumns = this.db
       .prepare(`PRAGMA table_info(session_traces)`)
@@ -308,8 +318,8 @@ export class SqliteLoge implements ConcertStore {
     const stmt = this.db.prepare(`
       INSERT INTO movements
         (concert_id, movement_id, movement_name, status, output, structured,
-         summary, goal_evaluation, usage, duration_ms, started_at, completed_at, error, trace_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         summary, goal_evaluation, usage, duration_ms, started_at, completed_at, error, trace_id, model, provider)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       concertId,
@@ -326,6 +336,8 @@ export class SqliteLoge implements ConcertStore {
       serializeDate(record.completedAt),
       record.error ? JSON.stringify(record.error) : null,
       record.traceId ?? null,
+      record.model ?? null,
+      record.provider ?? null,
     );
   }
 
@@ -375,6 +387,14 @@ export class SqliteLoge implements ConcertStore {
     if (record.traceId !== undefined) {
       fields.push('trace_id = ?');
       values.push(record.traceId ?? null);
+    }
+    if (record.model !== undefined) {
+      fields.push('model = ?');
+      values.push(record.model ?? null);
+    }
+    if (record.provider !== undefined) {
+      fields.push('provider = ?');
+      values.push(record.provider ?? null);
     }
 
     if (fields.length === 0) return;
@@ -589,6 +609,8 @@ function rowToMovementRecord(row: MovementRow): MovementRecord {
     completedAt: deserializeDate(row.completed_at),
     error: row.error ? jsonParse(row.error, undefined) : undefined,
     traceId: row.trace_id ?? undefined,
+    model: row.model ?? undefined,
+    provider: row.provider ?? undefined,
   };
 }
 

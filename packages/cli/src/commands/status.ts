@@ -36,6 +36,8 @@ export async function statusCommandHandler(
         goalAchieved: h.goalEvaluation.achieved,
         goalSummary: h.goalEvaluation.summary,
         error: h.error,
+        model: h.model,
+        provider: h.provider,
       })),
     };
 
@@ -99,6 +101,8 @@ function formatConcertHuman(
     durationMs: number;
     goalEvaluation: { achieved: boolean; summary: string };
     error?: { code: string; message: string; retryable: boolean } | undefined;
+    model?: string;
+    provider?: string;
   }>,
   events: ConcertEvent[],
 ): string {
@@ -157,6 +161,9 @@ function formatConcertHuman(
     }
     if (h.goalEvaluation.summary) {
       lines.push(`    Goal: ${h.goalEvaluation.summary}`);
+    }
+    if (h.model) {
+      lines.push(`    Model: ${[h.provider, h.model].filter(Boolean).join(' / ')}`);
     }
     if (h.error) {
       lines.push(`    Error: ${h.error.code} — ${h.error.message}`);

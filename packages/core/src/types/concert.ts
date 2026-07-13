@@ -59,6 +59,8 @@ export interface MovementRecord {
   completedAt?: Date;
   error?: SerializedError;
   traceId?: string;
+  model?: string;
+  provider?: string;
 }
 
 export interface GoalEvaluation {

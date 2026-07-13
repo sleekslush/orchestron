@@ -10,7 +10,7 @@ import {
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
-import type { Model, Usage, Api } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Model, Usage, Api } from '@earendil-works/pi-ai';
 
 export interface PiAdapterConfig {
   /** Built-in provider id (e.g. `openai`, `anthropic`). If omitted, Pi selects from settings. */
@@ -84,6 +84,8 @@ export class PiAdapter implements HarnessAdapter {
 
       let output = '';
       let finalUsage: Usage | undefined;
+      let model: string | undefined;
+      let provider: string | undefined;
 
       const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
         if (event.type === 'message_update') {
@@ -114,6 +116,11 @@ export class PiAdapter implements HarnessAdapter {
           for (const msg of event.messages) {
             if ('usage' in msg && msg.usage) {
               finalUsage = msg.usage as Usage;
+            }
+            if ('model' in msg && typeof msg.model === 'string') {
+              const am = msg as AssistantMessage;
+              model = am.model;
+              provider = am.provider;
             }
           }
         }
@@ -159,7 +166,7 @@ export class PiAdapter implements HarnessAdapter {
       const usage = this.toResourceUsage(finalUsage);
       const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
 
-      return { output, structured, summary, usage };
+      return { output, structured, summary, usage, model, provider };
     } finally {
       if (ownSession && session) {
         session.dispose();

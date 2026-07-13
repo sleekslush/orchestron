@@ -34,6 +34,8 @@ export interface HarnessResponse {
   structured?: Record<string, unknown>;
   summary: string;
   usage: ResourceUsage;
+  model?: string;
+  provider?: string;
 }
 
 export interface HarnessAdapterResolver {

@@ -169,7 +169,7 @@ export class OpencodeAdapter implements HarnessAdapter {
       const usage = this.toResourceUsage(data.info);
       const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
 
-      return { output, structured, summary, usage };
+      return { output, structured, summary, usage, model: data.info.modelID, provider: data.info.providerID };
     } finally {
       if (abortListener && options?.signal) {
         options.signal.removeEventListener('abort', abortListener);

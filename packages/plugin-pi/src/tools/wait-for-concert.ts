@@ -214,6 +214,8 @@ function buildResult(
     summary: string;
     durationMs: number;
     goalEvaluation: { achieved: boolean; summary: string };
+    model?: string;
+    provider?: string;
   }>,
 ) {
   return {
@@ -232,6 +234,8 @@ function buildResult(
       durationMs: h.durationMs,
       goalAchieved: h.goalEvaluation.achieved,
       goalSummary: h.goalEvaluation.summary,
+      model: h.model,
+      provider: h.provider,
     })),
   };
 }

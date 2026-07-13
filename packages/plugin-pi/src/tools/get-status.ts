@@ -36,6 +36,8 @@ export async function getConcertStatus(
     durationMs: number;
     goalAchieved: boolean;
     goalSummary: string;
+    model?: string;
+    provider?: string;
   }>;
 }> {
   const state = await orchestron.store.getConcert(input.concertId);
@@ -83,6 +85,8 @@ export async function getConcertStatus(
       durationMs: h.durationMs,
       goalAchieved: h.goalEvaluation.achieved,
       goalSummary: h.goalEvaluation.summary,
+      model: h.model,
+      provider: h.provider,
     })),
   };
 }
