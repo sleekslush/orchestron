@@ -55,7 +55,13 @@ Load the plugin from the monorepo:
 pi -e ./packages/plugin-pi/src/index.ts
 ```
 
-Or install it as a Pi package (once published):
+Or install it as a local Pi package (for development):
+
+```bash
+pi install ./packages/plugin-pi
+```
+
+Or install it as a Pi package from npm (once published):
 
 ```bash
 pi install npm:@orchestron/plugin-pi
@@ -69,6 +75,10 @@ mkdir -p .pi/skills
 ln -s /path/to/orchestron/packages/plugin-pi/skills/orchestron-score-authoring \
   .pi/skills/orchestron-score-authoring
 ```
+
+**Note:** When using `pi install ./packages/plugin-pi`, the skill is automatically
+discovered if the package includes a `pi.skills` manifest. The plugin includes
+this, so the skill should be available without manual symlinking.
 
 Then ask Pi:
 
