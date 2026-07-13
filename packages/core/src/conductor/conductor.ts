@@ -51,7 +51,6 @@ export class Conductor implements IConductor {
     adapters: Map<string, HarnessAdapter> | { get(name: string): Promise<HarnessAdapter> },
     private evaluator: Evaluator,
     tracesDir?: string,
-    private explicitHarness?: string,
     private defaultHarness?: string,
   ) {
     this._status = concert.status;
@@ -582,7 +581,7 @@ export class Conductor implements IConductor {
   }
 
   private async resolveAdapter(movement: Movement): Promise<HarnessAdapter> {
-    const type = movement.harness ?? this.explicitHarness ?? this.defaultHarness;
+    const type = movement.harness ?? this.concert.explicitHarness ?? this.defaultHarness;
     if (!type) {
       throw new ConductorPanic(
         `Movement '${movement.id}' has no harness specified and no default is configured`,

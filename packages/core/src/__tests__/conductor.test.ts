@@ -1396,4 +1396,77 @@ describe('Conductor.recover()', () => {
     expect(secondaryAdapter.prompts.length).toBeGreaterThanOrEqual(1);
     expect(primaryAdapter.prompts).toHaveLength(0);
   });
+
+  it('persists explicitHarness across loadConcert', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+
+    const primaryAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: 'primary',
+        summary: 'primary',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+    const secondaryAdapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: {
+        output: 'secondary',
+        summary: 'secondary',
+        usage: { spend: 1, tokens: 1 },
+        structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
+      },
+    });
+
+    const score: Score = {
+      id: 'persist-harness-test',
+      name: 'Persist Harness Test',
+      version: '1.0.0',
+      startMovement: 'step1',
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'default',
+          prompt: 'Do step 1',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([
+        ['primary', primaryAdapter],
+        ['secondary', secondaryAdapter],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'primary',
+    });
+
+    const conductor = await hall.createConcert('persist-harness-test', { harness: 'secondary' });
+    const concertId = conductor.concertId;
+
+    // Simulate process restart by creating a new hall and loading the concert
+    const hall2 = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([
+        ['primary', primaryAdapter],
+        ['secondary', secondaryAdapter],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'primary',
+    });
+
+    const loaded = await hall2.loadConcert(concertId);
+    expect(loaded).toBeDefined();
+    await loaded!.start();
+    expect(loaded!.status).toBe('completed');
+    expect(secondaryAdapter.prompts.length).toBeGreaterThanOrEqual(1);
+  });
 });

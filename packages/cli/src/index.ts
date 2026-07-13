@@ -42,7 +42,7 @@ const program = new Command()
     collect,
     [LOCAL_SCORES_DIR, DEFAULT_SCORES_DIR],
   )
-  .option('--harness <name>', 'Default harness for movements without an explicit harness', 'pi')
+  .option('--harness <name>', "Default harness for movements without an explicit harness (defaults to 'pi')")
   .option('--json', 'Output JSON instead of human-readable text');
 
 program

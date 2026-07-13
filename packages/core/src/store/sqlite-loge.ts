@@ -42,6 +42,7 @@ interface ConcertRow {
   child_concert_ids: string;
   nesting_depth: number | null;
   score_yaml: string | null;
+  explicit_harness: string | null;
 }
 
 interface MovementRow {
@@ -112,7 +113,8 @@ export class SqliteLoge implements ConcertStore {
         triggered_by TEXT NOT NULL DEFAULT 'cli',
         parent_concert_id TEXT,
         child_concert_ids TEXT NOT NULL DEFAULT '[]',
-        nesting_depth INTEGER
+        nesting_depth INTEGER,
+        explicit_harness TEXT
       );
 
       CREATE TABLE IF NOT EXISTS movements (
@@ -185,6 +187,9 @@ export class SqliteLoge implements ConcertStore {
     if (!concertColumns.some((col) => col.name === 'score_yaml')) {
       this.db.exec(`ALTER TABLE concerts ADD COLUMN score_yaml TEXT NOT NULL DEFAULT ''`);
     }
+    if (!concertColumns.some((col) => col.name === 'explicit_harness')) {
+      this.db.exec(`ALTER TABLE concerts ADD COLUMN explicit_harness TEXT`);
+    }
     const sessionTraceColumns = this.db
       .prepare(`PRAGMA table_info(session_traces)`)
       .all() as Array<{ name: string }>;
@@ -200,8 +205,8 @@ export class SqliteLoge implements ConcertStore {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO concerts
         (id, score_id, score_yaml, status, started_at, completed_at, current_movement,
-         context, usage, triggered_by, parent_concert_id, child_concert_ids, nesting_depth)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         context, usage, triggered_by, parent_concert_id, child_concert_ids, nesting_depth, explicit_harness)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       concert.id,
@@ -217,6 +222,7 @@ export class SqliteLoge implements ConcertStore {
       concert.parentConcertId ?? null,
       JSON.stringify(concert.childConcertIds),
       concert.nestingDepth ?? null,
+      concert.explicitHarness ?? null,
     );
 
     this.db.prepare('DELETE FROM movements WHERE concert_id = ?').run(concert.id);
@@ -608,6 +614,7 @@ function rowToConcert(row: ConcertRow, history: MovementRecord[]): Concert {
     parentConcertId: row.parent_concert_id ?? undefined,
     childConcertIds: jsonParse<string[]>(row.child_concert_ids, []),
     nestingDepth: row.nesting_depth ?? undefined,
+    explicitHarness: row.explicit_harness ?? undefined,
   };
 }
 

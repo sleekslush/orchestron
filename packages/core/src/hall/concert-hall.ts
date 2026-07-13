@@ -120,6 +120,7 @@ export class ConcertHall implements ChildConcertFactory {
       triggeredBy: options?.triggeredBy ?? 'cli',
       parentConcertId: options?.parentConcertId,
       childConcertIds: [],
+      explicitHarness: options?.harness,
     };
 
     const scoreYaml = yaml.dump(score);
@@ -133,7 +134,6 @@ export class ConcertHall implements ChildConcertFactory {
       this.adapterResolver,
       await this.resolveEvaluator(score, options?.harness),
       this.tracesDir,
-      options?.harness,
       this.defaultHarness,
     );
 
@@ -170,9 +170,8 @@ export class ConcertHall implements ChildConcertFactory {
         this.store,
         this,
         this.adapterResolver,
-        await this.resolveEvaluator(score),
+        await this.resolveEvaluator(score, stored.explicitHarness),
         this.tracesDir,
-        undefined,
         this.defaultHarness,
       );
       this.conductors.set(id, conductor);
@@ -255,9 +254,8 @@ export class ConcertHall implements ChildConcertFactory {
           this.store,
           this,
           this.adapterResolver,
-          await this.resolveEvaluator(score),
+          await this.resolveEvaluator(score, concert.explicitHarness),
           this.tracesDir,
-          undefined,
           this.defaultHarness,
         );
         this.conductors.set(concert.id, conductor);
