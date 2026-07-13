@@ -47,24 +47,6 @@ harness (Pi, opencode, or future adapters), and let a **Conductor** run the
 pnpm install
 ```
 
-### Local opencode development
-
-To use the Orchestron opencode plugin and score-authoring skill during local
-development, symlink them into the project's `.opencode` directory:
-
-```bash
-mkdir -p .opencode/plugins .opencode/skills/orchestron-score-authoring && \
-ln -sf ../../packages/plugin-opencode/src/index.ts .opencode/plugins/plugin-opencode.ts && \
-ln -sf ../../../packages/plugin-common/skills/orchestron-score-authoring/SKILL.md .opencode/skills/orchestron-score-authoring/SKILL.md
-```
-
-Then add the plugin to `opencode.json`:
-```json
-{
-  "plugin": ["plugin-opencode"]
-}
-```
-
 ### Typecheck and test
 
 ```bash
