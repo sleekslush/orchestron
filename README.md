@@ -88,7 +88,8 @@ pnpm orchestron dashboard --port 3000
 Use `--json` for scriptable output and `--store <path>` for a custom SQLite
 path. Pass `--context.key=value` arguments to populate the concert's initial
 context. Use `--scores-dir <dir>` to add a custom directory (can be passed
-multiple times).
+multiple times). Use `--harness <name>` to set the default harness adapter
+for the evaluator (e.g. `pi` or `opencode`).
 
 ### Configuration
 
@@ -111,6 +112,7 @@ Create `~/.orchestron/config.json` to set persistent defaults:
     "provider": "anthropic",
     "modelId": "claude-sonnet-4-20250514"
   },
+  "defaultHarness": "opencode",
   "dashboard": {
     "port": 3000
   }
@@ -129,6 +131,7 @@ Paths starting with `~/` are expanded to your home directory.
 | `ORCHESTRON_OPENCODE_MODEL_ID` | Opencode model ID | `kimi-k2.5` |
 | `ORCHESTRON_PI_PROVIDER` | Pi model provider | — |
 | `ORCHESTRON_PI_MODEL_ID` | Pi model ID | — |
+| `ORCHESTRON_DEFAULT_HARNESS` | Default harness adapter for the evaluator | `opencode` |
 
 Environment variables take precedence over the config file but are overridden
 by explicit CLI flags (`--store`, etc.).

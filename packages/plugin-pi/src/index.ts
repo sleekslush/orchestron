@@ -30,6 +30,7 @@ export default function orchestronPlugin(
           ['pi', new PiAdapter()],
           ['opencode', new OpencodeAdapter({ embedded: { port: 0 } })],
         ]),
+        defaultHarness: config.defaultHarness ?? 'pi',
       }).catch((err) => {
         orchestronPromise = undefined;
         throw err;
