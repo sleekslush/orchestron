@@ -134,6 +134,11 @@ it('movement spend limit breach', async () => {
   const conductor = await hall.createConcert('movement-constrained');
   await conductor.start();
   expect(conductor.status).toBe('failed');
+  const events = await store.getEvents(conductor.concertId, { types: ['constraint:breached'] });
+  expect(events).toHaveLength(1);
+  expect(events[0].constraint).toBe('maxSpendDollars');
+  expect(events[0].limit).toBe(0.5);
+  expect(events[0].actual).toBe(0.6);
 });
 
 it('missing adapter', async () => {

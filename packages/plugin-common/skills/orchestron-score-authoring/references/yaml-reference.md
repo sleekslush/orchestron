@@ -41,7 +41,6 @@ A valid score requires only:
 |-------|------|-------------|
 | `harness` | string | Harness to use for evaluation (e.g., `pi`, `opencode`). |
 | `model` | string | Model to use for evaluation (e.g., `pi-4-mini`). |
-| `provider` | string | Provider to use for evaluation. |
 | `prompt` | string | Optional custom prompt for the evaluator. |
 
 ## Movement Fields

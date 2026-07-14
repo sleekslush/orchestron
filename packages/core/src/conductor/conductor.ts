@@ -679,19 +679,13 @@ export class Conductor implements IConductor {
     }
   }
 
-  private checkProgramConstraints(
+  private checkMovementConstraints(
     movement: Movement,
     record: MovementRecord,
   ): void {
-    const totalSpend = (this.concert.usage.spend ?? 0) + (record.usage.spend ?? 0);
-    const totalTokens = (this.concert.usage.tokens ?? 0) + (record.usage.tokens ?? 0);
-    const program = this.score.program ?? {};
-
-    // Update aggregate usage before checking constraints so failures still report real spend.
-    this.concert.usage.spend = totalSpend;
-    this.concert.usage.tokens = totalTokens;
-
-    // Movement-level spend limit (in dollars; internal usage is micro-dollars).
+    // Per-execution spend limit (in dollars; internal usage is micro-dollars).
+    // This is checked against a single harness call (or subscore rollup), matching
+    // the per-execution semantics of budget.timeoutMs.
     const movementMaxSpendMicro = movement.budget?.maxSpendDollars
       ? Math.round(movement.budget.maxSpendDollars * 1_000_000)
       : undefined;
@@ -706,6 +700,19 @@ export class Conductor implements IConductor {
         this.concert.id,
       );
     }
+  }
+
+  private checkProgramConstraints(
+    movement: Movement,
+    record: MovementRecord,
+  ): void {
+    const totalSpend = (this.concert.usage.spend ?? 0) + (record.usage.spend ?? 0);
+    const totalTokens = (this.concert.usage.tokens ?? 0) + (record.usage.tokens ?? 0);
+    const program = this.score.program ?? {};
+
+    // Update aggregate usage before checking constraints so failures still report real spend.
+    this.concert.usage.spend = totalSpend;
+    this.concert.usage.tokens = totalTokens;
 
     // maxSpendDollars is configured in dollars; internal usage is tracked in micro-dollars.
     const maxSpendMicro = program.maxSpendDollars ? Math.round(program.maxSpendDollars * 1_000_000) : undefined;
@@ -773,6 +780,10 @@ export class Conductor implements IConductor {
       });
 
       const record = await this.executeMovement(movement, previousOutputs, signal);
+
+      // Enforce per-execution movement budget before retries, matching the
+      // per-execution semantics of budget.timeoutMs.
+      this.checkMovementConstraints(movement, record);
 
       if (record.status === 'failed' && movement.retryOnFailure) {
         const maxRetries = movement.budget?.maxRetries ?? 2;
