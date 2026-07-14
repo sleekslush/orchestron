@@ -16,7 +16,7 @@ export function createScoreTool(getOrchestron: () => Promise<import('@orchestron
       }),
       yaml: Type.String({
         description:
-          'Complete YAML content of the score. Must include id, name, version, startMovement, program, and movements.',
+          'Complete YAML content of the score. Must include id, name, version, startMovement, and movements.',
       }),
       persist: Type.Optional(
         Type.Boolean({

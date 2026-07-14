@@ -180,7 +180,7 @@ export const OrchestronPlugin: Plugin = async (_input, options) => {
         yaml: tool.schema
           .string()
           .describe(
-            "Complete YAML content of the score. Must include id, name, version, startMovement, program, and movements.",
+            "Complete YAML content of the score. Must include id, name, version, startMovement, and movements.",
           ),
         persist: tool.schema
           .boolean()
