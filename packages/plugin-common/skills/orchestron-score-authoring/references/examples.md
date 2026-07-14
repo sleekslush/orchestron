@@ -2,13 +2,12 @@
 
 ## Minimal Valid Score
 
-Only the absolutely required fields. `harness`, `model`, `provider`, `evaluator`, `output` are all omitted — the platform provides defaults.
+Required fields only.
 
 ```yaml
 id: hello-world
 name: "Hello World"
 version: "1.0.0"
-program: {}
 startMovement: greet
 movements:
   - id: greet

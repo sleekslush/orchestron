@@ -67,7 +67,7 @@ export interface Score {
   evaluator?: EvaluatorConfig;
   movements: Movement[];
   startMovement: MovementID;
-  program: Program;
+  program?: Program;
   metadata?: Record<string, unknown>;
 }
 
