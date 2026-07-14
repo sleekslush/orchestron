@@ -83,6 +83,8 @@ export class ConcertHall implements ChildConcertFactory {
       return new HarnessEvaluator({
         adapter,
         promptTemplate: score.evaluator?.prompt,
+        model: score.evaluator?.model,
+        provider: score.evaluator?.provider,
       });
     }
     return this.evaluator;
