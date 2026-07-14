@@ -138,7 +138,8 @@ program:
   maxSpendDollars: 5
   maxMovements: 10
   perSection:
-    "*":
+    execution:
+      maxSpendDollars: 3
       maxMovements: 6
 startMovement: run
 movements:
@@ -161,7 +162,48 @@ movements:
         on: failure
 ```
 
-Note: `perSection` currently only uses the `"*"` wildcard to override the global movement limit. Section-specific keys are parsed but not enforced.
+## Wildcard Section Budgets
+
+Use `*` to set a base budget for all sections, then override specific fields for individual sections:
+
+```yaml
+id: wildcard-budget
+name: "Wildcard Budget Example"
+version: "1.0.0"
+program:
+  perSection:
+    "*":
+      maxMovements: 5
+      maxSpendDollars: 2
+    execution:
+      maxMovements: 3  # overrides *; inherits maxSpendDollars: 2
+    review:
+      maxSpendDollars: 1  # overrides *; inherits maxMovements: 5
+startMovement: run
+movements:
+  - id: run
+    name: "Run"
+    section: execution
+    harness: pi
+    prompt: "Execute the task."
+    goal:
+      description: "Task executed"
+      strategy: llm_judge
+    transitions:
+      - to: review
+        on: success
+  - id: review
+    name: "Review"
+    section: review
+    harness: pi
+    prompt: "Review the results."
+    goal:
+      description: "Review complete"
+      strategy: llm_judge
+    transitions:
+      - to: __end__
+        on: success
+```
 
 ## Subscore Delegation
 

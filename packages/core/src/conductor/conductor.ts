@@ -9,6 +9,7 @@ import type {
   Score,
   Movement,
   MovementID,
+  SectionBudget,
 } from '../types/score.js';
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
@@ -26,6 +27,7 @@ import {
 import { PromptBuilder } from './prompt-builder.js';
 import { ConstraintChecker } from './constraint-checker.js';
 import { matchTransition } from './transition-resolver.js';
+import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
 
 export { StartOptions };
@@ -46,6 +48,8 @@ export class Conductor implements IConductor {
   private childConductors = new Map<ConcertID, IConductor>();
   private promptBuilder = new PromptBuilder();
   private constraintChecker: ConstraintChecker;
+  private sectionMovementCount = new Map<string, number>();
+  private sectionSpend = new Map<string, number>();
 
   constructor(
     private concert: Concert,
@@ -162,6 +166,11 @@ export class Conductor implements IConductor {
       if (failedMovement) {
         movementCount++;
         this.constraintChecker.checkMovementLimit(movementCount, failedMovement.id, this.concert.id);
+        const preCrashSectionCount = this.concert.history.filter((r) => {
+          const m = this.score.movements.find((x) => x.id === r.movementId);
+          return m?.section === failedMovement.section;
+        }).length;
+        this.checkSectionMovementLimit(failedMovement, preCrashSectionCount + 1);
 
         const error: SerializedError = {
           code: 'STATE_CORRUPTION',
@@ -208,6 +217,7 @@ export class Conductor implements IConductor {
 
     const previousOutputs = this.buildPreviousOutputs();
     this.seedMovementVisitCounts();
+    this.seedSectionStats();
 
     this.loopPromise = this.runLoop(currentId, previousOutputs, movementCount, signal).catch(
       (err) => this.handleExecutionError(err),
@@ -253,6 +263,7 @@ export class Conductor implements IConductor {
       const signal = this.abortController.signal;
       const previousOutputs = this.buildPreviousOutputs();
       this.seedMovementVisitCounts();
+      this.seedSectionStats();
       const currentId = this.concert.currentMovement ?? this.score.startMovement;
       this.loopPromise = this.runLoop(
         currentId,
@@ -306,6 +317,25 @@ export class Conductor implements IConductor {
 
   private seedMovementVisitCounts(): void {
     this.promptBuilder.seedFromHistory(this.concert.history);
+  }
+
+  private seedSectionStats(): void {
+    this.sectionMovementCount.clear();
+    this.sectionSpend.clear();
+    for (const record of this.concert.history) {
+      const movement = this.score.movements.find((m) => m.id === record.movementId);
+      if (!movement) continue;
+      this.sectionMovementCount.set(
+        movement.section,
+        (this.sectionMovementCount.get(movement.section) ?? 0) + 1,
+      );
+      if (record.usage.spend) {
+        this.sectionSpend.set(
+          movement.section,
+          (this.sectionSpend.get(movement.section) ?? 0) + record.usage.spend,
+        );
+      }
+    }
   }
 
   private async executeMovement(
@@ -627,6 +657,50 @@ export class Conductor implements IConductor {
     return adapter;
   }
 
+  private getMergedSectionBudget(section: string): SectionBudget | undefined {
+    const wildcard = this.score.program?.perSection?.['*'];
+    const specific = this.score.program?.perSection?.[section];
+    if (!wildcard && !specific) return undefined;
+    return {
+      maxMovements: specific?.maxMovements ?? wildcard?.maxMovements,
+      maxSpendDollars: specific?.maxSpendDollars ?? wildcard?.maxSpendDollars,
+    };
+  }
+
+  private checkSectionMovementLimit(movement: Movement, count: number): void {
+    const sectionBudget = this.getMergedSectionBudget(movement.section);
+    if (sectionBudget?.maxMovements !== undefined && count > sectionBudget.maxMovements) {
+      throw new ConstraintBreachError(
+        `Section '${movement.section}' movement limit exceeded: ${count} > ${sectionBudget.maxMovements}`,
+        'MOVEMENT_LIMIT',
+        sectionBudget.maxMovements,
+        count,
+        'maxMovements',
+        this.concert.id,
+      );
+    }
+  }
+
+  private checkSectionSpendLimit(movement: Movement, record: MovementRecord): void {
+    const sectionBudget = this.getMergedSectionBudget(movement.section);
+    if (sectionBudget?.maxSpendDollars !== undefined) {
+      const sectionSpend = (this.sectionSpend.get(movement.section) ?? 0) + (record.usage.spend ?? 0);
+      this.sectionSpend.set(movement.section, sectionSpend);
+      const maxSpendMicro = dollarsToMicro(sectionBudget.maxSpendDollars);
+      if (sectionSpend > maxSpendMicro) {
+        const sectionSpendDollars = microToDollars(sectionSpend);
+        throw new ConstraintBreachError(
+          `Section '${movement.section}' spend limit exceeded: $${sectionSpendDollars.toFixed(6)} > $${sectionBudget.maxSpendDollars.toFixed(6)}`,
+          'SPEND_LIMIT',
+          sectionBudget.maxSpendDollars,
+          sectionSpendDollars,
+          'maxSpendDollars',
+          this.concert.id,
+        );
+      }
+    }
+  }
+
   private async runLoop(
     startId: MovementID | '__end__' | '__fail__',
     previousOutputs: Map<MovementID, MovementRecord>,
@@ -657,6 +731,10 @@ export class Conductor implements IConductor {
 
       movementCount++;
       this.constraintChecker.checkMovementLimit(movementCount, movement.id, this.concert.id);
+      this.checkSectionMovementLimit(
+        movement,
+        (this.sectionMovementCount.get(movement.section) ?? 0) + 1,
+      );
 
       this.concert.currentMovement = movement.id;
       await this.store.updateConcert({
@@ -724,6 +802,10 @@ export class Conductor implements IConductor {
 
       this.concert.history.push(record);
       previousOutputs.set(movement.id, record);
+      this.sectionMovementCount.set(
+        movement.section,
+        (this.sectionMovementCount.get(movement.section) ?? 0) + 1,
+      );
 
       const usageResult = this.constraintChecker.checkProgramConstraints(
         this.concert.usage,
@@ -733,6 +815,7 @@ export class Conductor implements IConductor {
       );
       this.concert.usage.spend = usageResult.totalSpend;
       this.concert.usage.tokens = usageResult.totalTokens;
+      this.checkSectionSpendLimit(movement, record);
 
       await this.store.updateConcert({
         id: this.concert.id,

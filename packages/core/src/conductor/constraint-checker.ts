@@ -13,10 +13,7 @@ export class ConstraintChecker {
   constructor(private program: Program | undefined) {}
 
   checkMovementLimit(count: number, movementId: string, concertId: string): void {
-    const maxMovements =
-      this.program?.maxMovements ??
-      this.program?.perSection?.['*']?.maxMovements ??
-      100;
+    const maxMovements = this.program?.maxMovements ?? 100;
     if (count > maxMovements) {
       throw new ConstraintBreachError(
         `Movement limit exceeded: ${count} > ${maxMovements}`,

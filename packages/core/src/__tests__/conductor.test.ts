@@ -412,6 +412,278 @@ describe('Conductor constraints', () => {
     const events = await store.getEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
+
+  it('fails when per-section movement limit is exceeded', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'section-movement-limit', name: 'Section Movement Limit', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'execution', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'execution', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        maxMovements: 10,
+        perSection: { execution: { maxMovements: 1 } },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('section-movement-limit');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
+
+  it('fails when per-section spend limit is exceeded', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'section-spend-limit', name: 'Section Spend Limit', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'execution', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'execution', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        maxSpendDollars: 5,
+        perSection: { execution: { maxSpendDollars: 0.5 } },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 600_000, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('section-spend-limit');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
+
+  it('does not use wildcard as global maxMovements fallback', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'wildcard-not-global', name: 'Wildcard Not Global', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'alpha', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'beta', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        perSection: { '*': { maxMovements: 1 } },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('wildcard-not-global');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+  });
+
+  it('applies wildcard per-section budget to unlisted sections', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'wildcard-unlisted', name: 'Wildcard Unlisted', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'review', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'review', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        perSection: { '*': { maxMovements: 1 } },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('wildcard-unlisted');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
+
+  it('merges wildcard budget with explicit section overrides', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'merge-wildcard', name: 'Merge Wildcard', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'execution', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'execution', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        perSection: {
+          '*': { maxMovements: 5, maxSpendDollars: 0.5 },
+          execution: { maxMovements: 1 },
+        },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('merge-wildcard');
+    await conductor.start();
+    // execution maxMovements = 1 (explicit override), maxSpendDollars = 0.5 (from wildcard)
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
+
+  it('inherits wildcard maxSpendDollars when section overrides only maxMovements', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'inherit-spend', name: 'Inherit Spend', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'execution', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'execution', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        perSection: {
+          '*': { maxSpendDollars: 0.5 },
+          execution: { maxMovements: 5 },
+        },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 600_000, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('inherit-spend');
+    await conductor.start();
+    // execution maxMovements = 5 (explicit), maxSpendDollars = 0.5 (from wildcard)
+    // First movement costs $0.6, which exceeds $0.5
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
+
+  it('inherits wildcard maxMovements when section overrides only maxSpendDollars', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'inherit-movements', name: 'Inherit Movements', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'execution', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'execution', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        perSection: {
+          '*': { maxMovements: 1 },
+          execution: { maxSpendDollars: 5 },
+        },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('inherit-movements');
+    await conductor.start();
+    // execution maxMovements = 1 (from wildcard), maxSpendDollars = 5 (explicit)
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
 });
 
 // ─── Movement Progress & Timeout Tests ───────────────────────
