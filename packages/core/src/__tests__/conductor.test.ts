@@ -136,9 +136,10 @@ it('movement spend limit breach', async () => {
   expect(conductor.status).toBe('failed');
   const events = await store.getEvents(conductor.concertId, { types: ['constraint:breached'] });
   expect(events).toHaveLength(1);
-  expect(events[0].constraint).toBe('maxSpendDollars');
-  expect(events[0].limit).toBe(0.5);
-  expect(events[0].actual).toBe(0.6);
+  const breachEvent = events[0] as Extract<typeof events[0], { type: 'constraint:breached' }>;
+  expect(breachEvent.constraint).toBe('maxSpendDollars');
+  expect(breachEvent.limit).toBe(0.5);
+  expect(breachEvent.actual).toBe(0.6);
 });
 
 it('missing adapter', async () => {
@@ -387,10 +388,12 @@ describe('Conductor constraints', () => {
       movements: [{
         id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
         goal: { description: 'done', strategy: 'llm_judge' },
+        budget: { timeoutMs: 1000 },
         transitions: [{ to: 'b', on: 'success' }],
       }, {
         id: 'b', name: 'B', section: 'x', harness: 'fake', prompt: 'B',
         goal: { description: 'done', strategy: 'llm_judge' },
+        budget: { timeoutMs: 1000 },
         transitions: [{ to: '__end__', on: 'success' }],
       }],
       program: { maxDurationMs: 50 },

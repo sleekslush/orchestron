@@ -46,7 +46,7 @@ export async function editScore(
 
   const { score, errors } = parseAndValidateScore(orchestron.registry, input.yaml);
 
-  if (errors.length > 0) {
+  if (errors.length > 0 || !score) {
     return { scoreId, persisted: false, valid: false, errors };
   }
 
