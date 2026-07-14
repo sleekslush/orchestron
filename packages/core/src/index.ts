@@ -1,6 +1,12 @@
 export * from './types/index.js';
 
 export { safeJsonParse, extractBalancedJson } from './json-utils.js';
+export {
+  isObject,
+  tryParseStructured,
+  tryParseStructuredFromText,
+} from './structured-output.js';
+export { SessionPool } from './session-pool.js';
 export { dollarsToMicro, microToDollars, MICRO_DOLLARS_PER_DOLLAR } from './money.js';
 
 export { loadConfigFile, resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH } from './config.js';
@@ -19,6 +25,10 @@ export type { ChildConcertFactory } from './conductor/child-concert-factory.js';
 export type { StartOptions } from './conductor/start-options.js';
 export { FakeHarnessAdapter } from './conductor/fake-harness.js';
 export type { FakeHarnessConfig, FakeHarnessScenario } from './conductor/fake-harness.js';
+export { PromptBuilder } from './conductor/prompt-builder.js';
+export { ConstraintChecker } from './conductor/constraint-checker.js';
+export type { ConstraintResult } from './conductor/constraint-checker.js';
+export { matchTransition } from './conductor/transition-resolver.js';
 
 export { ConcertHall } from './hall/concert-hall.js';
 export type { ConcertHallOptions } from './hall/concert-hall.js';

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command, Option } from 'commander';
-import { createOrchestron, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR } from './orchestron.js';
+import { withOrchestron, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR } from './orchestron.js';
 import { startCommandHandler } from './commands/start.js';
 import {
   pauseCommandHandler,
@@ -13,10 +13,10 @@ import { scoresCommandHandler } from './commands/scores.js';
 import { dashboardCommandHandler } from './commands/dashboard.js';
 import { wantsJson } from './output.js';
 
-function safeAction(
-  fn: (...args: any[]) => Promise<void>,
-): (...args: any[]) => Promise<void> {
-  return async (...args: any[]) => {
+function safeAction<T extends unknown[]>(
+  fn: (...args: T) => Promise<void>,
+): (...args: T) => Promise<void> {
+  return async (...args: T) => {
     try {
       await fn(...args);
     } catch (err) {
@@ -52,48 +52,36 @@ program
   .action(safeAction(async (scoreId: string, _options: unknown, command: Command) => {
     const { parseContextArgs } = await import('./context.js');
     const context = parseContextArgs(process.argv);
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
-    try {
-      await startCommandHandler(orchestron, scoreId, context, wantsJson(command));
-    } finally {
-      orchestron.store.close();
-    }
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      startCommandHandler(orchestron, scoreId, context, wantsJson(command)),
+    );
   }));
 
 program
   .command('pause <concert-id>')
   .description('Pause a running concert')
   .action(safeAction(async (concertId: string, _options: unknown, command: Command) => {
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
-    try {
-      await pauseCommandHandler(orchestron, concertId, wantsJson(command));
-    } finally {
-      orchestron.store.close();
-    }
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      pauseCommandHandler(orchestron, concertId, wantsJson(command)),
+    );
   }));
 
 program
   .command('resume <concert-id>')
   .description('Resume a paused concert')
   .action(safeAction(async (concertId: string, _options: unknown, command: Command) => {
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
-    try {
-      await resumeCommandHandler(orchestron, concertId, wantsJson(command));
-    } finally {
-      orchestron.store.close();
-    }
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      resumeCommandHandler(orchestron, concertId, wantsJson(command)),
+    );
   }));
 
 program
   .command('cancel <concert-id>')
   .description('Cancel a running or paused concert')
   .action(safeAction(async (concertId: string, _options: unknown, command: Command) => {
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
-    try {
-      await cancelCommandHandler(orchestron, concertId, wantsJson(command));
-    } finally {
-      orchestron.store.close();
-    }
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      cancelCommandHandler(orchestron, concertId, wantsJson(command)),
+    );
   }));
 
 program
@@ -103,12 +91,9 @@ program
   .action(safeAction(async (concertId: string | undefined, _options: unknown, command: Command) => {
     const opts = command.optsWithGlobals();
     const verbose = opts.verbose === true;
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
-    try {
-      await statusCommandHandler(orchestron, concertId, wantsJson(command), verbose);
-    } finally {
-      orchestron.store.close();
-    }
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      statusCommandHandler(orchestron, concertId, wantsJson(command), verbose),
+    );
   }));
 
 program
@@ -126,16 +111,9 @@ program
   )
   .action(safeAction(async (_options: unknown, command: Command) => {
     const opts = command.opts();
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
-    try {
-      await listCommandHandler(
-        orchestron,
-        { status: opts.status },
-        wantsJson(command),
-      );
-    } finally {
-      orchestron.store.close();
-    }
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      listCommandHandler(orchestron, { status: opts.status }, wantsJson(command)),
+    );
   }));
 
 program
@@ -144,12 +122,9 @@ program
   .option('--validate', 'Validate all registered scores')
   .action(safeAction(async (_options: unknown, command: Command) => {
     const opts = command.opts();
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
-    try {
-      await scoresCommandHandler(orchestron, opts.validate === true, wantsJson(command));
-    } finally {
-      orchestron.store.close();
-    }
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      scoresCommandHandler(orchestron, opts.validate === true, wantsJson(command)),
+    );
   }));
 
 program
@@ -163,8 +138,9 @@ program
       console.error(`error: option '--port <port>' argument '${opts.port}' is invalid. Must be an integer between 1 and 65535.`);
       process.exit(1);
     }
-    const orchestron = await createOrchestron(getOrchestronOptions(program));
-    await dashboardCommandHandler(orchestron, port);
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      dashboardCommandHandler(orchestron, port),
+    );
   }));
 
 function getOrchestronOptions(program: Command): {

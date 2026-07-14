@@ -47,24 +47,21 @@ export function scoreFilePath(
 export function parseAndValidateScore(
   registry: ScoreRegistry,
   yamlText: string,
-): { score: Score; errors: Array<{ code: string; message: string }> } {
-  let score: Score;
+): { score?: Score; errors: Array<{ code: string; message: string }> } {
+  let parsed: unknown;
   try {
-    const parsed = yaml.load(yamlText);
-    if (!parsed || typeof parsed !== 'object') {
-      return {
-        score: parsed as Score,
-        errors: [{ code: 'INVALID_SCORE', message: 'YAML does not contain a valid object' }],
-      };
-    }
-    score = parsed as Score;
+    parsed = yaml.load(yamlText);
   } catch (err) {
     return {
-      score: undefined as unknown as Score,
       errors: [{ code: 'INVALID_SCORE', message: `YAML parse error: ${(err as Error).message}` }],
     };
   }
-
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {
+      errors: [{ code: 'INVALID_SCORE', message: 'YAML does not contain a valid object' }],
+    };
+  }
+  const score = parsed as Score;
   const rawErrors = registry.validate(score);
   const errors = rawErrors.map((e) => ({ code: e.code, message: e.message }));
   return { score, errors };

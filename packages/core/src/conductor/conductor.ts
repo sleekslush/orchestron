@@ -9,9 +9,7 @@ import type {
   Score,
   Movement,
   MovementID,
-  Program,
   SectionBudget,
-  Transition,
 } from '../types/score.js';
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
@@ -26,6 +24,9 @@ import {
   HarnessError,
   OrchestronError,
 } from '../types/errors.js';
+import { PromptBuilder } from './prompt-builder.js';
+import { ConstraintChecker } from './constraint-checker.js';
+import { matchTransition } from './transition-resolver.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 
 export { StartOptions };
@@ -43,7 +44,9 @@ export class Conductor implements IConductor {
   private adapterResolver: { get(name: string): Promise<HarnessAdapter> };
   private loopPromise?: Promise<void>;
   private traceService?: TraceService;
-  private movementVisitCount = new Map<MovementID, number>();
+  private childConductors = new Map<ConcertID, IConductor>();
+  private promptBuilder = new PromptBuilder();
+  private constraintChecker: ConstraintChecker;
   private sectionMovementCount = new Map<string, number>();
   private sectionSpend = new Map<string, number>();
 
@@ -56,9 +59,11 @@ export class Conductor implements IConductor {
     private evaluator: Evaluator,
     tracesDir?: string,
     private defaultHarness?: string,
+    private onFinalized?: (concertId: ConcertID) => void,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
+    this.constraintChecker = new ConstraintChecker(this.score.program);
     if (tracesDir) {
       this.traceService = new TraceService(tracesDir, store);
     }
@@ -174,7 +179,7 @@ export class Conductor implements IConductor {
 
       if (failedMovement) {
         movementCount++;
-        this.checkMovementLimit(movementCount, failedMovement.id);
+        this.constraintChecker.checkMovementLimit(movementCount, failedMovement.id, this.concert.id);
         const preCrashSectionCount = this.concert.history.filter((r) => {
           const m = this.score.movements.find((x) => x.id === r.movementId);
           return m?.section === failedMovement.section;
@@ -215,7 +220,7 @@ export class Conductor implements IConductor {
 
         this.concert.history.push(failedRecord);
 
-        const transition = this.matchTransition(failedMovement, false);
+        const transition = matchTransition(failedMovement, false);
         currentId = transition?.to ?? '__fail__';
       } else {
         currentId = '__fail__';
@@ -298,6 +303,13 @@ export class Conductor implements IConductor {
       this.pauseResolver = null;
     }
 
+    // Propagate cancellation to child concerts.
+    await Promise.all(
+      Array.from(this.childConductors.values()).map((c) =>
+        c.cancel().catch(() => {}),
+      ),
+    );
+
     // If there is no active execution loop (e.g. pending or rehydrated paused),
     // finalize immediately.
     if (!this.loopPromise) {
@@ -318,13 +330,7 @@ export class Conductor implements IConductor {
   }
 
   private seedMovementVisitCounts(): void {
-    this.movementVisitCount.clear();
-    for (const record of this.concert.history) {
-      this.movementVisitCount.set(
-        record.movementId,
-        (this.movementVisitCount.get(record.movementId) ?? 0) + 1,
-      );
-    }
+    this.promptBuilder.seedFromHistory(this.concert.history);
   }
 
   private seedSectionStats(): void {
@@ -374,11 +380,12 @@ export class Conductor implements IConductor {
       }
 
       harnessAdapter = await this.resolveAdapter(movement);
-      const prompt = this.buildPrompt(movement, previousOutputs);
-      this.movementVisitCount.set(
-        movement.id,
-        (this.movementVisitCount.get(movement.id) ?? 0) + 1,
+      const prompt = this.promptBuilder.buildPrompt(
+        movement,
+        previousOutputs,
+        this.concert.context.shared,
       );
+      this.promptBuilder.recordVisit(movement.id);
       const persistSession = this.score.program?.persistSession !== false;
       sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
 
@@ -571,6 +578,7 @@ export class Conductor implements IConductor {
       childOptions,
     );
 
+    this.childConductors.set(childConductor.concertId, childConductor);
     this.concert.childConcertIds.push(childConductor.concertId);
 
     await this.store.updateConcert({
@@ -631,82 +639,6 @@ export class Conductor implements IConductor {
     return adapter;
   }
 
-  private selectMovementPrompt(movement: Movement): string {
-    if (!movement.prompt) return '';
-
-    if (typeof movement.prompt === 'object') {
-      const visits = this.movementVisitCount.get(movement.id) ?? 0;
-      return visits === 0 ? movement.prompt.initial : movement.prompt.subsequent;
-    }
-
-    return movement.prompt;
-  }
-
-  private buildPrompt(
-    movement: Movement,
-    previousOutputs: Map<MovementID, MovementRecord>,
-  ): string {
-    const raw = this.selectMovementPrompt(movement);
-    if (!raw) return '';
-
-    // Structured output formatting/parsing is an adapter concern per the session-persistence
-    // decision; the adapter injects the schema instructions and parses the result.
-    return this.resolveTemplate(raw, movement.id, previousOutputs);
-  }
-
-  private resolveTemplate(
-    template: string,
-    _currentMovementId: MovementID,
-    previousOutputs: Map<MovementID, MovementRecord>,
-  ): string {
-    let result = template;
-
-    for (const [key, value] of Object.entries(this.concert.context.shared)) {
-      const placeholder = `{{context.${key}}}`;
-      result = result.replaceAll(placeholder, this.stringify(value));
-    }
-
-    for (const [id, record] of previousOutputs) {
-      const placeholder = `{{context.previousOutputs.${id}}}`;
-      result = result.replaceAll(placeholder, record.output);
-    }
-
-    return result;
-  }
-
-  private stringify(value: unknown): string {
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-    if (value === null || value === undefined) return '';
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
-  private matchTransition(
-    movement: Movement,
-    achieved: boolean,
-  ): Transition | undefined {
-    const status: 'success' | 'failure' = achieved ? 'success' : 'failure';
-    return movement.transitions.find((t) => t.on === status || t.on === 'skip');
-  }
-
-  private checkMovementLimit(count: number, movementId: string): void {
-    const maxMovements = this.score.program?.maxMovements ?? 100;
-    if (count > maxMovements) {
-      throw new ConstraintBreachError(
-        `Movement limit exceeded: ${count} > ${maxMovements}`,
-        'MOVEMENT_LIMIT',
-        maxMovements,
-        count,
-        'maxMovements',
-        this.concert.id,
-      );
-    }
-  }
-
   private getMergedSectionBudget(section: string): SectionBudget | undefined {
     const wildcard = this.score.program?.perSection?.['*'];
     const specific = this.score.program?.perSection?.[section];
@@ -751,69 +683,6 @@ export class Conductor implements IConductor {
     }
   }
 
-  private checkMovementConstraints(
-    movement: Movement,
-    record: MovementRecord,
-  ): void {
-    // Per-execution spend limit (in dollars; internal usage is micro-dollars).
-    // This is checked against a single harness call (or subscore rollup), matching
-    // the per-execution semantics of budget.timeoutMs.
-    const movementMaxSpendMicro = movement.budget?.maxSpendDollars
-      ? Math.round(movement.budget.maxSpendDollars * 1_000_000)
-      : undefined;
-    if (movementMaxSpendMicro && (record.usage.spend ?? 0) > movementMaxSpendMicro) {
-      const movementSpendDollars = (record.usage.spend ?? 0) / 1_000_000;
-      throw new ConstraintBreachError(
-        `Movement spend limit exceeded: $${movementSpendDollars.toFixed(6)} > $${movement.budget!.maxSpendDollars!.toFixed(6)}`,
-        'SPEND_LIMIT',
-        movement.budget!.maxSpendDollars!,
-        movementSpendDollars,
-        'maxSpendDollars',
-        this.concert.id,
-      );
-    }
-  }
-
-  private checkProgramConstraints(
-    movement: Movement,
-    record: MovementRecord,
-  ): void {
-    const totalSpend = (this.concert.usage.spend ?? 0) + (record.usage.spend ?? 0);
-    const totalTokens = (this.concert.usage.tokens ?? 0) + (record.usage.tokens ?? 0);
-    const program = this.score.program ?? {};
-
-    // Update aggregate usage before checking constraints so failures still report real spend.
-    this.concert.usage.spend = totalSpend;
-    this.concert.usage.tokens = totalTokens;
-
-    // maxSpendDollars is configured in dollars; internal usage is tracked in micro-dollars.
-    const maxSpendMicro = program.maxSpendDollars ? dollarsToMicro(program.maxSpendDollars) : undefined;
-    if (maxSpendMicro && totalSpend > maxSpendMicro) {
-      const totalSpendDollars = microToDollars(totalSpend);
-      throw new ConstraintBreachError(
-        `Spend limit exceeded: $${totalSpendDollars.toFixed(6)} > $${program.maxSpendDollars!.toFixed(6)}`,
-        'SPEND_LIMIT',
-        program.maxSpendDollars!,
-        totalSpendDollars,
-        'maxSpendDollars',
-        this.concert.id,
-      );
-    }
-    if (program.maxDurationMs && this.startedAt > 0) {
-      const elapsed = Date.now() - this.startedAt;
-      if (elapsed > program.maxDurationMs) {
-        throw new ConstraintBreachError(
-          `Duration limit exceeded: ${elapsed}ms > ${program.maxDurationMs}ms`,
-          'DURATION_LIMIT',
-          program.maxDurationMs,
-          elapsed,
-          'maxDurationMs',
-          this.concert.id,
-        );
-      }
-    }
-  }
-
   private async runLoop(
     startId: MovementID | '__end__' | '__fail__',
     previousOutputs: Map<MovementID, MovementRecord>,
@@ -843,7 +712,7 @@ export class Conductor implements IConductor {
       }
 
       movementCount++;
-      this.checkMovementLimit(movementCount, movement.id);
+      this.constraintChecker.checkMovementLimit(movementCount, movement.id, this.concert.id);
       this.checkSectionMovementLimit(
         movement,
         (this.sectionMovementCount.get(movement.section) ?? 0) + 1,
@@ -859,7 +728,7 @@ export class Conductor implements IConductor {
 
       // Enforce per-execution movement budget before retries, matching the
       // per-execution semantics of budget.timeoutMs.
-      this.checkMovementConstraints(movement, record);
+      this.constraintChecker.checkMovementConstraints(movement, record, this.concert.id);
 
       if (record.status === 'failed' && movement.retryOnFailure) {
         const maxRetries = movement.budget?.maxRetries ?? 2;
@@ -920,7 +789,14 @@ export class Conductor implements IConductor {
         (this.sectionMovementCount.get(movement.section) ?? 0) + 1,
       );
 
-      this.checkProgramConstraints(movement, record);
+      const usageResult = this.constraintChecker.checkProgramConstraints(
+        this.concert.usage,
+        record.usage,
+        this.startedAt,
+        this.concert.id,
+      );
+      this.concert.usage.spend = usageResult.totalSpend;
+      this.concert.usage.tokens = usageResult.totalTokens;
       this.checkSectionSpendLimit(movement, record);
 
       await this.store.updateConcert({
@@ -928,7 +804,7 @@ export class Conductor implements IConductor {
         usage: this.concert.usage,
       });
 
-      const transition = this.matchTransition(movement, achieved);
+      const transition = matchTransition(movement, achieved);
       currentId = transition?.to ?? '__fail__';
     }
 
@@ -981,6 +857,14 @@ export class Conductor implements IConductor {
     );
     this.activeSessions.clear();
 
+    if (status === 'failed' || status === 'cancelled') {
+      await Promise.all(
+        Array.from(this.childConductors.values()).map((c) =>
+          c.cancel().catch(() => {}),
+        ),
+      );
+    }
+
     await this.store.updateConcert({
       id: this.concert.id,
       status,
@@ -1009,5 +893,8 @@ export class Conductor implements IConductor {
         timestamp: new Date(),
       });
     }
+
+    this.childConductors.clear();
+    this.onFinalized?.(this.concert.id);
   }
 }

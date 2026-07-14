@@ -73,7 +73,6 @@ export class TraceService {
         try {
           return JSON.parse(line) as SessionTraceEvent;
         } catch {
-          console.error('Failed to parse trace line:', line);
           return undefined;
         }
       })
