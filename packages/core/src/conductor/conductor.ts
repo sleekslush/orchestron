@@ -43,6 +43,7 @@ export class Conductor implements IConductor {
   private loopPromise?: Promise<void>;
   private traceService?: TraceService;
   private movementVisitCount = new Map<MovementID, number>();
+  private childConductors = new Map<ConcertID, IConductor>();
 
   constructor(
     private concert: Concert,
@@ -53,6 +54,7 @@ export class Conductor implements IConductor {
     private evaluator: Evaluator,
     tracesDir?: string,
     private defaultHarness?: string,
+    private onFinalized?: (concertId: ConcertID) => void,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
@@ -287,6 +289,13 @@ export class Conductor implements IConductor {
       this.pauseResolver?.();
       this.pauseResolver = null;
     }
+
+    // Propagate cancellation to child concerts.
+    await Promise.all(
+      Array.from(this.childConductors.values()).map((c) =>
+        c.cancel().catch(() => {}),
+      ),
+    );
 
     // If there is no active execution loop (e.g. pending or rehydrated paused),
     // finalize immediately.
@@ -541,6 +550,7 @@ export class Conductor implements IConductor {
       childOptions,
     );
 
+    this.childConductors.set(childConductor.concertId, childConductor);
     this.concert.childConcertIds.push(childConductor.concertId);
 
     await this.store.updateConcert({
@@ -901,6 +911,14 @@ export class Conductor implements IConductor {
     );
     this.activeSessions.clear();
 
+    if (status === 'failed' || status === 'cancelled') {
+      await Promise.all(
+        Array.from(this.childConductors.values()).map((c) =>
+          c.cancel().catch(() => {}),
+        ),
+      );
+    }
+
     await this.store.updateConcert({
       id: this.concert.id,
       status,
@@ -929,5 +947,8 @@ export class Conductor implements IConductor {
         timestamp: new Date(),
       });
     }
+
+    this.childConductors.clear();
+    this.onFinalized?.(this.concert.id);
   }
 }
