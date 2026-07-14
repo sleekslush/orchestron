@@ -89,6 +89,21 @@ async function createTestOrchestron(dir: string) {
   });
 }
 
+function captureOutput(): { logs: string[]; restore: () => void } {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  const originalErr = console.error;
+  console.log = (msg: string) => logs.push(msg);
+  console.error = () => {};
+  return {
+    logs,
+    restore: () => {
+      console.log = originalLog;
+      console.error = originalErr;
+    },
+  };
+}
+
 describe('CLI commands', () => {
   let dir: string;
 
@@ -102,14 +117,12 @@ describe('CLI commands', () => {
 
   it('starts a concert and returns completed status', async () => {
     const orchestron = await createTestOrchestron(dir);
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => logs.push(msg);
+    const { logs, restore } = captureOutput();
 
     try {
       await startCommandHandler(orchestron, 'cli-test', { task: 'hello' }, false);
     } finally {
-      console.log = originalLog;
+      restore();
       orchestron.store.close();
     }
 
@@ -119,16 +132,19 @@ describe('CLI commands', () => {
 
   it('lists concerts', async () => {
     const orchestron = await createTestOrchestron(dir);
-    await startCommandHandler(orchestron, 'cli-test', {}, false);
+    const { restore: restoreStart } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'cli-test', {}, false);
+    } finally {
+      restoreStart();
+    }
 
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => logs.push(msg);
+    const { logs, restore } = captureOutput();
 
     try {
       await listCommandHandler(orchestron, {}, false);
     } finally {
-      console.log = originalLog;
+      restore();
       orchestron.store.close();
     }
 
@@ -137,19 +153,22 @@ describe('CLI commands', () => {
 
   it('shows status for a specific concert', async () => {
     const orchestron = await createTestOrchestron(dir);
-    await startCommandHandler(orchestron, 'cli-test', {}, false);
+    const { restore: restoreStart } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'cli-test', {}, false);
+    } finally {
+      restoreStart();
+    }
 
     const concerts = await orchestron.store.listConcerts();
     const concertId = concerts[0].id;
 
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => logs.push(msg);
+    const { logs, restore } = captureOutput();
 
     try {
       await statusCommandHandler(orchestron, concertId, false, false);
     } finally {
-      console.log = originalLog;
+      restore();
       orchestron.store.close();
     }
 
@@ -158,19 +177,22 @@ describe('CLI commands', () => {
 
   it('shows detailed movement information with --verbose', async () => {
     const orchestron = await createTestOrchestron(dir);
-    await startCommandHandler(orchestron, 'cli-test', { task: 'hello' }, false);
+    const { restore: restoreStart } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'cli-test', { task: 'hello' }, false);
+    } finally {
+      restoreStart();
+    }
 
     const concerts = await orchestron.store.listConcerts();
     const concertId = concerts[0].id;
 
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => logs.push(msg);
+    const { logs, restore } = captureOutput();
 
     try {
       await statusCommandHandler(orchestron, concertId, false, true);
     } finally {
-      console.log = originalLog;
+      restore();
       orchestron.store.close();
     }
 
@@ -180,16 +202,19 @@ describe('CLI commands', () => {
 
   it('shows system status when no concert id is given', async () => {
     const orchestron = await createTestOrchestron(dir);
-    await startCommandHandler(orchestron, 'cli-test', {}, false);
+    const { restore: restoreStart } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'cli-test', {}, false);
+    } finally {
+      restoreStart();
+    }
 
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => logs.push(msg);
+    const { logs, restore } = captureOutput();
 
     try {
       await statusCommandHandler(orchestron, undefined, false, false);
     } finally {
-      console.log = originalLog;
+      restore();
       orchestron.store.close();
     }
 
@@ -199,14 +224,12 @@ describe('CLI commands', () => {
   it('lists scores', async () => {
     const orchestron = await createTestOrchestron(dir);
 
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => logs.push(msg);
+    const { logs, restore } = captureOutput();
 
     try {
       await scoresCommandHandler(orchestron, false, false);
     } finally {
-      console.log = originalLog;
+      restore();
       orchestron.store.close();
     }
 
@@ -216,14 +239,12 @@ describe('CLI commands', () => {
   it('validates scores', async () => {
     const orchestron = await createTestOrchestron(dir);
 
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => logs.push(msg);
+    const { logs, restore } = captureOutput();
 
     try {
       await scoresCommandHandler(orchestron, true, false);
     } finally {
-      console.log = originalLog;
+      restore();
       orchestron.store.close();
     }
 
@@ -300,7 +321,12 @@ describe('CLI commands', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
-    await pauseCommandHandler(testOrchestron, conductor.concertId, false);
+    const { restore: restorePause } = captureOutput();
+    try {
+      await pauseCommandHandler(testOrchestron, conductor.concertId, false);
+    } finally {
+      restorePause();
+    }
 
     // Allow the adapter to finish; the conductor should remain paused.
     releaseStep2!();
@@ -314,7 +340,12 @@ describe('CLI commands', () => {
 
     expect((await conductor.getState()).status).toBe('paused');
 
-    await resumeCommandHandler(testOrchestron, conductor.concertId, false);
+    const { restore: restoreResume } = captureOutput();
+    try {
+      await resumeCommandHandler(testOrchestron, conductor.concertId, false);
+    } finally {
+      restoreResume();
+    }
     await runPromise;
 
     const finalState = await conductor.getState();
@@ -361,14 +392,12 @@ describe('CLI commands', () => {
       defaultHarness: 'fake',
     });
 
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => logs.push(msg);
+    const { logs, restore } = captureOutput();
 
     try {
       await startCommandHandler(orchestron, 'no-harness-test', {}, false);
     } finally {
-      console.log = originalLog;
+      restore();
       orchestron.store.close();
     }
 
