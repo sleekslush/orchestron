@@ -8,20 +8,22 @@ export type ProgressUpdate =
   | { type: 'heartbeat'; elapsedMs: number; message: string }
   | { type: 'usage_update'; usage: ResourceUsage };
 
+export interface HarnessAdapterExecuteOptions {
+  signal?: AbortSignal;
+  output?: OutputConfig;
+  movementId?: string;
+  sessionId?: string;
+  model?: string;
+  provider?: string;
+  onProgress?: (update: ProgressUpdate) => void;
+}
+
 export interface HarnessAdapter {
   readonly type: string;
   execute(
     prompt: string,
     context: ConcertContext,
-    options?: {
-      signal?: AbortSignal;
-      output?: OutputConfig;
-      movementId?: string;
-      sessionId?: string;
-      model?: string;
-      provider?: string;
-      onProgress?: (update: ProgressUpdate) => void;
-    },
+    options?: HarnessAdapterExecuteOptions,
   ): Promise<HarnessResponse>;
   /** Return session trace events for the given session since the given offset.
    *  No offset → return all events. Offset 0 → all events. Called after execute()

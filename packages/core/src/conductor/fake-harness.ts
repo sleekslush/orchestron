@@ -1,6 +1,5 @@
-import type { HarnessAdapter, HarnessResponse, ProgressUpdate } from '../types/adapter.js';
+import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, ProgressUpdate } from '../types/adapter.js';
 import type { ConcertContext } from '../types/concert.js';
-import type { OutputConfig } from '../types/score.js';
 import { HarnessError } from '../types/errors.js';
 
 export interface FakeHarnessScenario {
@@ -29,12 +28,7 @@ export class FakeHarnessAdapter implements HarnessAdapter {
   async execute(
     _prompt: string,
     _context: ConcertContext,
-    options?: {
-      signal?: AbortSignal;
-      output?: OutputConfig;
-      movementId?: string;
-      onProgress?: (update: ProgressUpdate) => void;
-    },
+    options?: HarnessAdapterExecuteOptions,
   ): Promise<HarnessResponse> {
     const movementId = options?.movementId;
     let scenario: FakeHarnessScenario | undefined;
