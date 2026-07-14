@@ -19,6 +19,10 @@ export type { ChildConcertFactory } from './conductor/child-concert-factory.js';
 export type { StartOptions } from './conductor/start-options.js';
 export { FakeHarnessAdapter } from './conductor/fake-harness.js';
 export type { FakeHarnessConfig, FakeHarnessScenario } from './conductor/fake-harness.js';
+export { PromptBuilder } from './conductor/prompt-builder.js';
+export { ConstraintChecker } from './conductor/constraint-checker.js';
+export type { ConstraintResult } from './conductor/constraint-checker.js';
+export { matchTransition } from './conductor/transition-resolver.js';
 
 export { ConcertHall } from './hall/concert-hall.js';
 export type { ConcertHallOptions } from './hall/concert-hall.js';
