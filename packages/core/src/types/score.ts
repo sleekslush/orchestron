@@ -74,6 +74,5 @@ export interface Score {
 export interface EvaluatorConfig {
   harness?: string;
   model?: string;
-  provider?: string;
   prompt?: string;
 }
