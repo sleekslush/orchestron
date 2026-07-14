@@ -138,8 +138,7 @@ program:
   maxSpendDollars: 5
   maxMovements: 10
   perSection:
-    execution:
-      maxSpendDollars: 3
+    "*":
       maxMovements: 6
 startMovement: run
 movements:
@@ -161,6 +160,8 @@ movements:
       - to: __fail__
         on: failure
 ```
+
+Note: `perSection` currently only uses the `"*"` wildcard to override the global movement limit. Section-specific keys are parsed but not enforced.
 
 ## Subscore Delegation
 

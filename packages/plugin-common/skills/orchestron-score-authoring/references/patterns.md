@@ -96,7 +96,7 @@ movements:
 ## Best Practices
 
 - Keep prompts focused and specific.
-- Use `output.mode: structured` with a JSON schema when downstream movements need to reference specific fields.
+- Use `output.mode: structured` with a JSON schema when downstream movements need predictable, machine-readable output. Reference the whole result with `{{context.previousOutputs.<movementId>}}` (the rendered value is the stringified JSON); dot-notation into individual fields is not supported.
 - Use `{{context.previousOutputs.<movementId>}}` to pass data between movements.
 - Always provide both `success` and `failure` transitions so concerts end cleanly on error.
 - Set realistic budgets in `program` and per-movement `budget` to prevent runaway costs.

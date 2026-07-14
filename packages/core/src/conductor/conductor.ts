@@ -679,6 +679,29 @@ export class Conductor implements IConductor {
     }
   }
 
+  private checkMovementConstraints(
+    movement: Movement,
+    record: MovementRecord,
+  ): void {
+    // Per-execution spend limit (in dollars; internal usage is micro-dollars).
+    // This is checked against a single harness call (or subscore rollup), matching
+    // the per-execution semantics of budget.timeoutMs.
+    const movementMaxSpendMicro = movement.budget?.maxSpendDollars
+      ? Math.round(movement.budget.maxSpendDollars * 1_000_000)
+      : undefined;
+    if (movementMaxSpendMicro && (record.usage.spend ?? 0) > movementMaxSpendMicro) {
+      const movementSpendDollars = (record.usage.spend ?? 0) / 1_000_000;
+      throw new ConstraintBreachError(
+        `Movement spend limit exceeded: $${movementSpendDollars.toFixed(6)} > $${movement.budget!.maxSpendDollars!.toFixed(6)}`,
+        'SPEND_LIMIT',
+        movement.budget!.maxSpendDollars!,
+        movementSpendDollars,
+        'maxSpendDollars',
+        this.concert.id,
+      );
+    }
+  }
+
   private checkProgramConstraints(
     movement: Movement,
     record: MovementRecord,
@@ -757,6 +780,10 @@ export class Conductor implements IConductor {
       });
 
       const record = await this.executeMovement(movement, previousOutputs, signal);
+
+      // Enforce per-execution movement budget before retries, matching the
+      // per-execution semantics of budget.timeoutMs.
+      this.checkMovementConstraints(movement, record);
 
       if (record.status === 'failed' && movement.retryOnFailure) {
         const maxRetries = movement.budget?.maxRetries ?? 2;

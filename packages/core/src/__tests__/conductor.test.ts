@@ -110,6 +110,37 @@ it('constraint breach', async () => {
   expect(conductor.status).toBe('failed');
 });
 
+it('movement spend limit breach', async () => {
+  const store = new SqliteLoge(':memory:');
+  const registry = new ScoreRegistry();
+  registry.register({
+    id: 'movement-constrained', name: 'Movement Constrained', description: 'movement spend limit', version: '1.0.0',
+    startMovement: 'a',
+    movements: [
+      { id: 'a', name: 'A', section: 'x', description: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: '__end__', on: 'success' as const }],
+        budget: { maxSpendDollars: 0.5 } },
+    ],
+    program: {},
+  });
+  const adapter = new FakeHarnessAdapter({
+    defaultResponse: { output: 'o', summary: 's', usage: { spend: 600_000, tokens: 100 } },
+  });
+  const hall = new ConcertHall({
+    store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+  });
+  const conductor = await hall.createConcert('movement-constrained');
+  await conductor.start();
+  expect(conductor.status).toBe('failed');
+  const events = await store.getEvents(conductor.concertId, { types: ['constraint:breached'] });
+  expect(events).toHaveLength(1);
+  expect(events[0].constraint).toBe('maxSpendDollars');
+  expect(events[0].limit).toBe(0.5);
+  expect(events[0].actual).toBe(0.6);
+});
+
 it('missing adapter', async () => {
   const store = new SqliteLoge(':memory:');
   const registry = new ScoreRegistry();
