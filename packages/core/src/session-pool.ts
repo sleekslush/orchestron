@@ -46,7 +46,11 @@ export class SessionPool<T> {
     if (!data) return;
 
     if (this.dispose) {
-      await this.dispose(data).catch(() => {});
+      try {
+        await this.dispose(data);
+      } catch (err) {
+        console.error(`SessionPool: error disposing session '${sessionId}':`, err);
+      }
     }
     this.sessions.delete(sessionId);
   }
@@ -58,8 +62,12 @@ export class SessionPool<T> {
 
     if (this.dispose) {
       await Promise.all(
-        entries.map(async ([, data]) => {
-          await this.dispose!(data).catch(() => {});
+        entries.map(async ([sessionId, data]) => {
+          try {
+            await this.dispose!(data);
+          } catch (err) {
+            console.error(`SessionPool: error disposing session '${sessionId}':`, err);
+          }
         }),
       );
     }

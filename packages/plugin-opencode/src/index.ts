@@ -55,7 +55,7 @@ export const OrchestronPlugin: Plugin = async (_input, options) => {
             .string()
             .describe("ID of the registered score to run"),
           context: tool.schema
-            .object({})
+            .record(tool.schema.string(), tool.schema.unknown())
             .optional()
             .describe("Optional initial context values for the concert"),
           harness: tool.schema

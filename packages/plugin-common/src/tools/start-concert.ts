@@ -25,7 +25,12 @@ export async function startConcert(
     harness: input.harness,
   });
 
-  conductor.start().catch(() => {});
+  // Fire the concert start without blocking, but capture any synchronous
+  // or early-async errors so they don't become unhandled rejections.
+  conductor.start().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    onUpdate?.(`Concert start failed: ${message}`);
+  });
 
   const state = await conductor.getState();
   const result = {

@@ -716,7 +716,7 @@ export class Conductor implements IConductor {
         return;
       }
 
-      if ((this._status as ConcertStatus) === 'paused') {
+      if (this._status === 'paused') {
         await this.waitForResume(signal);
       }
 

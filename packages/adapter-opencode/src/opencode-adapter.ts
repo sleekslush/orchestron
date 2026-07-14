@@ -154,8 +154,10 @@ export class OpencodeAdapter implements HarnessAdapter {
       if (options?.sessionId) {
         sessionData = await this.sessionPool.getOrCreate(options.sessionId);
       } else {
-        ownSession = true;
+        // Create session first, then mark as owned — avoids a finally-block
+        // cleanup attempt if createOpencodeSession throws.
         sessionData = await this.createOpencodeSession('ephemeral');
+        ownSession = true;
       }
 
       const opencodeSessionId = sessionData.opencodeSessionId;

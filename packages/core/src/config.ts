@@ -45,12 +45,67 @@ export const DEFAULT_STORE_PATH = join(DEFAULT_CONFIG_DIR, 'store.db');
 export const DEFAULT_SCORES_DIR = join(DEFAULT_CONFIG_DIR, 'scores');
 export const LOCAL_SCORES_DIR = join(process.cwd(), '.orchestron', 'scores');
 
+// ---------------------------------------------------------------------------
+// Runtime validation helpers for the config boundary
+// ---------------------------------------------------------------------------
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && !Number.isNaN(value);
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean';
+}
+
+function parseString(value: unknown, fallback?: string): string | undefined {
+  return isString(value) ? value : fallback;
+}
+
+function parseNumber(value: unknown, fallback?: number): number | undefined {
+  return isNumber(value) ? value : fallback;
+}
+
 function expandTilde(path: string): string {
   if (path.startsWith('~/')) {
     return join(homedir(), path.slice(2));
   }
   return path;
 }
+
+function parseStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter(isString).map(expandTilde);
+  return strings.length > 0 ? strings : undefined;
+}
+
+function parseSubObject<T extends Record<string, unknown>>(
+  value: unknown,
+  fields: { [K in keyof T]: (v: unknown) => T[K] | undefined },
+): T | undefined {
+  if (!isObject(value)) return undefined;
+  const result: Partial<T> = {};
+  let hasAny = false;
+  for (const [key, parser] of Object.entries(fields)) {
+    const parsed = parser(value[key]);
+    if (parsed !== undefined) {
+      (result as Record<string, unknown>)[key] = parsed;
+      hasAny = true;
+    }
+  }
+  return hasAny ? (result as T) : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Config loading
+// ---------------------------------------------------------------------------
 
 export function loadConfigFile(path?: string): OrchestronConfig | undefined {
   const configPath = path ?? DEFAULT_CONFIG_PATH;
@@ -66,57 +121,49 @@ export function loadConfigFile(path?: string): OrchestronConfig | undefined {
 }
 
 function normalizeConfig(raw: unknown): OrchestronConfig | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  if (!isObject(raw)) return undefined;
 
-  const input = raw as Record<string, unknown>;
   const config: OrchestronConfig = {};
 
-  if (typeof input.storePath === 'string') {
-    config.storePath = expandTilde(input.storePath);
-  }
-  if (Array.isArray(input.scoresDirs)) {
-    config.scoresDirs = input.scoresDirs.map((d) =>
-      typeof d === 'string' ? expandTilde(d) : String(d),
-    );
-  }
-  if (typeof input.tracesDir === 'string') {
-    config.tracesDir = expandTilde(input.tracesDir);
-  }
-  if (typeof input.defaultHarness === 'string') {
-    config.defaultHarness = input.defaultHarness;
-  }
-  if (input.opencode && typeof input.opencode === 'object') {
-    const oc = input.opencode as Record<string, unknown>;
-    config.opencode = {};
-    if (typeof oc.provider === 'string') config.opencode.provider = oc.provider;
-    if (typeof oc.modelId === 'string') config.opencode.modelId = oc.modelId;
-    if (typeof oc.baseUrl === 'string') config.opencode.baseUrl = oc.baseUrl;
-    if (oc.embedded && typeof oc.embedded === 'object') {
-      const emb = oc.embedded as Record<string, unknown>;
-      config.opencode.embedded = {};
-      if (typeof emb.hostname === 'string') config.opencode.embedded.hostname = emb.hostname;
-      if (typeof emb.port === 'number') config.opencode.embedded.port = emb.port;
-      if (emb.config && typeof emb.config === 'object') {
-        config.opencode.embedded.config = emb.config as Record<string, unknown>;
-      }
-    }
-  }
-  if (input.pi && typeof input.pi === 'object') {
-    const pi = input.pi as Record<string, unknown>;
-    config.pi = {};
-    if (typeof pi.provider === 'string') config.pi.provider = pi.provider;
-    if (typeof pi.modelId === 'string') config.pi.modelId = pi.modelId;
-  }
-  if (input.evaluator && typeof input.evaluator === 'object') {
-    const ev = input.evaluator as Record<string, unknown>;
-    config.evaluator = {};
-    if (typeof ev.promptTemplate === 'string') config.evaluator.promptTemplate = ev.promptTemplate;
-  }
-  if (input.dashboard && typeof input.dashboard === 'object') {
-    const db = input.dashboard as Record<string, unknown>;
-    config.dashboard = {};
-    if (typeof db.port === 'number') config.dashboard.port = db.port;
-  }
+  const storePath = parseString(raw.storePath);
+  if (storePath !== undefined) config.storePath = expandTilde(storePath);
+
+  const scoresDirs = parseStringArray(raw.scoresDirs);
+  if (scoresDirs !== undefined) config.scoresDirs = scoresDirs;
+
+  const tracesDir = parseString(raw.tracesDir);
+  if (tracesDir !== undefined) config.tracesDir = expandTilde(tracesDir);
+
+  const defaultHarness = parseString(raw.defaultHarness);
+  if (defaultHarness !== undefined) config.defaultHarness = defaultHarness;
+
+  const opencode = parseSubObject(raw.opencode, {
+    provider: (v) => parseString(v),
+    modelId: (v) => parseString(v),
+    baseUrl: (v) => parseString(v),
+    embedded: (v) => parseSubObject(v, {
+      hostname: (v) => parseString(v),
+      port: (v) => parseNumber(v),
+      config: (v) => isObject(v) ? (v as Record<string, unknown>) : undefined,
+    }),
+  });
+  if (opencode !== undefined) config.opencode = opencode;
+
+  const pi = parseSubObject(raw.pi, {
+    provider: (v) => parseString(v),
+    modelId: (v) => parseString(v),
+  });
+  if (pi !== undefined) config.pi = pi;
+
+  const evaluator = parseSubObject(raw.evaluator, {
+    promptTemplate: (v) => parseString(v),
+  });
+  if (evaluator !== undefined) config.evaluator = evaluator;
+
+  const dashboard = parseSubObject(raw.dashboard, {
+    port: (v) => parseNumber(v),
+  });
+  if (dashboard !== undefined) config.dashboard = dashboard;
 
   return Object.keys(config).length > 0 ? config : undefined;
 }
@@ -129,46 +176,66 @@ export function resolveOrchestronConfig(
   },
   env?: Record<string, string | undefined>,
 ): ResolvedOrchestronConfig {
-  const e = env ?? (process.env as Record<string, string | undefined>);
+  const e = env ?? process.env;
   const fileConfig = loadConfigFile() ?? {};
 
-  const storePath =
-    options.storePath ??
-    e.ORCHESTRON_STORE_PATH ??
-    fileConfig.storePath ??
-    defaults.storePath;
+  const storePath = firstDefined(
+    options.storePath,
+    e.ORCHESTRON_STORE_PATH,
+    fileConfig.storePath,
+    defaults.storePath,
+  );
 
-  const scoresDirs =
-    options.scoresDirs ??
-    (e.ORCHESTRON_SCORES_DIRS
+  const scoresDirs = firstDefined(
+    options.scoresDirs,
+    e.ORCHESTRON_SCORES_DIRS
       ? e.ORCHESTRON_SCORES_DIRS.split(',').map((s) => s.trim())
-      : undefined) ??
-    fileConfig.scoresDirs ??
-    defaults.scoresDirs;
+      : undefined,
+    fileConfig.scoresDirs,
+    defaults.scoresDirs,
+  );
 
-  const opencodeProvider =
-    e.ORCHESTRON_OPENCODE_PROVIDER ??
-    fileConfig.opencode?.provider ??
-    'opencode';
+  const opencodeProvider = firstDefined(
+    e.ORCHESTRON_OPENCODE_PROVIDER,
+    fileConfig.opencode?.provider,
+    'opencode',
+  );
 
-  const opencodeModelId =
-    e.ORCHESTRON_OPENCODE_MODEL_ID ??
-    fileConfig.opencode?.modelId ??
-    'kimi-k2.5';
+  const opencodeModelId = firstDefined(
+    e.ORCHESTRON_OPENCODE_MODEL_ID,
+    fileConfig.opencode?.modelId,
+    'kimi-k2.5',
+  );
 
-  const piProvider =
-    e.ORCHESTRON_PI_PROVIDER ??
-    fileConfig.pi?.provider;
+  const piProvider = firstDefined(
+    e.ORCHESTRON_PI_PROVIDER,
+    fileConfig.pi?.provider,
+    undefined,
+  );
 
-  const piModelId =
-    e.ORCHESTRON_PI_MODEL_ID ??
-    fileConfig.pi?.modelId;
+  const piModelId = firstDefined(
+    e.ORCHESTRON_PI_MODEL_ID,
+    fileConfig.pi?.modelId,
+    undefined,
+  );
 
-  const defaultHarness =
-    options.defaultHarness ??
-    e.ORCHESTRON_DEFAULT_HARNESS ??
-    fileConfig.defaultHarness ??
-    'pi';
+  const defaultHarness = firstDefined(
+    options.defaultHarness,
+    e.ORCHESTRON_DEFAULT_HARNESS,
+    fileConfig.defaultHarness,
+    'pi',
+  );
 
   return { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness };
+}
+
+// ---------------------------------------------------------------------------
+// Utility: return the first non-undefined value
+// ---------------------------------------------------------------------------
+
+function firstDefined<T>(...values: (T | undefined)[]): T {
+  for (const v of values) {
+    if (v !== undefined) return v;
+  }
+  throw new Error('firstDefined: all values are undefined');
 }
