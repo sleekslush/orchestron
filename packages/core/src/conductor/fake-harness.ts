@@ -33,6 +33,9 @@ export class FakeHarnessAdapter implements HarnessAdapter {
       signal?: AbortSignal;
       output?: OutputConfig;
       movementId?: string;
+      sessionId?: string;
+      model?: string;
+      provider?: string;
       onProgress?: (update: ProgressUpdate) => void;
     },
   ): Promise<HarnessResponse> {

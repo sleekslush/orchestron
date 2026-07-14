@@ -317,6 +317,7 @@ export class Conductor implements IConductor {
   }
 
   private seedMovementVisitCounts(): void {
+    this.movementVisitCount.clear();
     for (const record of this.concert.history) {
       this.movementVisitCount.set(
         record.movementId,
@@ -326,6 +327,8 @@ export class Conductor implements IConductor {
   }
 
   private seedSectionStats(): void {
+    this.sectionMovementCount.clear();
+    this.sectionSpend.clear();
     for (const record of this.concert.history) {
       const movement = this.score.movements.find((m) => m.id === record.movementId);
       if (!movement) continue;
@@ -909,8 +912,8 @@ export class Conductor implements IConductor {
         (this.sectionMovementCount.get(movement.section) ?? 0) + 1,
       );
 
-      this.checkSectionSpendLimit(movement, record);
       this.checkProgramConstraints(movement, record);
+      this.checkSectionSpendLimit(movement, record);
 
       await this.store.updateConcert({
         id: this.concert.id,
