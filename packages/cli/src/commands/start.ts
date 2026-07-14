@@ -1,5 +1,5 @@
 import type { Orchestron } from '../orchestron.js';
-import { printOutput, formatConcertHuman, extractFailure } from '../output.js';
+import { printOutput, formatConcertHuman, extractFailure, movementToOutput } from '../output.js';
 
 async function pollAndPrintProgress(
   orchestron: Orchestron,
@@ -95,18 +95,7 @@ export async function startCommandHandler(
     currentMovement: state.currentMovement,
     usage: state.usage,
     failure,
-    movements: history.map((h) => ({
-      movementId: h.movementId,
-      movementName: h.movementName,
-      status: h.status,
-      summary: h.summary,
-      durationMs: h.durationMs,
-      goalAchieved: h.goalEvaluation.achieved,
-      goalSummary: h.goalEvaluation.summary,
-      error: h.error,
-      model: h.model,
-      provider: h.provider,
-    })),
+    movements: history.map(movementToOutput),
   };
 
   printOutput(json, output, () => formatConcertHuman(state, history, events, true));

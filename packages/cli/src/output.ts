@@ -58,6 +58,34 @@ export function extractFailure(events: ConcertEvent[]) {
   };
 }
 
+/** Map a MovementRecord to its JSON output shape (used by both start and status commands). */
+export function movementToOutput(
+  h: {
+    movementId: string;
+    movementName: string;
+    status: string;
+    summary: string;
+    durationMs: number;
+    goalEvaluation: { achieved: boolean; summary: string };
+    error?: { code: string; message: string; retryable: boolean } | undefined;
+    model?: string;
+    provider?: string;
+  },
+) {
+  return {
+    movementId: h.movementId,
+    movementName: h.movementName,
+    status: h.status,
+    summary: h.summary,
+    durationMs: h.durationMs,
+    goalAchieved: h.goalEvaluation.achieved,
+    goalSummary: h.goalEvaluation.summary,
+    error: h.error,
+    model: h.model,
+    provider: h.provider,
+  };
+}
+
 export function formatConcertHuman(
   state: {
     id: string;

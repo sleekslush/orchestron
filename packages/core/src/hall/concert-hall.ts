@@ -95,6 +95,33 @@ export class ConcertHall implements ChildConcertFactory {
     return this.evaluator;
   }
 
+  /**
+   * Load a concert's score (from stored YAML or registry), build a
+   * Conductor, register it in {@link conductors}, and link parent-child
+   * relationships.  Shared by {@link loadConcert} and {@link rehydrate}.
+   */
+  private async hydrateConductor(concert: Concert): Promise<Conductor> {
+    let score: Score;
+    const scoreYaml = await this.store.getConcertScoreYaml(concert.id);
+    if (scoreYaml) {
+      score = yaml.load(scoreYaml) as Score;
+    } else {
+      score = this.scoreRegistry.get(concert.scoreId);
+    }
+    const conductor = await this.buildConductor(concert, score, concert.explicitHarness);
+    this.conductors.set(concert.id, conductor);
+
+    if (concert.parentConcertId) {
+      const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
+      if (!siblings.includes(concert.id)) {
+        siblings.push(concert.id);
+        this.parentToChildren.set(concert.parentConcertId, siblings);
+      }
+    }
+
+    return conductor;
+  }
+
   async createConcert(
     scoreId: ScoreID,
     options?: StartOptions,
@@ -155,24 +182,7 @@ export class ConcertHall implements ChildConcertFactory {
     if (!stored) return undefined;
 
     try {
-      let score: Score;
-      const scoreYaml = await this.store.getConcertScoreYaml(id);
-      if (scoreYaml) {
-        score = yaml.load(scoreYaml) as Score;
-      } else {
-        score = this.scoreRegistry.get(stored.scoreId);
-      }
-      const conductor = await this.buildConductor(stored, score, stored.explicitHarness);
-      this.conductors.set(id, conductor);
-
-      if (stored.parentConcertId) {
-        const siblings = this.parentToChildren.get(stored.parentConcertId) ?? [];
-        if (!siblings.includes(id)) {
-          siblings.push(id);
-          this.parentToChildren.set(stored.parentConcertId, siblings);
-        }
-      }
-
+      const conductor = await this.hydrateConductor(stored);
       return conductor;
     } catch (err) {
       console.error(`Failed to load concert '${id}':`, err);
@@ -242,21 +252,7 @@ export class ConcertHall implements ChildConcertFactory {
         continue;
       }
       try {
-        let score: Score;
-        const scoreYaml = await this.store.getConcertScoreYaml(concert.id);
-        if (scoreYaml) {
-          score = yaml.load(scoreYaml) as Score;
-        } else {
-          score = this.scoreRegistry.get(concert.scoreId);
-        }
-        const conductor = await this.buildConductor(concert, score, concert.explicitHarness);
-        this.conductors.set(concert.id, conductor);
-
-        if (concert.parentConcertId) {
-          const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
-          siblings.push(concert.id);
-          this.parentToChildren.set(concert.parentConcertId, siblings);
-        }
+        await this.hydrateConductor(concert);
       } catch {
         await this.store.updateConcert({
           id: concert.id,
