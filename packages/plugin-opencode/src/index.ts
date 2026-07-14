@@ -2,6 +2,7 @@ import { type Plugin, tool } from "@opencode-ai/plugin";
 import type { HarnessAdapter } from "@orchestron/core";
 import {
   createOrchestron,
+  type OrchestronOptions,
   startConcert,
   getConcertStatus,
   listConcerts,
@@ -17,23 +18,28 @@ import type { ListConcertsInput } from "@orchestron/plugin-common";
 import { PiAdapter } from "@orchestron/adapter-pi";
 import { OpencodeAdapter } from "@orchestron/adapter-opencode";
 
-let orchestronPromise: ReturnType<typeof createOrchestron> | undefined;
+export interface OrchestronPluginConfig extends OrchestronOptions {}
 
-async function getOrchestron() {
-  if (!orchestronPromise) {
-    orchestronPromise = createOrchestron({
-      defaultHarness: 'opencode',
-      adapters: new Map<string, HarnessAdapter>([
-        ["pi", new PiAdapter()],
-        ["opencode", new OpencodeAdapter({ embedded: { port: 0 } })],
-      ]),
-    });
+export const OrchestronPlugin: Plugin = async (_input, options) => {
+  const config = (options ?? {}) as OrchestronPluginConfig;
+
+  let orchestronPromise: ReturnType<typeof createOrchestron> | undefined;
+
+  async function getOrchestron() {
+    if (!orchestronPromise) {
+      orchestronPromise = createOrchestron({
+        ...config,
+        defaultHarness: config.defaultHarness ?? 'opencode',
+        adapters: config.adapters ?? new Map<string, HarnessAdapter>([
+          ["pi", new PiAdapter()],
+          ["opencode", new OpencodeAdapter({ embedded: { port: 0 } })],
+        ]),
+      });
+    }
+    return orchestronPromise;
   }
-  return orchestronPromise;
-}
 
-export const OrchestronPlugin: Plugin = async () => ({
-  tool: {
+  return ({
     orchestron_start_concert: tool({
       description:
         "Start a new Orchestron concert from a registered score. The concert runs in the background and can be monitored with orchestron_get_concert_status.",
@@ -45,10 +51,15 @@ export const OrchestronPlugin: Plugin = async () => ({
           .object({})
           .optional()
           .describe("Optional initial context values for the concert"),
+        harness: tool.schema
+          .string()
+          .optional()
+          .describe("Optional explicit harness to use for the concert. Overrides the score's default harness."),
       },
       async execute(args) {
         const o = await getOrchestron();
-        return JSON.stringify(await startConcert(o, { ...args, harness: 'opencode' }));
+        const { harness, ...rest } = args;
+        return JSON.stringify(await startConcert(o, harness ? { ...rest, harness } : rest));
       },
     }),
 
@@ -220,7 +231,7 @@ export const OrchestronPlugin: Plugin = async () => ({
         return JSON.stringify(await editScore(o, args as any));
       },
     }),
-  },
-});
+  });
+};
 
 export default OrchestronPlugin;

@@ -16,6 +16,11 @@ export function startConcertTool(getOrchestron: () => Promise<import('@orchestro
           description: 'Optional initial context values for the concert',
         }),
       ),
+      harness: Type.Optional(
+        Type.String({
+          description: 'Optional explicit harness to use for the concert. Overrides the score\'s default harness.',
+        }),
+      ),
     }),
     promptSnippet: 'Start an Orchestron workflow concert from a registered score',
     promptGuidelines: [
@@ -27,7 +32,8 @@ export function startConcertTool(getOrchestron: () => Promise<import('@orchestro
       const piOnUpdate = onUpdate
         ? (text: string) => onUpdate({ content: [{ type: 'text' as const, text }], details: {} })
         : undefined;
-      const result = await startConcert(orchestron, { ...params, harness: 'pi' }, piOnUpdate);
+      const { harness, ...rest } = params;
+      const result = await startConcert(orchestron, harness ? { ...rest, harness } : rest, piOnUpdate);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         details: result,
