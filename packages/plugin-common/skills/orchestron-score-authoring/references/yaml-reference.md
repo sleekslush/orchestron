@@ -2,6 +2,14 @@
 
 Complete field-by-field reference for Orchestron score YAML.
 
+## Minimal Required Fields
+
+A valid score requires only:
+
+**Top-level:** `id`, `name`, `version`, `startMovement`, `movements` (≥1)
+
+**Per movement:** `id`, `name`, `section`, `goal`, `transitions`
+
 ## Top-level Fields
 
 | Field | Required | Type | Description |
@@ -11,8 +19,8 @@ Complete field-by-field reference for Orchestron score YAML.
 | `version` | Yes | string | Semantic version (e.g., `1.0.0`). |
 | `description` | No | string | What this workflow does. |
 | `startMovement` | Yes | string | `id` of the first movement to run. |
-| `program` | Yes | object | Execution constraints and global settings. Can be empty `{}`. |
-| `evaluator` | No | object | Configures the evaluator that judges whether movement goals are achieved. |
+| `program` | No | object | Execution constraints and global settings. All sub-fields are optional. Omit entirely to use defaults. |
+| `evaluator` | No | object | Configures the evaluator that judges whether movement goals are achieved. All sub-fields are optional. |
 | `movements` | Yes | array | Non-empty list of movements. |
 | `metadata` | No | object | Arbitrary key-value data attached to the score. |
 
@@ -43,11 +51,11 @@ Complete field-by-field reference for Orchestron score YAML.
 | `name` | Yes | string | Human-readable name. |
 | `section` | Yes | string | Logical grouping (e.g., `planning`, `execution`, `review`, `delivery`). |
 | `description` | No | string | Brief explanation of the movement's purpose. |
-| `harness` | No | string | Harness to execute the movement (e.g., `pi`, `opencode`). |
-| `model` | No | string | Override the default model for this movement. |
-| `provider` | No | string | Override the default provider for this movement. |
-| `prompt` | No | string \| object | The prompt text. Supports templating. Can be a plain string or an object with `initial` and `subsequent` for loop-back movements. |
-| `output` | No | object | Output configuration. `{ mode: "text" }` or `{ mode: "structured", schema: <json-schema> }`. |
+| `harness` | No | string | Harness to execute the movement. Defaults to the plugin's `defaultHarness` (usually `pi`). |
+| `model` | No | string | Override the default model for this movement. Only needed to change from the adapter's default. |
+| `provider` | No | string | Override the default provider for this movement. Only needed to change from the adapter's default. |
+| `prompt` | No | string \| object | The prompt text. Supports templating. Optional when the movement does not need a prompt (e.g., subscores). |
+| `output` | No | object | Output configuration. Defaults to `{ mode: "text" }`. Use `structured` with a JSON Schema when downstream movements need specific fields. |
 | `goal` | Yes | object | `{ description: string, strategy: "llm_judge" }`. The evaluator uses this to judge success. |
 | `transitions` | Yes | array | Array of `{ to, on }` objects defining what happens next. |
 | `budget` | No | object | Movement-level budget overrides. `{ maxSpendDollars?, maxRetries?, timeoutMs? }`. |

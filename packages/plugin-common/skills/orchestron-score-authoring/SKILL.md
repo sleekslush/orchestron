@@ -53,34 +53,19 @@ Use this skill when the user wants to create, edit, run, or manage an Orchestron
 
 ## Score YAML at a Glance
 
+Required fields only. All others are optional.
+
 ```yaml
-id: my-score                # Must match scoreId param
+id: my-score                # must match scoreId param
 name: "My Score"
 version: "1.0.0"
-description: What this does
 startMovement: plan
-program:
-  maxSpendDollars: 2
-  maxMovements: 20
-  maxDurationMs: 600000
-  persistSession: true
-evaluator:
-  harness: pi
-  model: pi-4-mini
 movements:
   - id: plan
     name: "Create Plan"
     section: planning
-    harness: pi
     prompt: >
       Create a plan for: {{context.task}}
-    output:
-      mode: structured
-      schema:
-        type: object
-        properties:
-          steps: { type: array, items: { type: string } }
-        required: [steps]
     goal:
       description: "Plan is detailed and actionable"
       strategy: llm_judge
@@ -93,7 +78,6 @@ movements:
   - id: review
     name: "Review Plan"
     section: review
-    harness: pi
     prompt: >
       Review this plan:
       {{context.previousOutputs.plan}}

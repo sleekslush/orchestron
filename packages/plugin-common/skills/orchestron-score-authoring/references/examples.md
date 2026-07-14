@@ -2,17 +2,17 @@
 
 ## Minimal Valid Score
 
+Required fields only.
+
 ```yaml
 id: hello-world
 name: "Hello World"
 version: "1.0.0"
-program: {}
 startMovement: greet
 movements:
   - id: greet
     name: "Greet"
     section: delivery
-    harness: pi
     prompt: "Say hello to the user."
     goal:
       description: "Greeting is friendly"

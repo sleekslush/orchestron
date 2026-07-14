@@ -348,7 +348,7 @@ export class Conductor implements IConductor {
         movement.id,
         (this.movementVisitCount.get(movement.id) ?? 0) + 1,
       );
-      const persistSession = this.score.program.persistSession !== false;
+      const persistSession = this.score.program?.persistSession !== false;
       sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
 
       if (sessionId) {
@@ -375,8 +375,8 @@ export class Conductor implements IConductor {
       let timeoutMs: number | undefined;
       if (movement.budget?.timeoutMs && movement.budget.timeoutMs > 0) {
         timeoutMs = movement.budget.timeoutMs;
-      } else if (this.score.program.maxDurationMs && this.startedAt > 0) {
-        const remaining = this.score.program.maxDurationMs - (Date.now() - this.startedAt);
+      } else if (this.score.program?.maxDurationMs && this.startedAt > 0) {
+        const remaining = this.score.program!.maxDurationMs - (Date.now() - this.startedAt);
         if (remaining > 0) {
           timeoutMs = remaining;
         }
@@ -501,7 +501,7 @@ export class Conductor implements IConductor {
   ): Promise<MovementRecord> {
     if (!movement.subscore) return record;
 
-    const maxDepth = this.score.program.maxNestingDepth ?? 5;
+    const maxDepth = this.score.program?.maxNestingDepth ?? 5;
     if (this.nestingDepth >= maxDepth) {
       throw new ConstraintBreachError(
         `Max nesting depth exceeded: ${this.nestingDepth + 1} > ${maxDepth}`,
@@ -664,8 +664,8 @@ export class Conductor implements IConductor {
 
   private checkMovementLimit(count: number, movementId: string): void {
     const maxMovements =
-      this.score.program.maxMovements ??
-      this.score.program.perSection?.['*']?.maxMovements ??
+      this.score.program?.maxMovements ??
+      this.score.program?.perSection?.['*']?.maxMovements ??
       100;
     if (count > maxMovements) {
       throw new ConstraintBreachError(
@@ -685,7 +685,7 @@ export class Conductor implements IConductor {
   ): void {
     const totalSpend = (this.concert.usage.spend ?? 0) + (record.usage.spend ?? 0);
     const totalTokens = (this.concert.usage.tokens ?? 0) + (record.usage.tokens ?? 0);
-    const program = this.score.program;
+    const program = this.score.program ?? {};
 
     // Update aggregate usage before checking constraints so failures still report real spend.
     this.concert.usage.spend = totalSpend;
