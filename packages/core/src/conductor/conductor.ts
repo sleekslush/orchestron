@@ -691,6 +691,22 @@ export class Conductor implements IConductor {
     this.concert.usage.spend = totalSpend;
     this.concert.usage.tokens = totalTokens;
 
+    // Movement-level spend limit (in dollars; internal usage is micro-dollars).
+    const movementMaxSpendMicro = movement.budget?.maxSpendDollars
+      ? Math.round(movement.budget.maxSpendDollars * 1_000_000)
+      : undefined;
+    if (movementMaxSpendMicro && (record.usage.spend ?? 0) > movementMaxSpendMicro) {
+      const movementSpendDollars = (record.usage.spend ?? 0) / 1_000_000;
+      throw new ConstraintBreachError(
+        `Movement spend limit exceeded: $${movementSpendDollars.toFixed(6)} > $${movement.budget!.maxSpendDollars!.toFixed(6)}`,
+        'SPEND_LIMIT',
+        movement.budget!.maxSpendDollars!,
+        movementSpendDollars,
+        'maxSpendDollars',
+        this.concert.id,
+      );
+    }
+
     // maxSpendDollars is configured in dollars; internal usage is tracked in micro-dollars.
     const maxSpendMicro = program.maxSpendDollars ? Math.round(program.maxSpendDollars * 1_000_000) : undefined;
     if (maxSpendMicro && totalSpend > maxSpendMicro) {
