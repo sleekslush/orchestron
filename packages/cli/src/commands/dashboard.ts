@@ -15,7 +15,6 @@ export async function dashboardCommandHandler(
   return new Promise((resolve) => {
     const shutdown = () => {
       server.close();
-      orchestron.store.close();
       resolve(undefined);
     };
     process.on('SIGINT', shutdown);

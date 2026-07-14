@@ -24,6 +24,27 @@ export interface Orchestron {
   hall: ConcertHall;
 }
 
+export async function withOrchestron<T>(
+  options: OrchestronOptions,
+  fn: (orchestron: Orchestron) => Promise<T>,
+): Promise<T> {
+  const orchestron = await createOrchestron(options);
+  try {
+    return await fn(orchestron);
+  } finally {
+    try {
+      await orchestron.hall.close();
+    } catch {
+      // ignore
+    }
+    try {
+      orchestron.store.close();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
   const { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness } = resolveOrchestronConfig(
     options,
