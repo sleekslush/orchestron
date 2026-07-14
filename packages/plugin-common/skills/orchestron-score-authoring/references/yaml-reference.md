@@ -32,8 +32,8 @@ A valid score requires only:
 | `maxMovements` | number | Maximum number of movements that may execute across the entire concert. |
 | `maxDurationMs` | number | Maximum total duration in milliseconds. |
 | `maxNestingDepth` | number | Maximum depth of subscore nesting. Default is `5`. |
-| `persistSession` | boolean | Whether to persist harness sessions across movements. Default is `true` when the harness supports it. |
-| `perSection` | object | Section-level budgets keyed by `section` id. Each value is `{ maxSpendDollars?, maxMovements? }`. |
+| `persistSession` | boolean | Whether to persist harness sessions across movements. Default is `true`. |
+| `perSection` | object | Budget overrides. Currently only the `*` wildcard key is used for movement limits: `{ "*": { maxMovements? } }`. Section-specific keys are parsed but not enforced. |
 
 ## `evaluator` Fields
 
@@ -56,7 +56,7 @@ A valid score requires only:
 | `model` | No | string | Override the default model for this movement. Only needed to change from the adapter's default. |
 | `provider` | No | string | Override the default provider for this movement. Only needed to change from the adapter's default. |
 | `prompt` | No | string \| object | The prompt text. Supports templating. Optional when the movement does not need a prompt (e.g., subscores). |
-| `output` | No | object | Output configuration. Defaults to `{ mode: "text" }`. Use `structured` with a JSON Schema when downstream movements need specific fields. |
+| `output` | No | object | Output configuration. Defaults to `{ mode: "text" }`. Use `structured` with a JSON Schema when downstream movements need predictable, machine-readable output. |
 | `goal` | Yes | object | `{ description: string, strategy: "llm_judge" }`. The evaluator uses this to judge success. |
 | `transitions` | Yes | array | Array of `{ to, on }` objects defining what happens next. |
 | `budget` | No | object | Movement-level budget overrides. `{ maxSpendDollars?, maxRetries?, timeoutMs? }`. |
@@ -67,8 +67,7 @@ A valid score requires only:
 
 Movement prompts can reference:
 - `{{context.key}}` — values passed in the `context` parameter of `orchestron_start_concert`.
-- `{{context.previousOutputs.<movementId>}}` — the full text output of a previous movement.
-- `{{context.previousOutputs.<movementId>.<field>}}` — when the previous movement used `output.mode: structured`, you can reference individual fields.
+- `{{context.previousOutputs.<movementId>}}` — the full text output of a previous movement. If the previous movement used structured output, the rendered value is the stringified JSON of the structured result; dot-notation into individual fields (e.g. `{{context.previousOutputs.plan.steps}}`) is not supported.
 
 ## Prompt Variants for Loop-back Movements
 
@@ -88,7 +87,7 @@ The `initial` prompt is used on the first visit. The `subsequent` prompt is used
 ## Output Modes
 
 - `text` (default) — Free-form text output.
-- `structured` — The harness attempts to produce JSON matching the supplied JSON Schema. Use this when the next movement needs to reference specific fields cleanly.
+- `structured` — The harness attempts to produce JSON matching the supplied JSON Schema. Use this when the next movement needs predictable, machine-readable output. The whole result can be referenced as `{{context.previousOutputs.<movementId>}}` (rendered as stringified JSON); dot-notation into individual fields is not supported.
 
 ## Transitions
 
@@ -98,7 +97,7 @@ Each transition is `{ to, on }`:
 |------------|---------|
 | `success` | Movement completed and goal was achieved. |
 | `failure` | Movement failed or goal was not achieved. |
-| `skip` | Reserved for future use. |
+| `skip` | Wildcard: matches either `success` or `failure`. |
 
 | `to` value | Meaning |
 |------------|---------|
