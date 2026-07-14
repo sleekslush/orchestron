@@ -10,6 +10,7 @@ import type {
   Movement,
   MovementID,
   Program,
+  SectionBudget,
   Transition,
 } from '../types/score.js';
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
@@ -693,10 +694,7 @@ export class Conductor implements IConductor {
   }
 
   private checkMovementLimit(count: number, movementId: string): void {
-    const maxMovements =
-      this.score.program?.maxMovements ??
-      this.score.program?.perSection?.['*']?.maxMovements ??
-      100;
+    const maxMovements = this.score.program?.maxMovements ?? 100;
     if (count > maxMovements) {
       throw new ConstraintBreachError(
         `Movement limit exceeded: ${count} > ${maxMovements}`,
@@ -709,8 +707,18 @@ export class Conductor implements IConductor {
     }
   }
 
+  private getMergedSectionBudget(section: string): SectionBudget | undefined {
+    const wildcard = this.score.program?.perSection?.['*'];
+    const specific = this.score.program?.perSection?.[section];
+    if (!wildcard && !specific) return undefined;
+    return {
+      maxMovements: specific?.maxMovements ?? wildcard?.maxMovements,
+      maxSpendDollars: specific?.maxSpendDollars ?? wildcard?.maxSpendDollars,
+    };
+  }
+
   private checkSectionMovementLimit(movement: Movement, count: number): void {
-    const sectionBudget = this.score.program?.perSection?.[movement.section];
+    const sectionBudget = this.getMergedSectionBudget(movement.section);
     if (sectionBudget?.maxMovements !== undefined && count > sectionBudget.maxMovements) {
       throw new ConstraintBreachError(
         `Section '${movement.section}' movement limit exceeded: ${count} > ${sectionBudget.maxMovements}`,
@@ -724,7 +732,7 @@ export class Conductor implements IConductor {
   }
 
   private checkSectionSpendLimit(movement: Movement, record: MovementRecord): void {
-    const sectionBudget = this.score.program?.perSection?.[movement.section];
+    const sectionBudget = this.getMergedSectionBudget(movement.section);
     if (sectionBudget?.maxSpendDollars !== undefined) {
       const sectionSpend = (this.sectionSpend.get(movement.section) ?? 0) + (record.usage.spend ?? 0);
       this.sectionSpend.set(movement.section, sectionSpend);

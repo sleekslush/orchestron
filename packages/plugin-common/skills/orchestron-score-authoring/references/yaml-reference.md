@@ -33,7 +33,7 @@ A valid score requires only:
 | `maxDurationMs` | number | Maximum total duration in milliseconds. |
 | `maxNestingDepth` | number | Maximum depth of subscore nesting. Default is `5`. |
 | `persistSession` | boolean | Whether to persist harness sessions across movements. Default is `true`. |
-| `perSection` | object | Per-section budget overrides keyed by `section` ID. Each entry can specify `maxSpendDollars` and `maxMovements`. The `*` wildcard key is also supported as a fallback for the global `maxMovements` limit. |
+| `perSection` | object | Per-section budget overrides keyed by `section` ID. Each entry can specify `maxSpendDollars` and `maxMovements`. The `*` wildcard key sets a base budget for all sections; explicit section keys merge on top of it, overriding individual fields. |
 
 ## `evaluator` Fields
 

@@ -162,6 +162,49 @@ movements:
         on: failure
 ```
 
+## Wildcard Section Budgets
+
+Use `*` to set a base budget for all sections, then override specific fields for individual sections:
+
+```yaml
+id: wildcard-budget
+name: "Wildcard Budget Example"
+version: "1.0.0"
+program:
+  perSection:
+    "*":
+      maxMovements: 5
+      maxSpendDollars: 2
+    execution:
+      maxMovements: 3  # overrides *; inherits maxSpendDollars: 2
+    review:
+      maxSpendDollars: 1  # overrides *; inherits maxMovements: 5
+startMovement: run
+movements:
+  - id: run
+    name: "Run"
+    section: execution
+    harness: pi
+    prompt: "Execute the task."
+    goal:
+      description: "Task executed"
+      strategy: llm_judge
+    transitions:
+      - to: review
+        on: success
+  - id: review
+    name: "Review"
+    section: review
+    harness: pi
+    prompt: "Review the results."
+    goal:
+      description: "Review complete"
+      strategy: llm_judge
+    transitions:
+      - to: __end__
+        on: success
+```
+
 ## Subscore Delegation
 
 ```yaml
