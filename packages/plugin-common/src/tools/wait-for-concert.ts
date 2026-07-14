@@ -1,6 +1,7 @@
 import type { Orchestron } from '../orchestron.js';
 import { toUsageView, type UsageView } from '../util.js';
 import type { ProgressCallback } from './start-concert.js';
+import { microToDollars } from '@orchestron/core';
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -94,7 +95,7 @@ export async function waitForConcert(
   function emitUsage(usage: UsageView, maxDollars?: number) {
     const parts: string[] = [];
     if (usage.spend !== undefined) {
-      const spendDollars = usage.spend / 1_000_000;
+      const spendDollars = microToDollars(usage.spend);
       if (maxDollars !== undefined) {
         const pct = (spendDollars / maxDollars) * 100;
         parts.push(`$${spendDollars.toFixed(4)} spend / $${maxDollars.toFixed(4)} max (${pct.toFixed(1)}%)`);

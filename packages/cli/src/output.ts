@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import type { ConcertEvent } from '@orchestron/core';
+import { microToDollars } from '@orchestron/core';
 
 export function wantsJson(cmd: Command): boolean {
   return cmd.optsWithGlobals().json === true;
@@ -31,7 +32,7 @@ export function formatDuration(ms: number | undefined): string {
 export function formatUsage(usage: { spend?: number; tokens?: number }): string {
   const spend = usage.spend ?? 0;
   const tokens = usage.tokens ?? 0;
-  return `$${(spend / 1_000_000).toFixed(6)} / ${tokens} tokens`;
+  return `$${microToDollars(spend).toFixed(6)} / ${tokens} tokens`;
 }
 
 export function extractFailure(events: ConcertEvent[]) {
@@ -118,7 +119,7 @@ export function formatConcertHuman(
       const isDollarSpend = failure.constraint.name === 'maxSpendDollars';
       const isSpend = isMicroSpend || isDollarSpend;
       const toDollars = (value: number) =>
-        isMicroSpend ? (value / 1_000_000).toFixed(6) : value.toFixed(6);
+        isMicroSpend ? microToDollars(value).toFixed(6) : value.toFixed(6);
       lines.push(`  Constraint: ${failure.constraint.name}`);
       lines.push(
         `  Limit:      ${isSpend ? '$' + toDollars(failure.constraint.limit) : failure.constraint.limit}`,

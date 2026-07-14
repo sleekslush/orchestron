@@ -25,6 +25,7 @@ import {
   HarnessError,
   OrchestronError,
 } from '../types/errors.js';
+import { dollarsToMicro, microToDollars } from '../money.js';
 
 export { StartOptions };
 
@@ -692,9 +693,9 @@ export class Conductor implements IConductor {
     this.concert.usage.tokens = totalTokens;
 
     // maxSpendDollars is configured in dollars; internal usage is tracked in micro-dollars.
-    const maxSpendMicro = program.maxSpendDollars ? Math.round(program.maxSpendDollars * 1_000_000) : undefined;
+    const maxSpendMicro = program.maxSpendDollars ? dollarsToMicro(program.maxSpendDollars) : undefined;
     if (maxSpendMicro && totalSpend > maxSpendMicro) {
-      const totalSpendDollars = totalSpend / 1_000_000;
+      const totalSpendDollars = microToDollars(totalSpend);
       throw new ConstraintBreachError(
         `Spend limit exceeded: $${totalSpendDollars.toFixed(6)} > $${program.maxSpendDollars!.toFixed(6)}`,
         'SPEND_LIMIT',
