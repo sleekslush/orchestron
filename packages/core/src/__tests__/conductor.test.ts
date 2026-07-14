@@ -388,10 +388,12 @@ describe('Conductor constraints', () => {
       movements: [{
         id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
         goal: { description: 'done', strategy: 'llm_judge' },
+        budget: { timeoutMs: 1000 },
         transitions: [{ to: 'b', on: 'success' }],
       }, {
         id: 'b', name: 'B', section: 'x', harness: 'fake', prompt: 'B',
         goal: { description: 'done', strategy: 'llm_judge' },
+        budget: { timeoutMs: 1000 },
         transitions: [{ to: '__end__', on: 'success' }],
       }],
       program: { maxDurationMs: 50 },
