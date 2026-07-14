@@ -52,7 +52,7 @@ Typical workflow:
 Load the plugin from the monorepo:
 
 ```bash
-pi -e ./packages/plugin-pi/src/index.ts
+pi -e ./packages/plugin-pi/orchestron/index.ts
 ```
 
 Or install it as a local Pi package (for development):
@@ -103,5 +103,5 @@ The plugin uses the same defaults as the Orchestron CLI:
 Override with environment variables:
 
 ```bash
-ORCHESTRON_STORE_PATH=/path/to/store.db ORCHESTRON_SCORES_DIRS=/path/to/scores pi -e ./packages/plugin-pi/src/index.ts
+ORCHESTRON_STORE_PATH=/path/to/store.db ORCHESTRON_SCORES_DIRS=/path/to/scores pi -e ./packages/plugin-pi/orchestron/index.ts
 ```

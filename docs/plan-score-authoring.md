@@ -49,7 +49,7 @@
 
 ## Files to modify
 
-- `packages/plugin-pi/src/index.ts` — register new tools.
+- `packages/plugin-pi/orchestron/index.ts` — register new tools.
 - `packages/plugin-pi/src/orchestron.ts` — expose `scoresDirs` in the `Orchestron` interface.
 - `packages/plugin-pi/src/tools/list-scores.ts` — add `persisted` flag.
 - `packages/plugin-pi/package.json` — add `js-yaml` + `@types/js-yaml`, add `pi.skills` manifest.
