@@ -409,6 +409,82 @@ describe('Conductor constraints', () => {
     const events = await store.getEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
+
+  it('fails when per-section movement limit is exceeded', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'section-movement-limit', name: 'Section Movement Limit', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'execution', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'execution', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        maxMovements: 10,
+        perSection: { execution: { maxMovements: 1 } },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('section-movement-limit');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
+
+  it('fails when per-section spend limit is exceeded', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'section-spend-limit', name: 'Section Spend Limit', version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a', name: 'A', section: 'execution', harness: 'fake', prompt: 'A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: 'b', on: 'success' }],
+        },
+        {
+          id: 'b', name: 'B', section: 'execution', harness: 'fake', prompt: 'B',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {
+        maxSpendDollars: 5,
+        perSection: { execution: { maxSpendDollars: 0.5 } },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 600_000, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const conductor = await hall.createConcert('section-spend-limit');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const events = await store.getEvents(conductor.concertId);
+    expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
+  });
 });
 
 // ─── Movement Progress & Timeout Tests ───────────────────────
