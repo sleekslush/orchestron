@@ -39,8 +39,15 @@ export const OrchestronPlugin: Plugin = async (_input, options) => {
     return orchestronPromise;
   }
 
-  return ({
-    orchestron_start_concert: tool({
+  function validateSaveLocation(value: string | undefined): 'local' | 'global' | undefined {
+    if (value === undefined) return undefined;
+    if (value === 'local' || value === 'global') return value;
+    throw new Error(`Invalid saveLocation '${value}'. Must be 'local' or 'global'.`);
+  }
+
+  return {
+    tool: {
+      orchestron_start_concert: tool({
       description:
         "Start a new Orchestron concert from a registered score. The concert runs in the background and can be monitored with orchestron_get_concert_status.",
       args: {
@@ -197,7 +204,7 @@ export const OrchestronPlugin: Plugin = async (_input, options) => {
       },
       async execute(args) {
         const o = await getOrchestron();
-        return JSON.stringify(await createScore(o, args as any));
+        return JSON.stringify(await createScore(o, { ...args, saveLocation: validateSaveLocation(args.saveLocation) }));
       },
     }),
 
@@ -228,10 +235,11 @@ export const OrchestronPlugin: Plugin = async (_input, options) => {
       },
       async execute(args) {
         const o = await getOrchestron();
-        return JSON.stringify(await editScore(o, args as any));
+        return JSON.stringify(await editScore(o, { ...args, saveLocation: validateSaveLocation(args.saveLocation) }));
       },
     }),
-  });
+    },
+  };
 };
 
 export default OrchestronPlugin;

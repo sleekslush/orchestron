@@ -52,14 +52,14 @@ export class ScoreRegistry {
       );
     }
     const content = readFileSync(path, 'utf-8');
-    const score = yaml.load(content) as Score;
-    if (!score || typeof score !== 'object') {
+    const raw = yaml.load(content);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       throw new ScoreValidationError(
         `Invalid score YAML in: ${path}`,
         'INVALID_SCORE',
       );
     }
-    this.register(score);
+    this.register(raw as Score);
   }
 
   validate(score: Score): ScoreValidationError[] {

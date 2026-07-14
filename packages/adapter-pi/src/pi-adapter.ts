@@ -246,13 +246,11 @@ export class PiAdapter implements HarnessAdapter {
           break;
         }
         case 'assistant': {
-          if (
-            !('content' in msg) ||
-            !Array.isArray((msg as { content: unknown }).content)
-          ) {
+          const maybeContent = 'content' in msg ? (msg as { content: unknown }).content : undefined;
+          if (!Array.isArray(maybeContent)) {
             break;
           }
-          const blocks = ((msg as unknown) as { content: Array<Record<string, unknown>> }).content;
+          const blocks = maybeContent as Array<Record<string, unknown>>;
           for (const block of blocks) {
             if (!block || typeof block !== 'object') continue;
             if (block.type === 'text' && typeof block.text === 'string') {
