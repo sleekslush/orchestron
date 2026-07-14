@@ -2,6 +2,8 @@
 
 ## Minimal Valid Score
 
+Only the absolutely required fields. `harness`, `model`, `provider`, `evaluator`, `output` are all omitted — the platform provides defaults.
+
 ```yaml
 id: hello-world
 name: "Hello World"
@@ -12,7 +14,6 @@ movements:
   - id: greet
     name: "Greet"
     section: delivery
-    harness: pi
     prompt: "Say hello to the user."
     goal:
       description: "Greeting is friendly"

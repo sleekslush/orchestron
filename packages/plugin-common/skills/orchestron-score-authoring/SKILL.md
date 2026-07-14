@@ -53,34 +53,20 @@ Use this skill when the user wants to create, edit, run, or manage an Orchestron
 
 ## Score YAML at a Glance
 
+A minimal score requires only these fields. Optional fields (like `harness`, `model`, `provider`, `evaluator`, `output`) should be omitted unless you need to override system defaults — the platform provides sensible defaults.
+
 ```yaml
-id: my-score                # Must match scoreId param
-name: "My Score"
-version: "1.0.0"
-description: What this does
-startMovement: plan
-program:
-  maxSpendDollars: 2
-  maxMovements: 20
-  maxDurationMs: 600000
-  persistSession: true
-evaluator:
-  harness: pi
-  model: pi-4-mini
+id: my-score                # Required — must match scoreId param
+name: "My Score"            # Required
+version: "1.0.0"            # Required
+startMovement: plan          # Required — id of the first movement
+program: {}                  # Required — can be empty, uses defaults
 movements:
   - id: plan
     name: "Create Plan"
     section: planning
-    harness: pi
     prompt: >
       Create a plan for: {{context.task}}
-    output:
-      mode: structured
-      schema:
-        type: object
-        properties:
-          steps: { type: array, items: { type: string } }
-        required: [steps]
     goal:
       description: "Plan is detailed and actionable"
       strategy: llm_judge
@@ -93,7 +79,6 @@ movements:
   - id: review
     name: "Review Plan"
     section: review
-    harness: pi
     prompt: >
       Review this plan:
       {{context.previousOutputs.plan}}
@@ -106,6 +91,8 @@ movements:
       - to: plan
         on: failure
 ```
+
+> **Tip:** You can add optional fields (`harness`, `model`, `provider`, `output`, `evaluator`, `description`, `budget`, `retryOnFailure`, etc.) when you need advanced control. Start minimal and add only what you need.
 
 ## Detailed Reference
 

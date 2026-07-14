@@ -2,6 +2,28 @@
 
 Complete field-by-field reference for Orchestron score YAML.
 
+## Minimal Required Fields
+
+A valid score requires only:
+
+**Top-level:** `id`, `name`, `version`, `startMovement`, `program` (can be `{}`), `movements` (≥1)
+
+**Per movement:** `id`, `name`, `section`, `goal`, `transitions`
+
+All other fields are optional. Omit them unless you need to override system defaults or add advanced behavior.
+
+### Philosophy
+
+Fields like `harness`, `model`, `provider`, `evaluator`, `output`, `description`, `budget`, `retryOnFailure`, `prompt`, and `subscore` exist to give you full control when you need it. But for a typical workflow the platform provides sensible defaults:
+
+- **`harness`** — defaults to `pi` (or whatever the plugin sets as `defaultHarness`). Only specify when using a different harness (e.g., `opencode`).
+- **`model` / `provider`** — the harness adapter picks sensible defaults. Only specify when you need a specific model or provider.
+- **`evaluator`** — not needed unless you want custom evaluation behavior.
+- **`output`** — defaults to `text` mode. Only specify `structured` when downstream movements need to reference specific fields.
+- **`prompt`** — optional at the movement level because some movements (e.g., subscores) may not need a prompt.
+
+**Start minimal. Add fields only when you have a reason.**
+
 ## Top-level Fields
 
 | Field | Required | Type | Description |
@@ -12,7 +34,7 @@ Complete field-by-field reference for Orchestron score YAML.
 | `description` | No | string | What this workflow does. |
 | `startMovement` | Yes | string | `id` of the first movement to run. |
 | `program` | Yes | object | Execution constraints and global settings. Can be empty `{}`. |
-| `evaluator` | No | object | Configures the evaluator that judges whether movement goals are achieved. |
+| `evaluator` | No | object | Configures the evaluator that judges whether movement goals are achieved. Omit unless you need custom evaluation. |
 | `movements` | Yes | array | Non-empty list of movements. |
 | `metadata` | No | object | Arbitrary key-value data attached to the score. |
 
