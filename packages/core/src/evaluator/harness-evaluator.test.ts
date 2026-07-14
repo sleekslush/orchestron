@@ -138,4 +138,46 @@ describe('HarnessEvaluator', () => {
     expect(options?.output?.mode).toBe('structured');
     expect(options?.output?.schema).toBeDefined();
   });
+
+  it('forwards model and provider to the adapter', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"OK"}',
+        structured: { achieved: true, confidence: 1, summary: 'OK' },
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const evaluator = new HarnessEvaluator({
+      adapter,
+      model: 'pi-4-mini',
+      provider: 'pi',
+    });
+
+    await evaluator.evaluate(goal, 'output', context);
+
+    const options = executeSpy.mock.calls[0][2];
+    expect(options?.model).toBe('pi-4-mini');
+    expect(options?.provider).toBe('pi');
+  });
+
+  it('omits model and provider from adapter options when not configured', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"OK"}',
+        structured: { achieved: true, confidence: 1, summary: 'OK' },
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const evaluator = new HarnessEvaluator({ adapter });
+
+    await evaluator.evaluate(goal, 'output', context);
+
+    const options = executeSpy.mock.calls[0][2];
+    expect(options?.model).toBeUndefined();
+    expect(options?.provider).toBeUndefined();
+  });
 });
