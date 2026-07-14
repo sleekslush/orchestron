@@ -45,6 +45,11 @@ export default function orchestronPlugin(
     orchestronPromise = undefined;
     if (orchestron) {
       try {
+        await orchestron.hall.close();
+      } catch {
+        // ignore
+      }
+      try {
         orchestron.store.close();
       } catch {
         // ignore

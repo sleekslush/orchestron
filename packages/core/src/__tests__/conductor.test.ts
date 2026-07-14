@@ -807,14 +807,26 @@ describe('ConcertHall', () => {
     const c2 = await hall.createConcert('filter-score');
     await c2.start();
 
-    const running = hall.list({ status: 'completed' });
-    expect(running).toHaveLength(2);
+    // Completed conductors are cleaned up from the hall; verify via store.
+    const storedCompleted = await store.listConcerts({ status: 'completed' });
+    expect(storedCompleted).toHaveLength(2);
+
+    // Test in-memory filtering on pending concerts (not yet started).
+    const p1 = await hall.createConcert('filter-score');
+    const p2 = await hall.createConcert('filter-score');
+
+    const pending = hall.list({ status: 'pending' });
+    expect(pending).toHaveLength(2);
 
     const limited = hall.list({ limit: 1 });
     expect(limited).toHaveLength(1);
 
-    const withStatus = hall.list({ status: 'completed', limit: 1 });
+    const withStatus = hall.list({ status: 'pending', limit: 1 });
     expect(withStatus).toHaveLength(1);
+
+    // Clean up pending concerts so they don't leak into other tests.
+    await p1.cancel();
+    await p2.cancel();
   });
 
   it('getChildConcerts returns children', async () => {
@@ -850,10 +862,11 @@ describe('ConcertHall', () => {
     });
 
     const conductor = await hall.createConcert('parent');
-    await conductor.start();
+    const child = await hall.createChildConcert('child', { parentConcertId: conductor.concertId });
 
     const children = hall.getChildConcerts(conductor.concertId);
     expect(children).toHaveLength(1);
+    expect(children[0]).toBe(child.concertId);
     const childConductor = hall.getConcert(children[0]);
     expect(childConductor).toBeDefined();
   });

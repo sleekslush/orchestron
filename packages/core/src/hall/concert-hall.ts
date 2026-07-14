@@ -47,6 +47,37 @@ export class ConcertHall implements ChildConcertFactory {
     this.defaultHarness = options.defaultHarness;
   }
 
+  private async buildConductor(
+    concert: Concert,
+    score: Score,
+    explicitHarness?: string,
+  ): Promise<Conductor> {
+    const conductor = new Conductor(
+      concert,
+      score,
+      this.store,
+      this,
+      this.adapterResolver,
+      await this.resolveEvaluator(score, explicitHarness),
+      this.tracesDir,
+      this.defaultHarness,
+      (id) => this.cleanupConductor(id),
+    );
+    return conductor;
+  }
+
+  private cleanupConductor(id: ConcertID): void {
+    this.conductors.delete(id);
+    for (const [parentId, children] of this.parentToChildren.entries()) {
+      const filtered = children.filter((childId) => childId !== id);
+      if (filtered.length === 0) {
+        this.parentToChildren.delete(parentId);
+      } else {
+        this.parentToChildren.set(parentId, filtered);
+      }
+    }
+  }
+
   private createAdapterResolver(
     adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver,
   ): AdapterResolver {
@@ -128,16 +159,7 @@ export class ConcertHall implements ChildConcertFactory {
     const scoreYaml = yaml.dump(score);
     await this.store.saveConcert(concert, scoreYaml);
 
-    const conductor = new Conductor(
-      concert,
-      score,
-      this.store,
-      this,
-      this.adapterResolver,
-      await this.resolveEvaluator(score, options?.harness),
-      this.tracesDir,
-      this.defaultHarness,
-    );
+    const conductor = await this.buildConductor(concert, score, options?.harness);
 
     this.conductors.set(concert.id, conductor);
 
@@ -166,16 +188,7 @@ export class ConcertHall implements ChildConcertFactory {
       } else {
         score = this.scoreRegistry.get(stored.scoreId);
       }
-      const conductor = new Conductor(
-        stored,
-        score,
-        this.store,
-        this,
-        this.adapterResolver,
-        await this.resolveEvaluator(score, stored.explicitHarness),
-        this.tracesDir,
-        this.defaultHarness,
-      );
+      const conductor = await this.buildConductor(stored, score, stored.explicitHarness);
       this.conductors.set(id, conductor);
 
       if (stored.parentConcertId) {
@@ -231,6 +244,15 @@ export class ConcertHall implements ChildConcertFactory {
     return [...(this.parentToChildren.get(parentId) ?? [])];
   }
 
+  async close(): Promise<void> {
+    const ids = Array.from(this.conductors.keys());
+    await Promise.all(
+      ids.map((id) => this.conductors.get(id)!.cancel().catch(() => {})),
+    );
+    this.conductors.clear();
+    this.parentToChildren.clear();
+  }
+
   async rehydrate(): Promise<void> {
     const runningConcerts = await this.store.listConcerts({
       status: 'running',
@@ -242,6 +264,9 @@ export class ConcertHall implements ChildConcertFactory {
     const all = [...runningConcerts, ...pausedConcerts];
 
     for (const concert of all) {
+      if (this.conductors.has(concert.id)) {
+        continue;
+      }
       try {
         let score: Score;
         const scoreYaml = await this.store.getConcertScoreYaml(concert.id);
@@ -250,16 +275,7 @@ export class ConcertHall implements ChildConcertFactory {
         } else {
           score = this.scoreRegistry.get(concert.scoreId);
         }
-        const conductor = new Conductor(
-          concert,
-          score,
-          this.store,
-          this,
-          this.adapterResolver,
-          await this.resolveEvaluator(score, concert.explicitHarness),
-          this.tracesDir,
-          this.defaultHarness,
-        );
+        const conductor = await this.buildConductor(concert, score, concert.explicitHarness);
         this.conductors.set(concert.id, conductor);
 
         if (concert.parentConcertId) {
