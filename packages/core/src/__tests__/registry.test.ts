@@ -209,6 +209,13 @@ describe('ScoreRegistry', () => {
     ).toThrow();
   });
 
+  it('should reject a score without a version', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ version: '' })),
+    ).toThrow('must have a version');
+  });
+
   it('should reject a score without a name', () => {
     const registry = new ScoreRegistry();
     expect(() =>
