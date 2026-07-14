@@ -68,6 +68,9 @@ export class ScoreRegistry {
     if (!score.id) {
       errors.push(new ScoreValidationError('Score must have an id', 'INVALID_SCORE'));
     }
+    if (!score.version) {
+      errors.push(new ScoreValidationError(`Score '${score.id}' must have a version`, 'INVALID_SCORE'));
+    }
     if (!score.name) {
       errors.push(new ScoreValidationError(`Score '${score.id}' must have a name`, 'INVALID_SCORE'));
     }
