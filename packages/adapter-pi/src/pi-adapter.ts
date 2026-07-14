@@ -2,7 +2,7 @@ import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { OutputConfig } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
-import { HarnessError } from '@orchestron/core';
+import { HarnessError, dollarsToMicro } from '@orchestron/core';
 import {
   AuthStorage,
   createAgentSession,
@@ -133,7 +133,7 @@ export class PiAdapter implements HarnessAdapter {
               type: 'usage_update',
               usage: {
                 spend: cumulativeCost
-                  ? Math.round(cumulativeCost * 1_000_000)
+                  ? dollarsToMicro(cumulativeCost)
                   : undefined,
                 tokens: cumulativeInput + cumulativeOutput,
                 inputTokens: cumulativeInput,
@@ -198,7 +198,7 @@ export class PiAdapter implements HarnessAdapter {
       const usage = hasCumulative
         ? {
             spend: cumulativeCost
-              ? Math.round(cumulativeCost * 1_000_000)
+              ? dollarsToMicro(cumulativeCost)
               : undefined,
             tokens: cumulativeInput + cumulativeOutput,
             inputTokens: cumulativeInput,
@@ -370,7 +370,7 @@ export class PiAdapter implements HarnessAdapter {
   private toResourceUsage(finalUsage: Usage | undefined) {
     return {
       spend: finalUsage?.cost?.total
-        ? Math.round(finalUsage.cost.total * 1_000_000)
+        ? dollarsToMicro(finalUsage.cost.total)
         : undefined,
       tokens: finalUsage
         ? (finalUsage.input ?? 0) + (finalUsage.output ?? 0)

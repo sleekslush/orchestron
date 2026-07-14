@@ -2,7 +2,7 @@ import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { OutputConfig } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
-import { HarnessError, safeJsonParse, extractBalancedJson } from '@orchestron/core';
+import { HarnessError, safeJsonParse, extractBalancedJson, dollarsToMicro } from '@orchestron/core';
 import {
   createOpencode,
   createOpencodeClient,
@@ -501,7 +501,7 @@ export class OpencodeAdapter implements HarnessAdapter {
     const totalTokens = tokens?.total ?? (tokens?.input ?? 0) + (tokens?.output ?? 0);
 
     return {
-      spend: typeof spend === 'number' ? Math.round(spend * 1_000_000) : undefined,
+      spend: typeof spend === 'number' ? dollarsToMicro(spend) : undefined,
       tokens: totalTokens || undefined,
       inputTokens: tokens?.input,
       outputTokens: tokens?.output,

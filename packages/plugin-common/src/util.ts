@@ -1,3 +1,5 @@
+import { microToDollars } from '@orchestron/core';
+
 export interface UsageView {
   spend?: number;
   tokens?: number;
@@ -7,7 +9,7 @@ export interface UsageView {
 
 export function toUsageView(usage: UsageView): UsageView {
   return {
-    spend: usage.spend !== undefined ? usage.spend / 1_000_000 : undefined,
+    spend: usage.spend !== undefined ? microToDollars(usage.spend) : undefined,
     tokens: usage.tokens,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,

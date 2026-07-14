@@ -1,6 +1,7 @@
 export * from './types/index.js';
 
 export { safeJsonParse, extractBalancedJson } from './json-utils.js';
+export { dollarsToMicro, microToDollars, MICRO_DOLLARS_PER_DOLLAR } from './money.js';
 
 export { loadConfigFile, resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH } from './config.js';
 export type { OrchestronConfig, ResolvedOrchestronConfig } from './config.js';

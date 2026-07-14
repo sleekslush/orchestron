@@ -1,5 +1,6 @@
 import http from 'node:http';
 import type { ConcertStore } from '@orchestron/core';
+import { microToDollars } from '@orchestron/core';
 
 export async function startDashboardServer(
   store: ConcertStore,
@@ -113,7 +114,7 @@ function dashboardHtml(): string {
 
       document.getElementById('totalConcerts').textContent = aggregates.totalConcerts;
       document.getElementById('activeConcerts').textContent = aggregates.activeConcerts;
-      document.getElementById('totalSpend').textContent = '$' + (aggregates.totalSpend / 1_000_000).toFixed(6);
+      document.getElementById('totalSpend').textContent = '$' + microToDollars(aggregates.totalSpend).toFixed(6);
       document.getElementById('totalTokens').textContent = aggregates.totalTokens;
       document.getElementById('avgDurationMs').textContent = aggregates.avgDurationMs ? (aggregates.avgDurationMs / 1000).toFixed(1) + 's' : '—';
       document.getElementById('failureRate').textContent = (aggregates.failureRate * 100).toFixed(1) + '%';
@@ -125,7 +126,7 @@ function dashboardHtml(): string {
           <td>\${c.scoreId}</td>
           <td class="status-\${c.status}">\${c.status}</td>
           <td>\${new Date(c.startedAt).toLocaleString()}</td>
-          <td>\${c.usage.spend ? '$' + (c.usage.spend / 1_000_000).toFixed(6) : '$0.000000'} / \${c.usage.tokens ?? 0} tokens</td>
+          <td>\${c.usage.spend ? '$' + microToDollars(c.usage.spend).toFixed(6) : '$0.000000'} / \${c.usage.tokens ?? 0} tokens</td>
         </tr>
       \`).join('');
     }
