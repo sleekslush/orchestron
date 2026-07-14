@@ -9,7 +9,7 @@ export {
 export { SessionPool } from './session-pool.js';
 export { dollarsToMicro, microToDollars, MICRO_DOLLARS_PER_DOLLAR } from './money.js';
 
-export { loadConfigFile, resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH } from './config.js';
+export { loadConfigFile, resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR } from './config.js';
 export type { OrchestronConfig, ResolvedOrchestronConfig } from './config.js';
 
 export { SqliteLoge } from './store/sqlite-loge.js';
@@ -18,6 +18,7 @@ export { TraceService } from './store/trace-service.js';
 
 export { ScoreRegistry } from './registry/score-registry.js';
 export type { ScoreValidationResult } from './registry/score-registry.js';
+export { ensureDir, loadScoresFromDir } from './fs-utils.js';
 
 export { Conductor } from './conductor/conductor.js';
 export type { IConductor } from './conductor/conductor-interface.js';
@@ -29,6 +30,8 @@ export { PromptBuilder } from './conductor/prompt-builder.js';
 export { ConstraintChecker } from './conductor/constraint-checker.js';
 export type { ConstraintResult } from './conductor/constraint-checker.js';
 export { matchTransition } from './conductor/transition-resolver.js';
+export { createAdapterResolver } from './adapter-resolver.js';
+export type { AdapterResolver } from './adapter-resolver.js';
 
 export { ConcertHall } from './hall/concert-hall.js';
 export type { ConcertHallOptions } from './hall/concert-hall.js';

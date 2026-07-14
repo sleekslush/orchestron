@@ -41,6 +41,9 @@ export interface ResolvedOrchestronConfig {
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
 export const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, 'config.json');
+export const DEFAULT_STORE_PATH = join(DEFAULT_CONFIG_DIR, 'store.db');
+export const DEFAULT_SCORES_DIR = join(DEFAULT_CONFIG_DIR, 'scores');
+export const LOCAL_SCORES_DIR = join(process.cwd(), '.orchestron', 'scores');
 
 function expandTilde(path: string): string {
   if (path.startsWith('~/')) {
