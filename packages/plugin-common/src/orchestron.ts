@@ -1,6 +1,4 @@
-import { mkdirSync, readdirSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type {
   ConcertHall,
   Evaluator,
@@ -9,12 +7,9 @@ import type {
   ScoreRegistry,
   SqliteLoge,
 } from '@orchestron/core';
-import { resolveOrchestronConfig } from '@orchestron/core';
+import { resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR, ensureDir, loadScoresFromDir } from '@orchestron/core';
 
-export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
-export const DEFAULT_STORE_PATH = join(DEFAULT_CONFIG_DIR, 'store.db');
-export const DEFAULT_SCORES_DIR = join(DEFAULT_CONFIG_DIR, 'scores');
-export const LOCAL_SCORES_DIR = join(process.cwd(), '.orchestron', 'scores');
+export { DEFAULT_CONFIG_DIR, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR };
 
 export interface OrchestronOptions {
   storePath?: string;
@@ -86,29 +81,4 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
   return { store, registry, hall, scoresDirs };
 }
 
-function ensureDir(dir: string): void {
-  try {
-    mkdirSync(dir, { recursive: true });
-  } catch {
-    // ignore
-  }
-}
 
-function loadScoresFromDir(dir: string, registry: ScoreRegistry): void {
-  let entries: string[] = [];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    const fullPath = resolve(dir, entry);
-    const stat = statSync(fullPath);
-    if (!stat.isFile()) continue;
-
-    if (/\.score\.(ya?ml|json)$/i.test(entry)) {
-      registry.loadFrom(fullPath);
-    }
-  }
-}

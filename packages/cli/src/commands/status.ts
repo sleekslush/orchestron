@@ -1,5 +1,5 @@
 import type { Orchestron } from '../orchestron.js';
-import { printOutput, formatConcertHuman, extractFailure, formatDate, formatDuration, formatUsage } from '../output.js';
+import { printOutput, formatConcertHuman, extractFailure, formatDate, formatDuration, formatUsage, movementToOutput } from '../output.js';
 
 export async function statusCommandHandler(
   orchestron: Orchestron,
@@ -47,18 +47,7 @@ export async function statusCommandHandler(
       currentPrompt,
       usage: state.usage,
       failure,
-      movements: history.map((h) => ({
-        movementId: h.movementId,
-        movementName: h.movementName,
-        status: h.status,
-        summary: h.summary,
-        durationMs: h.durationMs,
-        goalAchieved: h.goalEvaluation.achieved,
-        goalSummary: h.goalEvaluation.summary,
-        error: h.error,
-        model: h.model,
-        provider: h.provider,
-      })),
+      movements: history.map(movementToOutput),
     };
 
     printOutput(json, output, () => formatConcertHuman(state, history, events, verbose, currentCommand, currentPrompt));

@@ -26,6 +26,7 @@ import {
 import { PromptBuilder } from './prompt-builder.js';
 import { ConstraintChecker } from './constraint-checker.js';
 import { matchTransition } from './transition-resolver.js';
+import { createAdapterResolver } from '../adapter-resolver.js';
 
 export { StartOptions };
 
@@ -39,7 +40,7 @@ export class Conductor implements IConductor {
   private startedAt = 0;
   private nestingDepth: number;
   private activeSessions = new Map<string, HarnessAdapter>();
-  private adapterResolver: { get(name: string): Promise<HarnessAdapter> };
+  private adapterResolver: { get(name: string, concertId?: string): Promise<HarnessAdapter> };
   private loopPromise?: Promise<void>;
   private traceService?: TraceService;
   private childConductors = new Map<ConcertID, IConductor>();
@@ -63,22 +64,7 @@ export class Conductor implements IConductor {
     if (tracesDir) {
       this.traceService = new TraceService(tracesDir, store);
     }
-    this.adapterResolver =
-      adapters instanceof Map
-        ? {
-            get: async (name) => {
-              const adapter = adapters.get(name);
-              if (!adapter) {
-                throw new ConductorPanic(
-                  `No adapter registered for harness type '${name}'`,
-                  'INTERNAL_ERROR',
-                  this.concert.id,
-                );
-              }
-              return adapter;
-            },
-          }
-        : adapters;
+    this.adapterResolver = createAdapterResolver(adapters);
   }
 
   get concertId(): ConcertID {
@@ -371,73 +357,10 @@ export class Conductor implements IConductor {
         timestamp: startedAt,
       });
 
-      const movementController = new AbortController();
-      const movementSignal = movementController.signal;
-      const onParentAbort = () => movementController.abort();
-      if (signal.aborted) {
-        movementController.abort();
-      } else {
-        signal.addEventListener('abort', onParentAbort, { once: true });
-      }
+      const { movementSignal, onParentAbort, timeoutHandle, heartbeatHandle } =
+        this.setupMovementExecution(movement, startedAt, signal);
 
-      let timeoutMs: number | undefined;
-      if (movement.budget?.timeoutMs && movement.budget.timeoutMs > 0) {
-        timeoutMs = movement.budget.timeoutMs;
-      } else if (this.score.program?.maxDurationMs && this.startedAt > 0) {
-        const remaining = this.score.program!.maxDurationMs - (Date.now() - this.startedAt);
-        if (remaining > 0) {
-          timeoutMs = remaining;
-        }
-      }
-      if (!timeoutMs) {
-        timeoutMs = DEFAULT_MOVEMENT_TIMEOUT_MS;
-      }
-      const timeoutHandle = setTimeout(() => {
-        movementController.abort();
-      }, timeoutMs);
-
-      const heartbeatHandle = setInterval(() => {
-        const elapsedMs = Date.now() - startedAt.getTime();
-        this.store.pushEvent({
-          type: 'movement:progress',
-          concertId: this.concert.id,
-          movementId: movement.id,
-          progressType: 'heartbeat',
-          payload: {
-            elapsedMs,
-            message: `Movement '${movement.id}' still running (${Math.round(elapsedMs / 1000)}s)`,
-          },
-          timestamp: new Date(),
-        }).catch(() => {});
-      }, HEARTBEAT_INTERVAL_MS);
-
-      const onProgress = (update: ProgressUpdate) => {
-        if (update.type === 'usage_update') {
-          this.store.updateConcert({
-            id: this.concert.id,
-            usage: update.usage,
-          }).catch(() => {});
-          return;
-        }
-        const payload: Record<string, unknown> = { type: update.type };
-        if (update.type === 'tool_execution_start') {
-          payload.toolName = update.toolName;
-          if (update.args) payload.args = update.args;
-        } else if (update.type === 'tool_execution_end') {
-          payload.toolName = update.toolName;
-          payload.isError = update.isError;
-          if (update.result !== undefined) payload.result = update.result;
-          if (update.error) payload.error = update.error;
-        }
-        this.store.pushEvent({
-          type: 'movement:progress',
-          concertId: this.concert.id,
-          movementId: movement.id,
-          progressType: update.type,
-          payload,
-          timestamp: new Date(),
-        }).catch(() => {});
-      };
+      const onProgress = this.createProgressHandler(movement.id);
 
       try {
         const response = await harnessAdapter.execute(prompt, this.concert.context, {
@@ -466,23 +389,7 @@ export class Conductor implements IConductor {
     } catch (err) {
       record.status = 'failed';
       record.durationMs = Date.now() - startedAt.getTime();
-      if (err instanceof OrchestronError) {
-        record.error = {
-          code: err.code,
-          message: err.message,
-          retryable: err.retryable,
-          concertId: this.concert.id,
-          movementId: movement.id,
-        };
-      } else {
-        record.error = {
-          code: 'UNKNOWN',
-          message: (err as Error).message ?? 'Unknown error',
-          retryable: false,
-          concertId: this.concert.id,
-          movementId: movement.id,
-        };
-      }
+      record.error = this.serializeMovementError(err, movement.id);
     }
 
     if (this.traceService && harnessAdapter && sessionId) {
@@ -587,6 +494,117 @@ export class Conductor implements IConductor {
     });
 
     return record;
+  }
+
+  /**
+   * Create an AbortController, register parent-abort propagation, compute
+   * the movement timeout, and start a heartbeat interval.
+   */
+  private setupMovementExecution(
+    movement: Movement,
+    startedAt: Date,
+    signal: AbortSignal,
+  ): {
+    movementSignal: AbortSignal;
+    onParentAbort: () => void;
+    timeoutHandle: ReturnType<typeof setTimeout>;
+    heartbeatHandle: ReturnType<typeof setInterval>;
+  } {
+    const movementController = new AbortController();
+    const movementSignal = movementController.signal;
+    const onParentAbort = () => movementController.abort();
+    if (signal.aborted) {
+      movementController.abort();
+    } else {
+      signal.addEventListener('abort', onParentAbort, { once: true });
+    }
+
+    let timeoutMs: number | undefined;
+    if (movement.budget?.timeoutMs && movement.budget.timeoutMs > 0) {
+      timeoutMs = movement.budget.timeoutMs;
+    } else if (this.score.program?.maxDurationMs && this.startedAt > 0) {
+      const remaining = this.score.program.maxDurationMs - (Date.now() - this.startedAt);
+      if (remaining > 0) {
+        timeoutMs = remaining;
+      }
+    }
+    if (!timeoutMs) {
+      timeoutMs = DEFAULT_MOVEMENT_TIMEOUT_MS;
+    }
+    const timeoutHandle = setTimeout(() => {
+      movementController.abort();
+    }, timeoutMs);
+
+    const heartbeatHandle = setInterval(() => {
+      const elapsedMs = Date.now() - startedAt.getTime();
+      this.store.pushEvent({
+        type: 'movement:progress',
+        concertId: this.concert.id,
+        movementId: movement.id,
+        progressType: 'heartbeat',
+        payload: {
+          elapsedMs,
+          message: `Movement '${movement.id}' still running (${Math.round(elapsedMs / 1000)}s)`,
+        },
+        timestamp: new Date(),
+      }).catch(() => {});
+    }, HEARTBEAT_INTERVAL_MS);
+
+    return { movementSignal, onParentAbort, timeoutHandle, heartbeatHandle };
+  }
+
+  /**
+   * Returns a ProgressUpdate callback that persists usage updates and
+   * forwards progress events to the store.
+   */
+  private createProgressHandler(movementId: string): (update: ProgressUpdate) => void {
+    return (update: ProgressUpdate) => {
+      if (update.type === 'usage_update') {
+        this.store.updateConcert({
+          id: this.concert.id,
+          usage: update.usage,
+        }).catch(() => {});
+        return;
+      }
+      const payload: Record<string, unknown> = { type: update.type };
+      if (update.type === 'tool_execution_start') {
+        payload.toolName = update.toolName;
+        if (update.args) payload.args = update.args;
+      } else if (update.type === 'tool_execution_end') {
+        payload.toolName = update.toolName;
+        payload.isError = update.isError;
+        if (update.result !== undefined) payload.result = update.result;
+        if (update.error) payload.error = update.error;
+      }
+      this.store.pushEvent({
+        type: 'movement:progress',
+        concertId: this.concert.id,
+        movementId,
+        progressType: update.type,
+        payload,
+        timestamp: new Date(),
+      }).catch(() => {});
+    };
+  }
+
+  /** Serialize an caught error into a SerializedError for a MovementRecord. */
+  private serializeMovementError(err: unknown, movementId: string): SerializedError {
+    if (err instanceof OrchestronError) {
+      return {
+        code: err.code,
+        message: err.message,
+        retryable: err.retryable,
+        concertId: this.concert.id,
+        movementId,
+      };
+    }
+    return {
+      code: 'UNKNOWN',
+      message: (err as Error).message ?? 'Unknown error',
+      retryable: false,
+      concertId: this.concert.id,
+      movementId,
+    };
   }
 
   private async resolveAdapter(movement: Movement): Promise<HarnessAdapter> {

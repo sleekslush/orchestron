@@ -35,10 +35,10 @@ export class ConstraintChecker {
     concertId: string,
   ): void {
     const movementMaxSpendMicro = movement.budget?.maxSpendDollars
-      ? Math.round(movement.budget.maxSpendDollars * 1_000_000)
+      ? dollarsToMicro(movement.budget.maxSpendDollars)
       : undefined;
     if (movementMaxSpendMicro && (record.usage.spend ?? 0) > movementMaxSpendMicro) {
-      const movementSpendDollars = (record.usage.spend ?? 0) / 1_000_000;
+      const movementSpendDollars = microToDollars(record.usage.spend ?? 0);
       throw new ConstraintBreachError(
         `Movement spend limit exceeded: $${movementSpendDollars.toFixed(6)} > $${movement.budget!.maxSpendDollars!.toFixed(6)}`,
         'SPEND_LIMIT',
