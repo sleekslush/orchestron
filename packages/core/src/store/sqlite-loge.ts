@@ -2,88 +2,26 @@ import type {
   Concert,
   ConcertID,
   ConcertFilter,
-  ConcertStatus,
   MovementID,
   MovementRecord,
-  MovementStatus,
 } from '../types/concert.js';
 import type { ConcertEvent, EventFilter, SystemAggregates, SessionTrace } from '../types/index.js';
 import type { ConcertStore } from './concert-store.js';
 import { createSqliteDb } from './sqlite-driver.js';
-
-function serializeDate(d: Date | undefined): string | null {
-  return d ? d.toISOString() : null;
-}
-
-function deserializeDate(s: string | null): Date | undefined {
-  return s ? new Date(s) : undefined;
-}
-
-function jsonParse<T>(s: string | null, fallback: T): T {
-  if (!s) return fallback;
-  try {
-    return JSON.parse(s) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-interface ConcertRow {
-  id: string;
-  score_id: string;
-  status: string;
-  started_at: string;
-  completed_at: string | null;
-  current_movement: string | null;
-  context: string;
-  usage: string;
-  triggered_by: string;
-  parent_concert_id: string | null;
-  child_concert_ids: string;
-  nesting_depth: number | null;
-  score_yaml: string | null;
-  explicit_harness: string | null;
-}
-
-interface MovementRow {
-  id: string;
-  concert_id: string;
-  movement_id: string;
-  movement_name: string;
-  status: string;
-  output: string;
-  structured: string | null;
-  summary: string;
-  goal_evaluation: string;
-  usage: string;
-  duration_ms: number;
-  started_at: string;
-  completed_at: string | null;
-  error: string | null;
-  trace_id: string | null;
-  model: string | null;
-  provider: string | null;
-}
-
-interface SessionTraceRow {
-  id: string;
-  concert_id: string;
-  movement_id: string;
-  session_id: string;
-  file_path: string;
-  started_at: string;
-  completed_at: string | null;
-  event_count: number;
-  status: string;
-  format: string;
-}
-
-interface EventRow {
-  concert_id: string;
-  type: string;
-  data: string;
-  timestamp: string;
-}
+import {
+  serializeDate,
+  jsonParse,
+  rowToConcert,
+  rowToMovementRecord,
+  rowToSessionTrace,
+  rowToEvent,
+} from './row-mappers.js';
+import type {
+  ConcertRow,
+  MovementRow,
+  SessionTraceRow,
+  EventRow,
+} from './row-mappers.js';
 
 export class SqliteLoge implements ConcertStore {
   private db: ReturnType<typeof createSqliteDb>;
@@ -599,132 +537,4 @@ export class SqliteLoge implements ConcertStore {
   }
 }
 
-function rowToConcert(row: ConcertRow, history: MovementRecord[]): Concert {
-  return {
-    id: row.id,
-    scoreId: row.score_id,
-    status: row.status as ConcertStatus,
-    startedAt: deserializeDate(row.started_at)!,
-    completedAt: deserializeDate(row.completed_at),
-    currentMovement: row.current_movement,
-    history,
-    context: jsonParse(row.context, { shared: {} }),
-    usage: jsonParse(row.usage, {}),
-    triggeredBy: row.triggered_by as Concert['triggeredBy'],
-    parentConcertId: row.parent_concert_id ?? undefined,
-    childConcertIds: jsonParse<string[]>(row.child_concert_ids, []),
-    nestingDepth: row.nesting_depth ?? undefined,
-    explicitHarness: row.explicit_harness ?? undefined,
-  };
-}
 
-function rowToMovementRecord(row: MovementRow): MovementRecord {
-  return {
-    movementId: row.movement_id,
-    movementName: row.movement_name,
-    status: row.status as MovementStatus,
-    output: row.output,
-    structured: row.structured ? jsonParse<Record<string, unknown> | undefined>(row.structured, undefined) : undefined,
-    summary: row.summary,
-    goalEvaluation: jsonParse(row.goal_evaluation, { achieved: false, confidence: 0, summary: '' }),
-    usage: jsonParse(row.usage, {}),
-    durationMs: row.duration_ms,
-    startedAt: deserializeDate(row.started_at)!,
-    completedAt: deserializeDate(row.completed_at),
-    error: row.error ? jsonParse(row.error, undefined) : undefined,
-    traceId: row.trace_id ?? undefined,
-    model: row.model ?? undefined,
-    provider: row.provider ?? undefined,
-  };
-}
-
-function rowToSessionTrace(row: SessionTraceRow): SessionTrace {
-  return {
-    id: row.id,
-    concertId: row.concert_id,
-    movementId: row.movement_id,
-    sessionId: row.session_id,
-    filePath: row.file_path,
-    startedAt: deserializeDate(row.started_at)!,
-    completedAt: deserializeDate(row.completed_at),
-    eventCount: row.event_count,
-    status: row.status as SessionTrace['status'],
-    format: row.format as SessionTrace['format'],
-  };
-}
-
-function rowToEvent(row: EventRow): ConcertEvent {
-  const parsed = jsonParse<Record<string, unknown>>(row.data, {});
-  const base = {
-    concertId: row.concert_id,
-    timestamp: deserializeDate(row.timestamp)!,
-  };
-
-  switch (row.type) {
-    case 'concert:started':
-      return { type: 'concert:started', ...base, scoreId: parsed.scoreId as string };
-    case 'concert:paused':
-      return { type: 'concert:paused', ...base };
-    case 'concert:resumed':
-      return { type: 'concert:resumed', ...base };
-    case 'concert:completed':
-      return { type: 'concert:completed', ...base };
-    case 'concert:failed':
-      return { type: 'concert:failed', ...base, error: parsed.error as never };
-    case 'concert:cancelled':
-      return { type: 'concert:cancelled', ...base };
-    case 'concert:recovered':
-      return { type: 'concert:recovered', ...base };
-    case 'movement:started':
-      return { type: 'movement:started', ...base, movementId: parsed.movementId as string };
-    case 'movement:progress':
-      return {
-        type: 'movement:progress',
-        ...base,
-        movementId: parsed.movementId as string,
-        progressType: parsed.progressType as string,
-        payload: (parsed.payload as Record<string, unknown>) ?? {},
-      };
-    case 'movement:completed':
-      return {
-        type: 'movement:completed',
-        ...base,
-        movementId: parsed.movementId as string,
-        result: parsed.result as never,
-      };
-    case 'movement:failed':
-      return {
-        type: 'movement:failed',
-        ...base,
-        movementId: parsed.movementId as string,
-        error: parsed.error as never,
-        retryCount: (parsed.retryCount as number) ?? 0,
-      };
-    case 'constraint:breached':
-      return {
-        type: 'constraint:breached',
-        ...base,
-        constraint: parsed.constraint as string,
-        limit: parsed.limit as number,
-        actual: parsed.actual as number,
-      };
-    case 'child:created':
-      return {
-        type: 'child:created',
-        ...base,
-        childConcertId: parsed.childConcertId as string,
-      };
-    case 'child:completed':
-      return {
-        type: 'child:completed',
-        ...base,
-        childConcertId: parsed.childConcertId as string,
-      };
-    default:
-      return {
-        type: row.type as ConcertEvent['type'],
-        ...base,
-        ...parsed,
-      } as ConcertEvent;
-  }
-}
