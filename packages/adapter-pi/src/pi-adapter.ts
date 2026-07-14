@@ -2,7 +2,7 @@ import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { OutputConfig } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
-import { HarnessError, dollarsToMicro } from '@orchestron/core';
+import { HarnessError, dollarsToMicro, tryParseStructuredFromText, SessionPool } from '@orchestron/core';
 import {
   AuthStorage,
   createAgentSession,
@@ -36,14 +36,17 @@ export class PiAdapter implements HarnessAdapter {
   private provider: string | undefined;
   private tools: string[] | undefined;
   private excludeTools: string[] | undefined;
-  private sessions = new Map<string, PiSessionData>();
-  private sessionLocks = new Map<string, Promise<PiSessionData>>();
+  private sessionPool: SessionPool<PiSessionData>;
 
   constructor(config: PiAdapterConfig = {}) {
     this.provider = config.provider;
     this.modelId = config.modelId;
     this.tools = config.tools;
     this.excludeTools = config.excludeTools;
+    this.sessionPool = new SessionPool(
+      () => this.createPiSession(),
+      (data) => Promise.resolve(data.session.dispose()),
+    );
   }
 
   async execute(
@@ -80,7 +83,7 @@ export class PiAdapter implements HarnessAdapter {
 
     try {
       if (options?.sessionId) {
-        const existing = await this.getOrCreateSession(options.sessionId);
+        const existing = await this.sessionPool.getOrCreate(options.sessionId);
         session = existing.session;
       } else {
         ownSession = true;
@@ -191,7 +194,7 @@ export class PiAdapter implements HarnessAdapter {
 
       let structured: Record<string, unknown> | undefined;
       if (options?.output?.mode === 'structured') {
-        structured = this.tryParseStructured(output);
+        structured = tryParseStructuredFromText(output);
       }
 
       const hasCumulative = cumulativeInput > 0 || cumulativeOutput > 0;
@@ -216,15 +219,11 @@ export class PiAdapter implements HarnessAdapter {
   }
 
   async disposeSession(sessionId: string): Promise<void> {
-    const data = this.sessions.get(sessionId);
-    if (data) {
-      data.session.dispose();
-      this.sessions.delete(sessionId);
-    }
+    await this.sessionPool.disposeSession(sessionId);
   }
 
   getSessionTraceEvents(sessionId: string, _offset?: number): Promise<SessionTraceEvent[]> {
-    const data = this.sessions.get(sessionId);
+    const data = this.sessionPool.get(sessionId);
     if (!data) return Promise.resolve([]);
 
     const messages = data.session.messages;
@@ -292,8 +291,7 @@ export class PiAdapter implements HarnessAdapter {
 
   /** Dispose every tracked session. Useful for graceful shutdown. */
   async dispose(): Promise<void> {
-    const ids = Array.from(this.sessions.keys());
-    await Promise.all(ids.map((id) => this.disposeSession(id).catch(() => {})));
+    await this.sessionPool.disposeAll();
   }
 
   private async resolveModel(provider?: string, modelId?: string): Promise<void> {
@@ -319,28 +317,6 @@ export class PiAdapter implements HarnessAdapter {
         'HARNESS_FAILURE',
       );
     }
-  }
-
-  private async getOrCreateSession(sessionId: string): Promise<PiSessionData> {
-    const existing = this.sessions.get(sessionId);
-    if (existing) return existing;
-
-    const inFlight = this.sessionLocks.get(sessionId);
-    if (inFlight) return inFlight;
-
-    const promise = this.createPiSession()
-      .then((data) => {
-        this.sessions.set(sessionId, data);
-        this.sessionLocks.delete(sessionId);
-        return data;
-      })
-      .catch((err) => {
-        this.sessionLocks.delete(sessionId);
-        throw err;
-      });
-
-    this.sessionLocks.set(sessionId, promise);
-    return promise;
   }
 
   private async createPiSession(): Promise<PiSessionData> {
@@ -376,52 +352,6 @@ export class PiAdapter implements HarnessAdapter {
       inputTokens: finalUsage?.input,
       outputTokens: finalUsage?.output,
     };
-  }
-
-  private tryParseStructured(
-    output: string,
-  ): Record<string, unknown> | undefined {
-    const isObject = (value: unknown): value is Record<string, unknown> =>
-      typeof value === 'object' && value !== null && !Array.isArray(value);
-
-    // 1. Try a markdown JSON block.
-    const blockMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (blockMatch) {
-      const parsed = this.safeJsonParse(blockMatch[1].trim());
-      if (isObject(parsed)) return parsed;
-    }
-
-    // 2. Find the first balanced JSON object in the text.
-    const balanced = this.extractBalancedJson(output);
-    if (balanced) {
-      const parsed = this.safeJsonParse(balanced);
-      if (isObject(parsed)) return parsed;
-    }
-
-    // 3. Fallback: parse the whole string.
-    const parsed = this.safeJsonParse(output.trim());
-    if (isObject(parsed)) return parsed;
-
-    return undefined;
-  }
-
-  private safeJsonParse(text: string): unknown {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return undefined;
-    }
-  }
-
-  private extractBalancedJson(text: string): string | undefined {
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i];
-      if (ch === '{' || ch === '[') {
-        const end = this.findMatchingClose(text, i);
-        if (end !== -1) return text.slice(i, end + 1);
-      }
-    }
-    return undefined;
   }
 
   private summarizeToolArgs(args: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -461,38 +391,5 @@ export class PiAdapter implements HarnessAdapter {
       return (result.error as Record<string, unknown>).message as string;
     }
     return JSON.stringify(result.error ?? result);
-  }
-
-  private findMatchingClose(text: string, start: number): number {
-    const open = text[start];
-    const close = open === '{' ? '}' : ']';
-    let depth = 1;
-    let inString = false;
-    let escaped = false;
-
-    for (let i = start + 1; i < text.length; i++) {
-      const ch = text[i];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-        } else if (ch === '\\') {
-          escaped = true;
-        } else if (ch === '"') {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (ch === '"') {
-        inString = true;
-      } else if (ch === open) {
-        depth++;
-      } else if (ch === close) {
-        depth--;
-        if (depth === 0) return i;
-      }
-    }
-
-    return -1;
   }
 }

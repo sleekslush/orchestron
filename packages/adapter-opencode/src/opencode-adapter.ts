@@ -2,7 +2,13 @@ import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { OutputConfig } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
-import { HarnessError, safeJsonParse, extractBalancedJson, dollarsToMicro } from '@orchestron/core';
+import {
+  HarnessError,
+  dollarsToMicro,
+  tryParseStructured,
+  tryParseStructuredFromText,
+  SessionPool,
+} from '@orchestron/core';
 import {
   createOpencode,
   createOpencodeClient,
@@ -48,8 +54,7 @@ export class OpencodeAdapter implements HarnessAdapter {
   private provider: string | undefined;
   private modelId: string | undefined;
   private tools: string[] | undefined;
-  private sessions = new Map<string, OpencodeSessionData>();
-  private sessionLocks = new Map<string, Promise<OpencodeSessionData>>();
+  private sessionPool: SessionPool<OpencodeSessionData>;
   private config: OpencodeAdapterConfig;
   private initialized = false;
   private initialization: Promise<void> | undefined;
@@ -59,6 +64,14 @@ export class OpencodeAdapter implements HarnessAdapter {
     this.provider = config.provider;
     this.modelId = config.modelId;
     this.tools = config.tools;
+    this.sessionPool = new SessionPool(
+      (sessionId) => this.createOpencodeSession(sessionId),
+      async (data) => {
+        await this.client?.session
+          .delete({ sessionID: data.opencodeSessionId })
+          .catch(() => {});
+      },
+    );
   }
 
   async execute(
@@ -93,7 +106,7 @@ export class OpencodeAdapter implements HarnessAdapter {
 
     try {
       if (options?.sessionId) {
-        sessionData = await this.getOrCreateSession(options.sessionId);
+        sessionData = await this.sessionPool.getOrCreate(options.sessionId);
       } else {
         ownSession = true;
         sessionData = await this.createOpencodeSession('ephemeral');
@@ -183,9 +196,9 @@ export class OpencodeAdapter implements HarnessAdapter {
       }
 
       const output = this.extractText(data.parts);
-      let structured = this.tryParseStructured(data.info.structured);
+      let structured = tryParseStructured(data.info.structured);
       if (!structured && options?.output?.mode === 'structured') {
-        structured = this.tryParseStructuredFromText(output);
+        structured = tryParseStructuredFromText(output);
       }
       const usage = this.toResourceUsage(data.info);
       const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
@@ -204,17 +217,11 @@ export class OpencodeAdapter implements HarnessAdapter {
   }
 
   async disposeSession(sessionId: string): Promise<void> {
-    const data = this.sessions.get(sessionId);
-    if (!data) return;
-
-    await this.client?.session
-      .delete({ sessionID: data.opencodeSessionId })
-      .catch(() => {});
-    this.sessions.delete(sessionId);
+    await this.sessionPool.disposeSession(sessionId);
   }
 
   async getSessionTraceEvents(sessionId: string, _offset?: number): Promise<SessionTraceEvent[]> {
-    const data = this.sessions.get(sessionId);
+    const data = this.sessionPool.get(sessionId);
     if (!data || !this.client) return [];
 
     try {
@@ -296,10 +303,7 @@ export class OpencodeAdapter implements HarnessAdapter {
   }
 
   async dispose(): Promise<void> {
-    const ids = Array.from(this.sessions.keys());
-    await Promise.all(ids.map((id) => this.disposeSession(id).catch(() => {})));
-    this.sessions.clear();
-    this.sessionLocks.clear();
+    await this.sessionPool.disposeAll();
 
     if (this.ownsServer && this.server) {
       this.server.close();
@@ -371,30 +375,6 @@ export class OpencodeAdapter implements HarnessAdapter {
     }
   }
 
-  private async getOrCreateSession(
-    sessionId: string,
-  ): Promise<OpencodeSessionData> {
-    const existing = this.sessions.get(sessionId);
-    if (existing) return existing;
-
-    const inFlight = this.sessionLocks.get(sessionId);
-    if (inFlight) return inFlight;
-
-    const promise = this.createOpencodeSession(sessionId)
-      .then((data) => {
-        this.sessions.set(sessionId, data);
-        this.sessionLocks.delete(sessionId);
-        return data;
-      })
-      .catch((err) => {
-        this.sessionLocks.delete(sessionId);
-        throw err;
-      });
-
-    this.sessionLocks.set(sessionId, promise);
-    return promise;
-  }
-
   private async createOpencodeSession(
     title: string,
   ): Promise<OpencodeSessionData> {
@@ -437,53 +417,6 @@ export class OpencodeAdapter implements HarnessAdapter {
       })
       .map((part) => part.text)
       .join('');
-  }
-
-  private tryParseStructured(
-    structured: unknown,
-  ): Record<string, unknown> | undefined {
-    if (
-      structured &&
-      typeof structured === 'object' &&
-      !Array.isArray(structured)
-    ) {
-      return structured as Record<string, unknown>;
-    }
-    if (typeof structured === 'string') {
-      const parsed = safeJsonParse(structured.trim());
-      if (
-        parsed &&
-        typeof parsed === 'object' &&
-        !Array.isArray(parsed)
-      ) {
-        return parsed as Record<string, unknown>;
-      }
-    }
-    return undefined;
-  }
-
-  private tryParseStructuredFromText(
-    output: string,
-  ): Record<string, unknown> | undefined {
-    const isObject = (value: unknown): value is Record<string, unknown> =>
-      typeof value === 'object' && value !== null && !Array.isArray(value);
-
-    const blockMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (blockMatch) {
-      const parsed = safeJsonParse(blockMatch[1].trim());
-      if (isObject(parsed)) return parsed;
-    }
-
-    const balanced = extractBalancedJson(output);
-    if (balanced) {
-      const parsed = safeJsonParse(balanced);
-      if (isObject(parsed)) return parsed;
-    }
-
-    const parsed = safeJsonParse(output.trim());
-    if (isObject(parsed)) return parsed;
-
-    return undefined;
   }
 
   private toResourceUsage(
