@@ -23,21 +23,8 @@ import type {
   EventRow,
 } from './row-mappers.js';
 
-export class SqliteLoge implements ConcertStore {
-  private db: ReturnType<typeof createSqliteDb>;
-
-  constructor(dbPath: string = ':memory:') {
-    this.db = createSqliteDb(dbPath);
-    this.db.exec('PRAGMA journal_mode = WAL');
-    this.initSchema();
-  }
-
-  close(): void {
-    this.db.close();
-  }
-
-  private initSchema(): void {
-    this.db.exec(`
+/** SQL statements to create the full Orchestron schema (tables + indexes). */
+const SCHEMA_SQL = `
       CREATE TABLE IF NOT EXISTS concerts (
         id TEXT PRIMARY KEY,
         score_id TEXT NOT NULL,
@@ -101,7 +88,23 @@ export class SqliteLoge implements ConcertStore {
       CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
       CREATE INDEX IF NOT EXISTS idx_session_traces_concert ON session_traces(concert_id);
       CREATE INDEX IF NOT EXISTS idx_session_traces_movement ON session_traces(concert_id, movement_id);
-    `);
+    `;
+
+export class SqliteLoge implements ConcertStore {
+  private db: ReturnType<typeof createSqliteDb>;
+
+  constructor(dbPath: string = ':memory:') {
+    this.db = createSqliteDb(dbPath);
+    this.db.exec('PRAGMA journal_mode = WAL');
+    this.initSchema();
+  }
+
+  close(): void {
+    this.db.close();
+  }
+
+  private initSchema(): void {
+    this.db.exec(SCHEMA_SQL);
     this.migrateSchema();
   }
 

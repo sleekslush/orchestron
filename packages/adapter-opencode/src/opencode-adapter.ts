@@ -20,6 +20,52 @@ import type {
   Session,
 } from '@opencode-ai/sdk/v2';
 
+// --------------------------------------------------------------------------
+// Part-filter helpers used by getSessionTraceEvents
+// --------------------------------------------------------------------------
+
+interface TextPart { type: 'text'; text: string }
+
+function isTextPart(p: unknown): p is TextPart {
+  return (
+    p != null &&
+    typeof p === 'object' &&
+    (p as Record<string, unknown>).type === 'text' &&
+    typeof (p as Record<string, unknown>).text === 'string'
+  );
+}
+
+function collectTextParts(parts: unknown[]): string[] {
+  return parts.filter(isTextPart).map((p) => p.text);
+}
+
+interface ToolPart {
+  type: 'tool';
+  tool: string;
+  state: { status?: string; input?: Record<string, unknown>; output?: string; error?: string };
+}
+
+function isToolPart(p: unknown): p is ToolPart {
+  if (p == null || typeof p !== 'object') return false;
+  const obj = p as Record<string, unknown>;
+  return (
+    obj.type === 'tool' &&
+    typeof obj.tool === 'string' &&
+    obj.state != null &&
+    typeof obj.state === 'object' &&
+    !Array.isArray(obj.state)
+  );
+}
+
+function collectToolParts(
+  parts: unknown[],
+): Array<{ tool: string; state: ToolPart['state'] }> {
+  return parts.filter(isToolPart).map((p) => ({
+    tool: p.tool,
+    state: p.state,
+  }));
+}
+
 export interface OpencodeAdapterConfig {
   /**
    * Connect to an existing opencode server. If provided, `embedded` is ignored.
@@ -237,58 +283,27 @@ export class OpencodeAdapter implements HarnessAdapter {
         const parts = Array.isArray(msg.parts) ? msg.parts : [];
 
         if (msg.info?.role === 'user') {
-          const textParts = parts.filter(
-            (p: unknown) =>
-              p &&
-              typeof p === 'object' &&
-              (p as { type?: string }).type === 'text' &&
-              typeof (p as { text?: string }).text === 'string',
-          );
-          const content = textParts
-            .map((p) => (p as { text: string }).text)
-            .join('\n');
+          const content = collectTextParts(parts).join('\n');
           if (content) {
             events.push({ type: 'prompt', content, timestamp: ts });
           }
         } else if (msg.info?.role === 'assistant') {
-          const textParts = parts.filter(
-            (p: unknown) =>
-              p &&
-              typeof p === 'object' &&
-              (p as { type?: string }).type === 'text' &&
-              typeof (p as { text?: string }).text === 'string',
-          );
-          for (const p of textParts) {
-            events.push({ type: 'text_delta', delta: (p as { text: string }).text, timestamp: ts });
+          for (const text of collectTextParts(parts)) {
+            events.push({ type: 'text_delta', delta: text, timestamp: ts });
           }
-
-          const toolParts = parts.filter(
-            (p: unknown) =>
-              p &&
-              typeof p === 'object' &&
-              (p as Record<string, unknown>).type === 'tool' &&
-              typeof (p as Record<string, unknown>).tool === 'string' &&
-              (p as Record<string, unknown>).state !== undefined &&
-              (p as Record<string, unknown>).state !== null &&
-              typeof (p as Record<string, unknown>).state === 'object',
-          );
-          for (const p of toolParts) {
-            const toolPart = p as {
-              tool: string;
-              state: { status?: string; input?: Record<string, unknown>; output?: string; error?: string };
-            };
+          for (const { tool, state } of collectToolParts(parts)) {
             events.push({
               type: 'tool_execution_start',
-              toolName: toolPart.tool,
-              args: toolPart.state.input,
+              toolName: tool,
+              args: state.input,
               timestamp: ts,
             });
             events.push({
               type: 'tool_execution_end',
-              toolName: toolPart.tool,
-              isError: toolPart.state.status === 'error',
-              result: toolPart.state.output ?? toolPart.state.error,
-              error: toolPart.state.status === 'error' ? toolPart.state.error : undefined,
+              toolName: tool,
+              isError: state.status === 'error',
+              result: state.output ?? state.error,
+              error: state.status === 'error' ? state.error : undefined,
               timestamp: ts,
             });
           }
@@ -409,14 +424,7 @@ export class OpencodeAdapter implements HarnessAdapter {
 
   private extractText(parts: Part[] | undefined): string {
     if (!parts) return '';
-    return parts
-      .filter((part): part is Part & { type: 'text'; text: string } => {
-        if (!part || typeof part !== 'object') return false;
-        const p = part as Record<string, unknown>;
-        return p.type === 'text' && typeof p.text === 'string';
-      })
-      .map((part) => part.text)
-      .join('');
+    return collectTextParts(parts).join('');
   }
 
   private toResourceUsage(

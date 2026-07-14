@@ -11,6 +11,7 @@ import type { ChildConcertFactory } from '../conductor/child-concert-factory.js'
 import type { StartOptions } from '../conductor/start-options.js';
 import { HarnessEvaluator, type Evaluator } from '../evaluator/index.js';
 import { ConductorPanic } from '../types/errors.js';
+import { createAdapterResolver, type AdapterResolver } from '../adapter-resolver.js';
 
 export interface ConcertHallOptions {
   store: ConcertStore;
@@ -19,10 +20,6 @@ export interface ConcertHallOptions {
   evaluator?: Evaluator;
   tracesDir?: string;
   defaultHarness?: string;
-}
-
-interface AdapterResolver {
-  get(name: string): Promise<HarnessAdapter>;
 }
 
 export class ConcertHall implements ChildConcertFactory {
@@ -38,7 +35,7 @@ export class ConcertHall implements ChildConcertFactory {
   constructor(options: ConcertHallOptions) {
     this.store = options.store;
     this.scoreRegistry = options.scoreRegistry;
-    this.adapterResolver = this.createAdapterResolver(options.adapters);
+    this.adapterResolver = createAdapterResolver(options.adapters);
     if (!options.evaluator) {
       throw new Error('ConcertHall requires an evaluator; pass one explicitly or use FakeEvaluator only in tests.');
     }
@@ -76,29 +73,6 @@ export class ConcertHall implements ChildConcertFactory {
         this.parentToChildren.set(parentId, filtered);
       }
     }
-  }
-
-  private createAdapterResolver(
-    adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver,
-  ): AdapterResolver {
-    if (adapters instanceof Map) {
-      return {
-        get: async (name) => {
-          const adapter = adapters.get(name);
-          if (!adapter) {
-            throw new ConductorPanic(
-              `No adapter registered for harness type '${name}'`,
-              'INTERNAL_ERROR',
-            );
-          }
-          return adapter;
-        },
-      };
-    }
-
-    return {
-      get: adapters.resolve.bind(adapters),
-    };
   }
 
   private async resolveEvaluator(score: Score, explicitHarness?: string): Promise<Evaluator> {

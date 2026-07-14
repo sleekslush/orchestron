@@ -29,6 +29,8 @@ export { PromptBuilder } from './conductor/prompt-builder.js';
 export { ConstraintChecker } from './conductor/constraint-checker.js';
 export type { ConstraintResult } from './conductor/constraint-checker.js';
 export { matchTransition } from './conductor/transition-resolver.js';
+export { createAdapterResolver } from './adapter-resolver.js';
+export type { AdapterResolver } from './adapter-resolver.js';
 
 export { ConcertHall } from './hall/concert-hall.js';
 export type { ConcertHallOptions } from './hall/concert-hall.js';
