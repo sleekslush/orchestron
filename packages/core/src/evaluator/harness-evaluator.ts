@@ -18,8 +18,6 @@ const goalEvaluationSchema = {
 export interface HarnessEvaluatorConfig {
   adapter: HarnessAdapter;
   promptTemplate?: string;
-  model?: string;
-  provider?: string;
 }
 
 export class HarnessEvaluator implements Evaluator {
@@ -38,8 +36,6 @@ export class HarnessEvaluator implements Evaluator {
         mode: 'structured',
         schema: goalEvaluationSchema as unknown as Record<string, unknown>,
       },
-      model: this.config.model,
-      provider: this.config.provider,
     });
 
     return this.parseEvaluation(response, goal, movementId);
