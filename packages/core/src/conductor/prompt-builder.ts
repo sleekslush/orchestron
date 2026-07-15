@@ -1,5 +1,6 @@
 import type { Movement, MovementID } from '../types/score.js';
 import type { MovementRecord } from '../types/concert.js';
+import { tryParseStructuredFromText } from '../structured-output.js';
 
 export class PromptBuilder {
   private visitCounts = new Map<MovementID, number>();
@@ -51,12 +52,69 @@ export class PromptBuilder {
       result = result.replaceAll(placeholder, this.stringify(value));
     }
 
-    for (const [id, record] of previousOutputs) {
-      const placeholder = `{{context.previousOutputs.${id}}}`;
-      result = result.replaceAll(placeholder, record.output);
+    // Sort by ID length (descending) to prevent shorter IDs from
+    // accidentally matching the prefix of longer IDs when using regex.
+    const sortedIds = [...previousOutputs.keys()].sort(
+      (a, b) => b.length - a.length,
+    );
+
+    for (const id of sortedIds) {
+      const record = previousOutputs.get(id)!;
+      const escapedId = this.escapeRegex(id);
+
+      // Matches:
+      //   {{context.previousOutputs.<id>}}            — full output
+      //   {{context.previousOutputs.<id>.<path>}}      — dot-notation into structured
+      const regex = new RegExp(
+        `\\{\\{context\\.previousOutputs\\.${escapedId}(?:\\.([^}]+))?\\}\\}`,
+        'g',
+      );
+
+      result = result.replace(regex, (_match: string, dotPath: string | undefined) => {
+        if (!dotPath) {
+          // Simple {{context.previousOutputs.<id>}} — full text output
+          return record.output;
+        }
+
+        // Dot-notation: traverse into structured data
+        const parts = dotPath.split('.');
+        let value: unknown = record.structured;
+
+        // If structured data wasn't stored, fall back to parsing from output
+        if (value === undefined || value === null) {
+          value = tryParseStructuredFromText(record.output);
+        }
+
+        for (const part of parts) {
+          if (value === null || value === undefined || typeof value !== 'object') {
+            // Can't traverse further — leave placeholder as-is
+            return _match;
+          }
+          if (Array.isArray(value)) {
+            const index = Number(part);
+            if (Number.isNaN(index) || index < 0 || index >= value.length) {
+              return _match;
+            }
+            value = value[index];
+          } else {
+            value = (value as Record<string, unknown>)[part];
+          }
+        }
+
+        if (value === undefined) {
+          // Path not found — leave placeholder as-is for debugging
+          return _match;
+        }
+
+        return this.stringify(value);
+      });
     }
 
     return result;
+  }
+
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   stringify(value: unknown): string {

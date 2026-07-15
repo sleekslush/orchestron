@@ -67,7 +67,11 @@ A valid score requires only:
 
 Movement prompts can reference:
 - `{{context.key}}` — values passed in the `context` parameter of `orchestron_start_concert`.
-- `{{context.previousOutputs.<movementId>}}` — the full text output of a previous movement. If the previous movement used structured output, the rendered value is the stringified JSON of the structured result; dot-notation into individual fields (e.g. `{{context.previousOutputs.plan.steps}}`) is not supported.
+- `{{context.previousOutputs.<movementId>}}` — the full text output of a previous movement.
+- `{{context.previousOutputs.<movementId>.<path>}}` — a specific field from a previous movement's structured output using dot-notation, e.g. `{{context.previousOutputs.plan.steps}}` or `{{context.previousOutputs.analyze.summary}}`.
+  - Traverses into the parsed `structured` data if available.
+  - Falls back to parsing the text `output` as JSON if no structured data was stored.
+  - Unrecognized paths are left as-is in the rendered prompt for debugging.
 
 ## Prompt Variants for Loop-back Movements
 
@@ -87,7 +91,7 @@ The `initial` prompt is used on the first visit. The `subsequent` prompt is used
 ## Output Modes
 
 - `text` (default) — Free-form text output.
-- `structured` — The harness attempts to produce JSON matching the supplied JSON Schema. Use this when the next movement needs predictable, machine-readable output. The whole result can be referenced as `{{context.previousOutputs.<movementId>}}` (rendered as stringified JSON); dot-notation into individual fields is not supported.
+- `structured` — The harness attempts to produce JSON matching the supplied JSON Schema. Use this when the next movement needs predictable, machine-readable output. Reference the whole result with `{{context.previousOutputs.<movementId>}}` or individual fields with dot-notation like `{{context.previousOutputs.<movementId>.<field>}}`.
 
 ## Transitions
 
