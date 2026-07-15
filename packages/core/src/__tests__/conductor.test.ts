@@ -921,6 +921,168 @@ describe('Dual prompt selection', () => {
     expect(stepAPrompts[2].prompt).toBe('subsequent-a');
   });
 
+  it('retryOnFailure accumulates spend from successful retry', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'retry-accumulate',
+      name: 'Retry Accumulate',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          retryOnFailure: true,
+          budget: { maxRetries: 2 },
+          transitions: [{ to: '__end__', on: 'success' }, { to: '__fail__', on: 'failure' }],
+        },
+      ],
+      program: {},
+    });
+    // Adapter throws twice (no usage), succeeds on 3rd with usage.
+    // The fix ensures Object.assign doesn't lose the successful retry's usage.
+    let attempt = 0;
+    const adapter = new (class extends FakeHarnessAdapter {
+      async execute(prompt: string, context: any, options?: any) {
+        attempt++;
+        if (options?.movementId === 'step_a' && attempt <= 2) {
+          throw new Error('Fake failure');
+        }
+        return super.execute(prompt, context, options);
+      }
+    })({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('retry-accumulate');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    const state = await conductor.getState();
+    // Spend from the successful (3rd) attempt only — thrown attempts record no usage
+    expect(state.usage.spend).toBe(10);
+    expect(state.usage.tokens).toBe(100);
+  });
+
+  it('retryOnFailure: all retries exhaust fail the concert with no usage', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'retry-exhaust',
+      name: 'Retry Exhaust',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          retryOnFailure: true,
+          budget: { maxRetries: 2 },
+          transitions: [{ to: '__end__', on: 'success' }, { to: '__fail__', on: 'failure' }],
+        },
+      ],
+      program: {},
+    });
+    // No retryOnFailure, so the single attempt throws and the concert fails.
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, fail: true },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('retry-exhaust');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+    const state = await conductor.getState();
+    // All attempts threw — no usage recorded
+    expect(state.usage.spend).toBe(0);
+    expect(state.usage.tokens).toBe(0);
+  });
+
+  it('program budget enforced with retryOnFailure', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'retry-program-budget',
+      name: 'Retry Program Budget',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          retryOnFailure: true,
+          budget: { maxRetries: 2 },
+          transitions: [{ to: '__end__', on: 'success' }, { to: '__fail__', on: 'failure' }],
+        },
+      ],
+      program: { maxSpendDollars: 0.000009 }, // 9 micro-dollars < 10 per attempt
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const evaluator = {
+      async evaluate() {
+        return { achieved: true, confidence: 1, summary: 'ok', evidence: '' };
+      },
+    };
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator,
+    });
+    const conductor = await hall.createConcert('retry-program-budget');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+  });
+
+  it('section budget enforced with retryOnFailure', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'retry-section-budget',
+      name: 'Retry Section Budget',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          retryOnFailure: true,
+          budget: { maxRetries: 2 },
+          transitions: [{ to: '__end__', on: 'success' }, { to: '__fail__', on: 'failure' }],
+        },
+      ],
+      program: {
+        perSection: {
+          x: { maxSpendDollars: 0.000009 }, // 9 micro-dollars < 10 per attempt
+        },
+      },
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const evaluator = {
+      async evaluate() {
+        return { achieved: true, confidence: 1, summary: 'ok', evidence: '' };
+      },
+    };
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator,
+    });
+    const conductor = await hall.createConcert('retry-section-budget');
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+  });
+
   it('seeds visit counts from history during recover', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();
