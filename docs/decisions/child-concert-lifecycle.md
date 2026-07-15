@@ -2,11 +2,11 @@
 
 **Status:** Decided / Deferred
 **Date:** 2026-07-12
-**Related:** PLAN.md (Sub-scores), `packages/core/src/conductor/conductor.ts`
+**Related:** PLAN.md (Sub-scores, since removed), `packages/core/src/conductor/conductor.ts`
 
 ## Context
 
-`PLAN.md` defines sub-scores as nested Concerts: a Movement can specify a `subscore` instead of a harness, and the parent Conductor spawns a child Concert via `ConcertHall`. The plan also states that parent lifecycle operations should cascade to children:
+The original PLAN.md (since removed) defined sub-scores as nested Concerts: a Movement can specify a `subscore` instead of a harness, and the parent Conductor spawns a child Concert via `ConcertHall`. The plan also stated that parent lifecycle operations should cascade to children:
 
 > "Pause/cancel parent → cascades to children"
 
@@ -34,4 +34,4 @@ The Conductor/Hall decoupling work (see `packages/core/src/conductor/child-conce
 ## Related work
 
 - `docs/decisions/session-persistence.md`
-- `PLAN.md` §2 "Sub-scores (nested Concerts)"
+- `PLAN.md` §2 "Sub-scores (nested Concerts)" (since removed)
