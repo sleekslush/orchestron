@@ -23,7 +23,7 @@ export interface Goal {
 
 export interface Transition {
   to: MovementID | '__end__' | '__fail__';
-  on: 'success' | 'failure' | 'skip';
+  on: 'success' | 'failure' | 'any';
 }
 
 export interface OutputConfig {

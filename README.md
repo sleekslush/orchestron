@@ -249,7 +249,7 @@ Movement prompts can reference:
 - `on: success` — when the movement completes and the evaluator says the goal is
   achieved.
 - `on: failure` — when the movement fails or the goal is not achieved.
-- `on: skip` — reserved for future use.
+- `on: any` — wildcard: matches either `success` or `failure`.
 - Special targets: `__end__` and `__fail__`.
 
 ### Constraints
