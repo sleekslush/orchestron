@@ -750,6 +750,10 @@ export class Conductor implements IConductor {
 
       if (record.status === 'failed' && movement.retryOnFailure) {
         const maxRetries = movement.budget?.maxRetries ?? 2;
+        // Accumulate spend/tokens across all retry attempts so budget
+        // enforcement counts every attempt, not just the final one.
+        let totalSpend = record.usage.spend ?? 0;
+        let totalTokens = record.usage.tokens ?? 0;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           await this.store.pushEvent({
             type: 'movement:failed',
@@ -760,12 +764,17 @@ export class Conductor implements IConductor {
             timestamp: new Date(),
           });
           const retryRecord = await this.executeMovement(movement, previousOutputs, signal);
+          totalSpend += retryRecord.usage.spend ?? 0;
+          totalTokens += retryRecord.usage.tokens ?? 0;
           if (retryRecord.status === 'completed') {
             Object.assign(record, retryRecord);
             break;
           }
           Object.assign(record, retryRecord);
         }
+        // Restore accumulated usage (Object.assign overwrote it).
+        record.usage.spend = totalSpend;
+        record.usage.tokens = totalTokens;
       }
 
       const evaluation = await this.evaluator.evaluate(
