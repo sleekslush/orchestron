@@ -104,6 +104,8 @@ export class OpencodeAdapter implements HarnessAdapter {
   private config: OpencodeAdapterConfig;
   private initialized = false;
   private initialization: Promise<void> | undefined;
+  /** Cached model catalog from the server, populated on first successful fetch. */
+  private validatedModels: Array<{ providerID: string; modelID: string }> | undefined;
 
   constructor(config: OpencodeAdapterConfig = {}) {
     this.config = config;
@@ -145,6 +147,13 @@ export class OpencodeAdapter implements HarnessAdapter {
     // Use model/provider from options (per-movement) if provided, otherwise fall back to config
     const provider = options?.provider ?? this.provider;
     const modelId = options?.model ?? this.modelId;
+
+    // Validate model before creating a session or spending tokens.
+    // If the server is unreachable the check is skipped; the prompt call
+    // will surface the real error.
+    if (provider && modelId) {
+      await this.validateModel(provider, modelId);
+    }
 
     let sessionData: OpencodeSessionData | undefined;
     let ownSession = false;
@@ -327,11 +336,56 @@ export class OpencodeAdapter implements HarnessAdapter {
     this.server = undefined;
     this.initialized = false;
     this.initialization = undefined;
+    this.validatedModels = undefined;
   }
 
   /** Resolves when the adapter has finished initializing its client/server. */
   ready(): Promise<void> {
     return this.ensureInitialized();
+  }
+
+  /**
+   * Validate that the requested model exists on the Opencode server.
+   *
+   * Fetches the model catalog on first call and caches it.  When the
+   * server is unreachable the check is silently skipped — the subsequent
+   * prompt call will surface the real error.
+   */
+  private async validateModel(provider: string, modelId: string): Promise<void> {
+    if (!this.client) return;
+
+    try {
+      if (!this.validatedModels) {
+        const result = await this.client.v2.model.list();
+        if (result.data?.data) {
+          this.validatedModels = result.data.data.map((m) => ({
+            providerID: m.providerID,
+            modelID: m.id,
+          }));
+        }
+      }
+
+      if (this.validatedModels) {
+        const found = this.validatedModels.some(
+          (m) => m.providerID === provider && m.modelID === modelId,
+        );
+        if (!found) {
+          const providerModels = this.validatedModels
+            .filter((m) => m.providerID === provider)
+            .map((m) => m.modelID);
+          throw new HarnessError(
+            `Opencode server does not recognize model '${modelId}' for provider '${provider}'.` +
+            (providerModels.length > 0
+              ? ` Available models for '${provider}': ${providerModels.join(', ')}.`
+              : ` Provider '${provider}' is not configured.`),
+            'HARNESS_FAILURE',
+          );
+        }
+      }
+    } catch (err) {
+      if (err instanceof HarnessError) throw err;
+      // Server unreachable or other transient error — skip validation.
+    }
   }
 
   private async ensureInitialized(): Promise<void> {

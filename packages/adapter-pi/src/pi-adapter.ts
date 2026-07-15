@@ -37,6 +37,8 @@ export class PiAdapter implements HarnessAdapter {
   private tools: string[] | undefined;
   private excludeTools: string[] | undefined;
   private sessionPool: SessionPool<PiSessionData>;
+  private authStorage: AuthStorage | undefined;
+  private modelRegistry: ModelRegistry | undefined;
 
   constructor(config: PiAdapterConfig = {}) {
     this.provider = config.provider;
@@ -75,7 +77,7 @@ export class PiAdapter implements HarnessAdapter {
     const modelId = options?.model ?? this.modelId;
     const provider = options?.provider ?? this.provider;
 
-    await this.resolveModel(provider, modelId);
+    this.resolveModel(provider, modelId);
 
     let session: AgentSession | undefined;
     let abortListener: (() => void) | undefined;
@@ -294,34 +296,37 @@ export class PiAdapter implements HarnessAdapter {
     await this.sessionPool.disposeAll();
   }
 
-  private async resolveModel(provider?: string, modelId?: string): Promise<void> {
+  private ensureRegistry(): { authStorage: AuthStorage; modelRegistry: ModelRegistry } {
+    if (!this.authStorage || !this.modelRegistry) {
+      this.authStorage = AuthStorage.create();
+      this.modelRegistry = ModelRegistry.create(this.authStorage);
+    }
+    return { authStorage: this.authStorage, modelRegistry: this.modelRegistry };
+  }
+
+  private resolveModel(provider?: string, modelId?: string): void {
     const targetProvider = provider ?? this.provider;
     const targetModelId = modelId ?? this.modelId;
-    if (this.model) return;
+
+    // Always re-resolve — different execute() calls may specify different models.
+    this.model = undefined;
+
     if (!targetProvider || !targetModelId) return;
 
-    try {
-      const registry = ModelRegistry.inMemory(AuthStorage.create());
-      const resolved = registry.find(targetProvider, targetModelId);
-      if (!resolved) {
-        throw new HarnessError(
-          `Unknown Pi model '${targetModelId}' for provider '${targetProvider}'`,
-          'HARNESS_FAILURE',
-        );
-      }
-      this.model = resolved;
-    } catch (err) {
-      if (err instanceof HarnessError) throw err;
+    const { modelRegistry } = this.ensureRegistry();
+    const resolved = modelRegistry.find(targetProvider, targetModelId);
+    if (!resolved) {
       throw new HarnessError(
-        `Failed to resolve Pi model: ${(err as Error).message ?? String(err)}`,
+        `Unknown Pi model '${targetModelId}' for provider '${targetProvider}'. ` +
+        `Use 'pi --list-models' to see available models.`,
         'HARNESS_FAILURE',
       );
     }
+    this.model = resolved;
   }
 
   private async createPiSession(): Promise<PiSessionData> {
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.create(authStorage);
+    const { authStorage, modelRegistry } = this.ensureRegistry();
 
     const sessionOptions: Parameters<typeof createAgentSession>[0] = {
       model: this.model as never,

@@ -16,10 +16,12 @@ createAgentSessionMock.mockImplementation(async () => ({ session: mockSession, e
 
 const registryFindMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
 
+const mockRegistry = { find: registryFindMock };
+
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   AuthStorage: { create: vi.fn(() => ({ id: 'auth' })) },
   ModelRegistry: {
-    create: vi.fn(() => ({ id: 'registry' })),
+    create: vi.fn(() => mockRegistry),
     inMemory: vi.fn(() => ({ find: registryFindMock })),
   },
   SessionManager: { inMemory: vi.fn(() => ({ id: 'manager' })) },
@@ -274,16 +276,41 @@ describe('PiAdapter', () => {
     expect(mockSession.abort).not.toHaveBeenCalled();
   });
 
-  it('throws HARNESS_FAILURE when model resolution fails', async () => {
-    registryFindMock.mockImplementation(() => {
-      throw new Error('boom');
-    });
+  it('throws HARNESS_FAILURE when model is not found', async () => {
+    registryFindMock.mockReturnValue(undefined);
 
     const adapter = new PiAdapter({ provider: 'openai', modelId: 'gpt-4o' });
 
     await expect(adapter.execute('x', { shared: {} })).rejects.toMatchObject({
       code: 'HARNESS_FAILURE',
+      message: expect.stringContaining("Unknown Pi model 'gpt-4o' for provider 'openai'"),
     });
+  });
+
+  it('validates per-execution model options instead of config defaults', async () => {
+    registryFindMock.mockReturnValue(undefined);
+
+    const adapter = new PiAdapter({ provider: 'openai', modelId: 'gpt-4o' });
+
+    await expect(
+      adapter.execute('x', { shared: {} }, { provider: 'anthropic', model: 'claude-opus' }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining("Unknown Pi model 'claude-opus' for provider 'anthropic'"),
+    });
+  });
+
+  it('shares a single ModelRegistry across sessions', async () => {
+    const { ModelRegistry } = await import('@earendil-works/pi-coding-agent');
+    const createSpy = ModelRegistry.create as Mock;
+    createSpy.mockClear();
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter();
+    await adapter.execute('a', { shared: {} }, { sessionId: 'c1:m1' });
+    await adapter.execute('b', { shared: {} }, { sessionId: 'c1:m2' });
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
   it('omits tools by default so Pi uses built-in defaults', async () => {
