@@ -5,5 +5,5 @@ export function matchTransition(
   achieved: boolean,
 ): Transition | undefined {
   const status: 'success' | 'failure' = achieved ? 'success' : 'failure';
-  return movement.transitions.find((t) => t.on === status || t.on === 'skip');
+  return movement.transitions.find((t) => t.on === status || t.on === 'any');
 }

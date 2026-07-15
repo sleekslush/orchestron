@@ -304,7 +304,7 @@ interface GoalEvaluation {
 // === Transition ===
 interface Transition {
   to: MovementID | '__end__' | '__fail__';
-  on: 'success' | 'failure' | 'skip' | GoalEvaluation;
+  on: 'success' | 'failure' | 'any' | GoalEvaluation;
 }
 
 // === Output ===

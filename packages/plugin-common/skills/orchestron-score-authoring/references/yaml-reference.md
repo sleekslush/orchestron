@@ -97,7 +97,7 @@ Each transition is `{ to, on }`:
 |------------|---------|
 | `success` | Movement completed and goal was achieved. |
 | `failure` | Movement failed or goal was not achieved. |
-| `skip` | Wildcard: matches either `success` or `failure`. |
+| `any` | Wildcard: matches either `success` or `failure`. |
 
 | `to` value | Meaning |
 |------------|---------|
