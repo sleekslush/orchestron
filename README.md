@@ -80,7 +80,7 @@ pnpm orchestron start opencode-demo --context.topic='Obsidian plugins'
 # Monitor it
 pnpm orchestron list
 pnpm orchestron status <concert-id>
-pnpm orchestron status              # system-wide aggregates
+pnpm orchestron status              # overview of all concerts
 
 # Pause, resume, or cancel a concert
 pnpm orchestron pause <concert-id>
