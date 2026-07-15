@@ -34,6 +34,26 @@ Use this skill when the user wants to create, edit, run, or manage an Orchestron
 
 ## Workflow Guidelines
 
+### Model selection
+
+Model names differ between harnesses. When authoring scores:
+
+- **Check the harness first.** A movement's `harness` field determines which model namespace applies. Pi uses Pi built-in model IDs; Opencode uses Opencode server model IDs.
+- **Use per-harness model config for cross-harness scores.** When a score may run on multiple harnesses, use the per-harness map form:
+  ```yaml
+  model:
+    pi: { provider: "anthropic", model: "claude-sonnet-4-5" }
+    opencode: { provider: "anthropic", model: "claude-opus-4-7" }
+  ```
+- **Use flat strings for single-harness scores.** When the harness is fixed, a flat string is simpler:
+  ```yaml
+  harness: pi
+  model: "claude-sonnet-4-5"
+  provider: "anthropic"
+  ```
+- **Omit model/provider to use defaults.** If the user doesn't specify a model, leave it out — the harness adapter will use its configured default.
+- **Score-level `models` for shared defaults.** Use the top-level `models` key when all movements share the same model configuration.
+
 ### Creating a new score
 1. Ask the user for the goal if it is unclear.
 2. Generate the complete score YAML with all required fields.
@@ -60,10 +80,13 @@ id: my-score                # must match scoreId param
 name: "My Score"
 version: "1.0.0"
 startMovement: plan
+models:                     # optional score-level defaults
+  pi: { provider: "anthropic", model: "claude-sonnet-4-5" }
 movements:
   - id: plan
     name: "Create Plan"
     section: planning
+    harness: pi
     prompt: >
       Create a plan for: {{context.task}}
     goal:
@@ -78,6 +101,7 @@ movements:
   - id: review
     name: "Review Plan"
     section: review
+    harness: pi
     prompt: >
       Review this plan:
       {{context.previousOutputs.plan}}
