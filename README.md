@@ -15,8 +15,8 @@ harness (Pi, opencode, or future adapters), and let a **Conductor** run the
   the same interface.
 - **Observable** — every movement, prompt, output, goal evaluation, and cost is
   persisted to a local SQLite database (`Loge`).
-- **Budget-aware** — set spend, token, movement, and duration limits at the
-  score or section level.
+- **Budget-aware** — set spend, movement, and duration limits at the score or
+  section level.
 - **Composable** — scores can spawn sub-scores as child concerts.
 
 ## Core Concepts
@@ -80,6 +80,16 @@ pnpm orchestron start opencode-demo --context.topic='Obsidian plugins'
 # Monitor it
 pnpm orchestron list
 pnpm orchestron status <concert-id>
+pnpm orchestron status              # overview of all concerts
+
+# Pause, resume, or cancel a concert
+pnpm orchestron pause <concert-id>
+pnpm orchestron resume <concert-id>
+pnpm orchestron cancel <concert-id>
+
+# List available scores
+pnpm orchestron scores
+pnpm orchestron scores --validate
 
 # Launch the web dashboard
 pnpm orchestron dashboard --port 3000
