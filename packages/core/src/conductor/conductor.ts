@@ -366,6 +366,7 @@ export class Conductor implements IConductor {
       }
 
       harnessAdapter = await this.resolveAdapter(movement);
+      const modelConfig = this.resolveModelConfig(movement, harnessAdapter.type);
       const prompt = this.promptBuilder.buildPrompt(
         movement,
         previousOutputs,
@@ -398,8 +399,8 @@ export class Conductor implements IConductor {
           output: movement.output,
           movementId: movement.id,
           sessionId,
-          model: movement.model,
-          provider: movement.provider,
+          model: modelConfig.model,
+          provider: modelConfig.provider,
           onProgress,
         });
 
@@ -635,6 +636,51 @@ export class Conductor implements IConductor {
       concertId: this.concert.id,
       movementId,
     };
+  }
+
+  /**
+   * Resolve model/provider for a movement based on the resolved harness type.
+   *
+   * Precedence:
+   * 1. Movement-level per-harness map — select entry matching harness type
+   * 2. Movement-level flat string + provider
+   * 3. Score-level \`models\` map — select entry matching harness type
+   * 4. Nothing — adapter uses its own default
+   */
+  private resolveModelConfig(
+    movement: Movement,
+    harnessType: string,
+  ): { model?: string; provider?: string } {
+    const modelSpec = movement.model;
+
+    // 1. Per-harness map on the movement
+    if (modelSpec && typeof modelSpec === 'object') {
+      const entry = modelSpec[harnessType];
+      if (entry) {
+        return { model: entry.model, provider: entry.provider };
+      }
+      throw new ConductorPanic(
+        `Movement '${movement.id}' has per-harness model config but no entry for harness '${harnessType}'`,
+        'INTERNAL_ERROR',
+        this.concert.id,
+      );
+    }
+
+    // 2. Flat string on the movement
+    if (typeof modelSpec === 'string') {
+      return { model: modelSpec, provider: movement.provider };
+    }
+
+    // 3. Score-level defaults
+    if (this.score.models) {
+      const entry = this.score.models[harnessType];
+      if (entry) {
+        return { model: entry.model, provider: entry.provider };
+      }
+    }
+
+    // 4. Nothing — adapter uses its own default
+    return {};
   }
 
   private async resolveAdapter(movement: Movement): Promise<HarnessAdapter> {
