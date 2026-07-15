@@ -1951,3 +1951,214 @@ describe('Conductor.recover()', () => {
     expect(secondaryAdapter.prompts.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe('model resolution', () => {
+  it('passes flat string model and provider through to the adapter', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'flat-model',
+      name: 'Flat Model Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          model: 'claude-3',
+          provider: 'anthropic',
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok', model: 'claude-3', provider: 'anthropic' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('flat-model');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    const history = (conductor as any).concert.history;
+    expect(history[0].model).toBe('claude-3');
+    expect(history[0].provider).toBe('anthropic');
+  });
+
+  it('resolves per-harness model map to the matching harness entry', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'per-harness-model',
+      name: 'Per-Harness Model Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          model: {
+            fake: { provider: 'anthropic', model: 'claude-3' },
+            pi: { provider: 'openai', model: 'gpt-4o' },
+          },
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok', model: 'claude-3', provider: 'anthropic' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('per-harness-model');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    const history = (conductor as any).concert.history;
+    expect(history[0].model).toBe('claude-3');
+    expect(history[0].provider).toBe('anthropic');
+  });
+
+  it('throws when per-harness model map has no entry for the resolved harness', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'missing-harness',
+      name: 'Missing Harness Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          model: {
+            pi: { provider: 'openai', model: 'gpt-4o' },
+            // no 'fake' entry
+          },
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new FakeHarnessAdapter({});
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('missing-harness');
+    await conductor.start();
+
+    expect(conductor.status).toBe('failed');
+  });
+
+  it('inherits model from score-level defaults when movement has no model', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'score-defaults',
+      name: 'Score Defaults Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      models: {
+        fake: { provider: 'anthropic', model: 'claude-opus' },
+      },
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          // no model specified — uses score-level default
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok', model: 'claude-opus', provider: 'anthropic' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('score-defaults');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    const history = (conductor as any).concert.history;
+    expect(history[0].model).toBe('claude-opus');
+    expect(history[0].provider).toBe('anthropic');
+  });
+
+  it('movement-level model overrides score-level defaults', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'movement-override',
+      name: 'Movement Override Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      models: {
+        fake: { provider: 'anthropic', model: 'claude-opus' },
+      },
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          model: 'gpt-4o',
+          provider: 'openai',
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok', model: 'gpt-4o', provider: 'openai' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('movement-override');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    const history = (conductor as any).concert.history;
+    expect(history[0].model).toBe('gpt-4o');
+    expect(history[0].provider).toBe('openai');
+  });
+});
