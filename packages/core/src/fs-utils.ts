@@ -16,7 +16,7 @@ export function ensureDir(dir: string): void {
 
 /**
  * Load all score files from a directory into the given registry.
- * Supports `.score.yml`, `.score.yaml`, and `.score.json` files.
+ * Supports `.score.yml` and `.score.yaml` files.
  * Silently returns if the directory does not exist.
  */
 export function loadScoresFromDir(dir: string, registry: ScoreRegistry): void {
@@ -32,7 +32,7 @@ export function loadScoresFromDir(dir: string, registry: ScoreRegistry): void {
     const stat = statSync(fullPath);
     if (!stat.isFile()) continue;
 
-    if (/\.score\.(ya?ml|json)$/i.test(entry)) {
+    if (/\.score\.(ya?ml)$/i.test(entry)) {
       registry.loadFrom(fullPath);
     }
   }

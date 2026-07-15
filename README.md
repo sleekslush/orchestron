@@ -56,7 +56,7 @@ pnpm test
 
 ### Run a concert from the CLI
 
-Orchestron looks for score files (`*.score.yaml`/`*.score.json`) in two places
+Orchestron looks for score files (`*.score.yaml`) in two places
 by default:
 
 1. `./.orchestron/scores/` — project-local scores, checked first
