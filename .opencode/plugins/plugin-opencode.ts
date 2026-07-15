@@ -1,1 +1,0 @@
-../../packages/plugin-opencode/src/index.ts
