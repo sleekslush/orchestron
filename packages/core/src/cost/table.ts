@@ -40,10 +40,7 @@ export function convertPricingOverridesToLookup(
     const exact = list.find((o) => {
       const op = o.provider?.toLowerCase();
       const om = o.model?.toLowerCase();
-      if (op !== undefined && om !== undefined) return op === p && om === m;
-      if (op !== undefined) return false;
-      if (om !== undefined) return false;
-      return false;
+      return op !== undefined && om !== undefined && op === p && om === m;
     });
     if (exact) return toPricing(exact);
 

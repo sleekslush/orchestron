@@ -28,7 +28,9 @@ export interface ConcertStore {
    * Compute estimated spend for persisted movements that have tokens + model/
    * provider but no spend yet, persist it (marked `estimated`) and fold it
    * into the owning concert's usage. Idempotent: movements that already carry
-   * spend are left untouched.
+   * spend are left untouched. Movements that resolve to `unknown` stay
+   * unresolvable and are re-scanned on the next call — the scan is cheap and
+   * pricing is cached, so repeated reads are not a correctness concern.
    */
   backfillSpend(
     resolve: (input: CostResolutionInput) => Promise<CostResolution | null>,

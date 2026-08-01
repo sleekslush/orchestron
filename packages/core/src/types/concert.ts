@@ -30,6 +30,12 @@ export interface ResourceUsage {
    * pricing source (`'estimated'`). Absent when spend is unknown.
    */
   spendSource?: SpendSource;
+  /**
+   * Portion of `spend` (in microdollars) that is estimated, so a concert
+   * mixing measured + estimated movements keeps an honest split for
+   * aggregates even though `spendSource` is a single marker.
+   */
+  estimatedSpend?: number;
 }
 
 export interface ConcertContext {

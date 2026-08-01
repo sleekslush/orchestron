@@ -49,6 +49,7 @@ function safeResourceUsage(value: unknown): ResourceUsage {
   if (value.spendSource === 'measured' || value.spendSource === 'estimated') {
     result.spendSource = value.spendSource;
   }
+  if (typeof value.estimatedSpend === 'number') result.estimatedSpend = value.estimatedSpend;
   return result;
 }
 

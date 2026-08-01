@@ -21,6 +21,12 @@ export function estimateSpend(
  * Pure spend resolver implementing the precedence: measured → pricing lookup →
  * unknown. Returns `null` when nothing can resolve spend (rendered as
  * `unknown`), preserving today's last-resort behavior.
+ *
+ * This sync helper is intentionally kept alongside the async `CostResolver`,
+ * which layers the async per-provider sources (OpenRouter network fetch,
+ * configured table, free-marker) on top of the same measured-first ordering.
+ * The duplication is deliberate: `resolveCost` is the fast, dependency-free
+ * core exercised by unit tests, while `CostResolver` owns I/O and caching.
  */
 export function resolveCost(
   input: CostResolutionInput,
