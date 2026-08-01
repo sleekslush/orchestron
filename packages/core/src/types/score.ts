@@ -33,6 +33,15 @@ export interface OutputConfig {
 
 export type MovementPrompt = string | { initial: string; subsequent: string };
 
+/**
+ * Per-harness model configuration used when a movement or score needs
+ * different model/provider values for different harnesses.
+ */
+export interface HarnessModelConfig {
+  provider: string;
+  model: string;
+}
+
 export interface Movement {
   id: MovementID;
   name: string;
@@ -49,7 +58,15 @@ export interface Movement {
   transitions: Transition[];
   budget?: MovementBudget;
   retryOnFailure?: boolean;
-  model?: string;
+  /**
+   * Model to use for this movement.
+   *
+   * - Flat string: backward-compatible, used for all harnesses.
+   * - Per-harness map: keyed by harness type (e.g. \`pi\`, \`opencode\`).
+   *   The conductor selects the entry matching the movement's resolved harness.
+   */
+  model?: string | Record<string, HarnessModelConfig>;
+  /** Provider name. Only used when \`model\` is a flat string. */
   provider?: string;
 }
 
@@ -68,6 +85,11 @@ export interface Score {
   movements: Movement[];
   startMovement: MovementID;
   program?: Program;
+  /**
+   * Optional score-level model defaults, keyed by harness type.
+   * Movements inherit these unless they specify their own \`model\`.
+   */
+  models?: Record<string, HarnessModelConfig>;
   metadata?: Record<string, unknown>;
 }
 
