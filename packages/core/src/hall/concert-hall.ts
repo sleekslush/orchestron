@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import yaml from 'js-yaml';
-import type { Concert, ConcertID, ConcertFilter } from '../types/concert.js';
+import type { Concert, ConcertID, ConcertFilter, ConcertWorktree } from '../types/concert.js';
 import type { Score, ScoreID } from '../types/score.js';
 import type { HarnessAdapter, HarnessAdapterResolver } from '../types/adapter.js';
 import type { ConcertStore } from '../store/concert-store.js';
@@ -126,7 +126,27 @@ export class ConcertHall implements ChildConcertFactory {
     } else {
       score = this.scoreRegistry.get(concert.scoreId);
     }
-    const conductor = await this.buildConductor(concert, score, concert.explicitHarness);
+
+    // Restore the isolated worktree the concert was created with (if any) so a
+    // restarted concert continues to run inside it and disposes it on terminal
+    // state instead of leaking it.
+    let cwd: string | undefined;
+    let worktreeDisposer: (() => Promise<void>) | undefined;
+    if (concert.worktree) {
+      cwd = concert.worktree.path;
+      if (!concert.worktree.keep) {
+        const ref = concert.worktree;
+        worktreeDisposer = () => this.worktreeManager.remove(ref.path, ref.branch, ref.baseDir);
+      }
+    }
+
+    const conductor = await this.buildConductor(
+      concert,
+      score,
+      concert.explicitHarness,
+      cwd,
+      worktreeDisposer,
+    );
     this.conductors.set(concert.id, conductor);
 
     if (concert.parentConcertId) {
@@ -164,6 +184,7 @@ export class ConcertHall implements ChildConcertFactory {
     // it, disposing it when the concert reaches a terminal state.
     let cwd: string | undefined = startOptions.cwd;
     let worktreeDisposer: (() => Promise<void>) | undefined;
+    let worktreeRef: ConcertWorktree | undefined;
     if (startOptions.worktree) {
       const worktreeOpts =
         typeof startOptions.worktree === 'boolean'
@@ -171,10 +192,16 @@ export class ConcertHall implements ChildConcertFactory {
           : startOptions.worktree;
       const handle = await this.worktreeManager.create(score, worktreeOpts, concertId);
       cwd = handle.path;
-      if (!worktreeOpts.keep) {
-        const branch = handle.branch;
-        const path = handle.path;
-        worktreeDisposer = () => this.worktreeManager.remove(path, branch);
+      const keep = worktreeOpts.keep === true;
+      worktreeRef = {
+        path: handle.path,
+        branch: handle.branch,
+        baseDir: handle.baseDir,
+        ...(keep ? { keep: true } : {}),
+      };
+      if (!keep) {
+        const ref = worktreeRef;
+        worktreeDisposer = () => this.worktreeManager.remove(ref.path, ref.branch, ref.baseDir);
       }
     }
 
@@ -191,28 +218,38 @@ export class ConcertHall implements ChildConcertFactory {
       parentConcertId: startOptions?.parentConcertId,
       childConcertIds: [],
       explicitHarness: startOptions?.harness,
+      worktree: worktreeRef,
     };
 
-    const scoreYaml = yaml.dump(score);
-    await this.store.saveConcert(concert, scoreYaml);
+    try {
+      const scoreYaml = yaml.dump(score);
+      await this.store.saveConcert(concert, scoreYaml);
 
-    const conductor = await this.buildConductor(
-      concert,
-      score,
-      startOptions?.harness,
-      cwd,
-      worktreeDisposer,
-    );
+      const conductor = await this.buildConductor(
+        concert,
+        score,
+        startOptions?.harness,
+        cwd,
+        worktreeDisposer,
+      );
 
-    this.conductors.set(concert.id, conductor);
+      this.conductors.set(concert.id, conductor);
 
-    if (concert.parentConcertId) {
-      const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
-      siblings.push(concert.id);
-      this.parentToChildren.set(concert.parentConcertId, siblings);
+      if (concert.parentConcertId) {
+        const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
+        siblings.push(concert.id);
+        this.parentToChildren.set(concert.parentConcertId, siblings);
+      }
+
+      return conductor;
+    } catch (err) {
+      // If anything after worktree creation fails (DB error, build failure), do
+      // not leak the freshly created worktree/branch — dispose it before rethrowing.
+      if (worktreeDisposer) {
+        await worktreeDisposer().catch(() => {});
+      }
+      throw err;
     }
-
-    return conductor;
   }
 
   /**

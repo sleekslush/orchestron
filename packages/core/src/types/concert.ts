@@ -45,6 +45,22 @@ export interface Concert {
   childConcertIds: ConcertID[];
   nestingDepth?: number;
   explicitHarness?: string;
+  /** Isolated git worktree metadata, persisted so it survives restarts and is discoverable. */
+  worktree?: ConcertWorktree;
+}
+
+/**
+ * Persisted reference to the isolated git worktree a concert runs in (when
+ * started with `worktree`). Stored on the concert record so it can be
+ * re-hydrated after a restart and listed/cleaned by the CLI.
+ */
+export interface ConcertWorktree {
+  path: string;
+  branch: string;
+  /** Absolute base directory the worktree was created from. */
+  baseDir: string;
+  /** When true the worktree is kept on disk after the concert finishes. */
+  keep?: boolean;
 }
 
 export interface MovementRecord {

@@ -27,6 +27,8 @@ export interface WorktreeOptions {
 export interface WorktreeHandle {
   path: string;
   branch: string;
+  /** Absolute base directory the worktree was created from. */
+  baseDir: string;
 }
 
 /** Thin git wrapper so tests can inject a fake instead of touching the real repo. */
@@ -54,22 +56,24 @@ export class WorktreeManager {
     concertId: string,
     sourceDir?: string,
   ): Promise<WorktreeHandle> {
-    const baseDir = sourceDir ?? process.cwd();
+    const resolvedBase = resolve(sourceDir ?? process.cwd());
     const branch = opts.branch ?? `orchestron/wt-${concertId}-${nanoid(4)}`;
     const path =
-      opts.path ?? resolve(dirname(baseDir), `.orchestron-wt-${concertId}-${nanoid(4)}`);
+      opts.path ?? resolve(dirname(resolvedBase), `.orchestron-wt-${concertId}-${nanoid(4)}`);
     const metadataBase =
       typeof score.metadata?.baseBranch === 'string'
         ? score.metadata.baseBranch
         : undefined;
     const base = opts.baseBranch ?? metadataBase ?? 'origin/main';
 
-    await this.git(['worktree', 'add', '--force', '-b', branch, path, base], baseDir);
-    return { path, branch };
+    await this.git(['worktree', 'add', '--force', '-b', branch, path, base], resolvedBase);
+    return { path, branch, baseDir: resolvedBase };
   }
 
   async remove(path: string, branch?: string, sourceDir?: string): Promise<void> {
-    const baseDir = sourceDir ?? process.cwd();
+    // Resolve against a stable absolute base so removal never depends on the
+    // runtime process.cwd() at run time (which may differ from creation time).
+    const baseDir = resolve(sourceDir ?? process.cwd());
     await this.git(['worktree', 'remove', '--force', path], baseDir).catch(() => {});
     if (branch) {
       await this.git(['branch', '-D', branch], baseDir).catch(() => {});

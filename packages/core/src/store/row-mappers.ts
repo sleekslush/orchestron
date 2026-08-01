@@ -64,6 +64,7 @@ export interface ConcertRow {
   nesting_depth: number | null;
   score_yaml: string | null;
   explicit_harness: string | null;
+  worktree: string | null;
 }
 
 export interface MovementRow {
@@ -124,6 +125,9 @@ export function rowToConcert(row: ConcertRow, history: MovementRecord[]): Concer
       : [],
     nestingDepth: row.nesting_depth ?? undefined,
     explicitHarness: row.explicit_harness ?? undefined,
+    worktree: row.worktree
+      ? (jsonParse<Concert['worktree'] | undefined>(row.worktree, undefined) ?? undefined)
+      : undefined,
   };
 }
 
