@@ -3,9 +3,8 @@ import type { ConcertContext } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
 import { HarnessError, dollarsToMicro, tryParseStructuredFromText, SessionPool } from '@orchestron/core';
 import {
-  AuthStorage,
   createAgentSession,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
@@ -31,8 +30,7 @@ export interface PiAdapterConfig {
 
 interface PiSessionData {
   session: AgentSession;
-  authStorage: AuthStorage;
-  modelRegistry: ModelRegistry;
+  modelRuntime: ModelRuntime;
 }
 
 export class PiAdapter implements HarnessAdapter {
@@ -43,8 +41,7 @@ export class PiAdapter implements HarnessAdapter {
   private tools: string[] | undefined;
   private excludeTools: string[] | undefined;
   private sessionPool: SessionPool<PiSessionData>;
-  private authStorage: AuthStorage | undefined;
-  private modelRegistry: ModelRegistry | undefined;
+  private modelRuntime: ModelRuntime | undefined;
 
   constructor(config: PiAdapterConfig = {}) {
     this.provider = config.provider;
@@ -76,7 +73,7 @@ export class PiAdapter implements HarnessAdapter {
     const provider = options?.provider ?? this.provider;
     const thinkingLevel = this.extractThinkingLevel(options?.options?.thinkingLevel);
 
-    this.resolveModel(provider, modelId);
+    await this.resolveModel(provider, modelId);
 
     let session: AgentSession | undefined;
     let abortListener: (() => void) | undefined;
@@ -224,8 +221,10 @@ export class PiAdapter implements HarnessAdapter {
   }
 
   async listModels(): Promise<HarnessModelInfo[]> {
-    const { modelRegistry } = this.ensureRegistry();
-    return modelRegistry.getAll().map((m) => ({ provider: m.provider, model: m.id }));
+    const modelRuntime = await this.ensureModelRuntime();
+    return modelRuntime
+      .getModels()
+      .map((m) => ({ provider: m.provider, model: m.id }));
   }
 
   async disposeSession(sessionId: string): Promise<void> {
@@ -304,15 +303,19 @@ export class PiAdapter implements HarnessAdapter {
     await this.sessionPool.disposeAll();
   }
 
-  private ensureRegistry(): { authStorage: AuthStorage; modelRegistry: ModelRegistry } {
-    if (!this.authStorage || !this.modelRegistry) {
-      this.authStorage = AuthStorage.create();
-      this.modelRegistry = ModelRegistry.create(this.authStorage);
+  private async ensureModelRuntime(): Promise<ModelRuntime> {
+    if (!this.modelRuntime) {
+      // Build the catalog exactly the way pi's interactive runtime does: merge
+      // static built-ins with the remote-catalog overlay and read/write the same
+      // ~/.pi/agent/models-store.json cache. `allowModelNetwork` lets a fresh
+      // environment fetch + cache remote catalogs; on network failure it degrades
+      // to the cached/static catalog rather than hard-failing.
+      this.modelRuntime = await ModelRuntime.create({ allowModelNetwork: true });
     }
-    return { authStorage: this.authStorage, modelRegistry: this.modelRegistry };
+    return this.modelRuntime;
   }
 
-  private resolveModel(provider?: string, modelId?: string): void {
+  private async resolveModel(provider?: string, modelId?: string): Promise<void> {
     const targetProvider = provider ?? this.provider;
     const targetModelId = modelId ?? this.modelId;
 
@@ -321,8 +324,8 @@ export class PiAdapter implements HarnessAdapter {
 
     if (!targetProvider || !targetModelId) return;
 
-    const { modelRegistry } = this.ensureRegistry();
-    const resolved = modelRegistry.find(targetProvider, targetModelId);
+    const modelRuntime = await this.ensureModelRuntime();
+    const resolved = modelRuntime.getModel(targetProvider, targetModelId);
     if (!resolved) {
       throw new HarnessError(
         `Unknown Pi model '${targetModelId}' for provider '${targetProvider}'. ` +
@@ -345,13 +348,12 @@ export class PiAdapter implements HarnessAdapter {
   }
 
   private async createPiSession(thinkingLevel?: ThinkingLevel): Promise<PiSessionData> {
-    const { authStorage, modelRegistry } = this.ensureRegistry();
+    const modelRuntime = await this.ensureModelRuntime();
 
     const sessionOptions: Parameters<typeof createAgentSession>[0] = {
       model: this.model as never,
       sessionManager: SessionManager.inMemory(),
-      authStorage,
-      modelRegistry,
+      modelRuntime,
     };
 
     if (thinkingLevel !== undefined) {
@@ -365,7 +367,7 @@ export class PiAdapter implements HarnessAdapter {
     }
 
     const { session } = await createAgentSession(sessionOptions);
-    return { session, authStorage, modelRegistry };
+    return { session, modelRuntime };
   }
 
   private toResourceUsage(finalUsage: Usage | undefined) {

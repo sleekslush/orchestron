@@ -14,17 +14,19 @@ const createAgentSessionMock = vi.fn() as Mock<
 >;
 createAgentSessionMock.mockImplementation(async () => ({ session: mockSession, extensionsResult: {} }));
 
-const registryFindMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
-const registryGetAllMock = vi.fn() as Mock<() => unknown[]>;
+const modelRuntimeGetModelMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
+const modelRuntimeGetModelsMock = vi.fn() as Mock<() => unknown[]>;
 
-const mockRegistry = { find: registryFindMock, getAll: registryGetAllMock };
+const mockModelRuntime = {
+  getModel: modelRuntimeGetModelMock,
+  getModels: modelRuntimeGetModelsMock,
+};
+
+const modelRuntimeCreateMock = vi.fn() as Mock<() => Promise<unknown>>;
+modelRuntimeCreateMock.mockResolvedValue(mockModelRuntime);
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
-  AuthStorage: { create: vi.fn(() => ({ id: 'auth' })) },
-  ModelRegistry: {
-    create: vi.fn(() => mockRegistry),
-    inMemory: vi.fn(() => ({ find: registryFindMock })),
-  },
+  ModelRuntime: { create: (...args: unknown[]) => modelRuntimeCreateMock(...args as Parameters<typeof modelRuntimeCreateMock>) },
   SessionManager: { inMemory: vi.fn(() => ({ id: 'manager' })) },
   createAgentSession: (...args: unknown[]) => createAgentSessionMock(...args as Parameters<typeof createAgentSessionMock>),
 }));
@@ -33,6 +35,7 @@ describe('PiAdapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     createAgentSessionMock.mockResolvedValue({ session: mockSession, extensionsResult: {} });
+    modelRuntimeCreateMock.mockResolvedValue(mockModelRuntime);
   });
 
   it('executes a prompt without sessionId using a fresh session', async () => {
@@ -308,7 +311,7 @@ describe('PiAdapter', () => {
   });
 
   it('throws HARNESS_FAILURE when model is not found', async () => {
-    registryFindMock.mockReturnValue(undefined);
+    modelRuntimeGetModelMock.mockReturnValue(undefined);
 
     const adapter = new PiAdapter({ provider: 'openai', modelId: 'gpt-4o' });
 
@@ -319,7 +322,7 @@ describe('PiAdapter', () => {
   });
 
   it('validates per-execution model options instead of config defaults', async () => {
-    registryFindMock.mockReturnValue(undefined);
+    modelRuntimeGetModelMock.mockReturnValue(undefined);
 
     const adapter = new PiAdapter({ provider: 'openai', modelId: 'gpt-4o' });
 
@@ -331,17 +334,44 @@ describe('PiAdapter', () => {
     });
   });
 
-  it('shares a single ModelRegistry across sessions', async () => {
-    const { ModelRegistry } = await import('@earendil-works/pi-coding-agent');
-    const createSpy = ModelRegistry.create as Mock;
-    createSpy.mockClear();
+  it('resolves models via ModelRuntime and passes modelRuntime to the session', async () => {
+    const resolvedModel = { provider: 'openrouter', id: 'deepseek/deepseek-v4-flash-0731' };
+    modelRuntimeGetModelMock.mockReturnValue(resolvedModel);
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter({ provider: 'openrouter', modelId: 'deepseek/deepseek-v4-flash-0731' });
+    await adapter.execute('x', { shared: {} });
+
+    expect(modelRuntimeGetModelMock).toHaveBeenCalledWith(
+      'openrouter',
+      'deepseek/deepseek-v4-flash-0731',
+    );
+    const options = createAgentSessionMock.mock.calls[0]?.[0];
+    expect(options!.model).toEqual(resolvedModel);
+    expect(options!.modelRuntime).toBe(mockModelRuntime);
+    expect(options!).not.toHaveProperty('modelRegistry');
+    expect(options!).not.toHaveProperty('authStorage');
+  });
+
+  it('creates ModelRuntime with allowModelNetwork enabled', async () => {
+    modelRuntimeCreateMock.mockClear();
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter();
+    await adapter.execute('a', { shared: {} });
+
+    expect(modelRuntimeCreateMock).toHaveBeenCalledWith({ allowModelNetwork: true });
+  });
+
+  it('shares a single ModelRuntime across sessions', async () => {
+    modelRuntimeCreateMock.mockClear();
     mockSession.prompt.mockResolvedValue(undefined);
 
     const adapter = new PiAdapter();
     await adapter.execute('a', { shared: {} }, { sessionId: 'c1:m1' });
     await adapter.execute('b', { shared: {} }, { sessionId: 'c1:m2' });
 
-    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(modelRuntimeCreateMock).toHaveBeenCalledTimes(1);
   });
 
   it('omits tools by default so Pi uses built-in defaults', async () => {
@@ -368,10 +398,11 @@ describe('PiAdapter', () => {
     expect(options!.excludeTools).toEqual(['bash']);
   });
 
-  it('lists models from the shared registry', async () => {
-    registryGetAllMock.mockReturnValue([
+  it('lists models from the shared ModelRuntime', async () => {
+    modelRuntimeGetModelsMock.mockReturnValue([
       { id: 'claude-3', provider: 'anthropic', name: 'Claude 3' },
       { id: 'gpt-4o', provider: 'openai', name: 'GPT-4o' },
+      { id: 'deepseek/deepseek-v4-flash-0731', provider: 'openrouter' },
     ]);
     const adapter = new PiAdapter();
 
@@ -380,6 +411,7 @@ describe('PiAdapter', () => {
     expect(models).toEqual([
       { provider: 'anthropic', model: 'claude-3' },
       { provider: 'openai', model: 'gpt-4o' },
+      { provider: 'openrouter', model: 'deepseek/deepseek-v4-flash-0731' },
     ]);
   });
 
