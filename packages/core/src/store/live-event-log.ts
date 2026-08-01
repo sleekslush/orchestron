@@ -10,6 +10,12 @@ import type { ConcertEvent, ConcertID } from '../types/index.js';
  * Events are written to `traces/<concertId>/live.jsonl` as they are emitted.
  * Cross-process consumers can tail the same file to observe progress without
  * polling SQLite.
+ *
+ * Offset semantics: `readSince` offsets and the returned `bytesRead` values
+ * are JS string code-unit (UTF-16) offsets into the decoded file content, sorted
+ * so they double as resume points for `watch`. The log lines are JSON, which
+ * ASCII-encodes to the same value in bytes, so for the JSONL payloads this is
+ * self-consistent; non-ASCII payloads would diverge from true byte offsets.
  */
 export class LiveEventLog {
   private tracesDir: string;
@@ -62,7 +68,10 @@ export class LiveEventLog {
     return this.parseLines(content);
   }
 
-  /** Read events from the live log starting at a byte offset. */
+  /**
+   * Read events from the live log starting at a UTF-16 code-unit offset (see
+   * class docs). Returns the newly parsed events and the new code-unit offset.
+   */
   async readSince(
     concertId: ConcertID,
     offset: number,

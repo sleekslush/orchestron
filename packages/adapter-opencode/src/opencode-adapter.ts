@@ -328,13 +328,12 @@ export class OpencodeAdapter implements HarnessAdapter {
             'HARNESS_FAILURE',
           );
         }
-        if (!completed) {
-          throw new HarnessError(
-            'Opencode harness event stream ended without completion',
-            'HARNESS_FAILURE',
-          );
-        }
 
+        // Whether or not the subscription observed a terminal step event, return
+        // the result via the post-hoc session trace rather than relying on the
+        // live stream: if promptAsync resolved after the turn finished, the
+        // stream has already ended and an unobserved completion should not be a
+        // hard failure.
         return await this.waitForFinalResponse(
           opencodeSessionId,
           options?.signal,
@@ -681,11 +680,13 @@ export class OpencodeAdapter implements HarnessAdapter {
       throw new HarnessError('Opencode client is not initialized', 'HARNESS_FAILURE');
     }
 
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (signal?.aborted) {
-        throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
-      }
-
+    // Poll the session trace until a complete assistant message becomes
+    // queryable. Bound by the abort signal (driven by the movement timeout)
+    // rather than a short fixed cap, so a turn whose final message materializes
+    // slowly isn't spuriously failed within a few seconds. A generous constant
+    // cap guards against an unbounded loop when no signal is provided.
+    const maxAttempts = 3000; // 3000 * 100ms ≈ 5 minutes
+    for (let attempt = 0; attempt < maxAttempts && !signal?.aborted; attempt++) {
       const result = await this.client.session.messages({ sessionID: sessionId });
       if (!result.error && result.data) {
         const response = this.responseFromMessages(
@@ -698,6 +699,9 @@ export class OpencodeAdapter implements HarnessAdapter {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
+    if (signal?.aborted) {
+      throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
+    }
     throw new HarnessError(
       'Opencode harness did not produce a final response',
       'HARNESS_FAILURE',

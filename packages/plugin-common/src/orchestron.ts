@@ -34,8 +34,8 @@ export interface Orchestron {
   store: SqliteLoge;
   registry: ScoreRegistry;
   hall: ConcertHall;
-  liveEventLog?: LiveEventLog;
-  tracesDir?: string;
+  liveEventLog: LiveEventLog;
+  tracesDir: string;
   scoresDirs: string[];
 }
 

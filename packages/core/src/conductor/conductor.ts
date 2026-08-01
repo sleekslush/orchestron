@@ -323,9 +323,17 @@ export class Conductor implements IConductor {
   }
 
   private emit(event: ConcertEvent): void {
+    // Fan out to the in-process event bus synchronously so listeners never block.
     this.eventEmitter.emit('event', event);
+    // Persist to the live event log fire-and-forget to keep the hot path
+    // non-blocking; surface write failures instead of silently swallowing them.
     if (this.liveEventLog) {
-      this.liveEventLog.append(this.concert.id, event).catch(() => {});
+      this.liveEventLog.append(this.concert.id, event).catch((err) => {
+        console.error(
+          `Failed to append event to live log for concert '${this.concert.id}':`,
+          err,
+        );
+      });
     }
   }
 

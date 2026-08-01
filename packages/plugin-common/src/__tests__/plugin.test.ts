@@ -1,12 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   FakeEvaluator,
   FakeHarnessAdapter,
   ScoreRegistry,
   SqliteLoge,
   ConcertHall,
+  LiveEventLog,
 } from '@orchestron/core';
 import type { Score } from '@orchestron/core';
+
+const tracesDir = mkdtempSync(join(realpathSync(tmpdir()), 'orchestron-test-trace-'));
+const liveEventLog = new LiveEventLog(tracesDir);
 import { createOrchestron, type Orchestron } from '../orchestron.js';
 import { startConcert } from '../tools/start-concert.js';
 import { getConcertStatus } from '../tools/get-status.js';
@@ -178,7 +185,14 @@ describe('plugin-common tool functions', () => {
       adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
-    const orchestron: Orchestron = { store, registry, hall, scoresDirs: [] };
+    const orchestron: Orchestron = {
+      store,
+      registry,
+      hall,
+      scoresDirs: [],
+      tracesDir,
+      liveEventLog,
+    };
 
     const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
     await new Promise((r) => setTimeout(r, 50));
@@ -208,7 +222,14 @@ describe('plugin-common tool functions', () => {
       adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
-    const orchestron: Orchestron = { store, registry, hall, scoresDirs: [] };
+    const orchestron: Orchestron = {
+      store,
+      registry,
+      hall,
+      scoresDirs: [],
+      tracesDir,
+      liveEventLog,
+    };
 
     const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
 
