@@ -10,6 +10,7 @@ import { pauseCommandHandler, resumeCommandHandler } from '../commands/lifecycle
 import { statusCommandHandler } from '../commands/status.js';
 import { listCommandHandler } from '../commands/list.js';
 import { scoresCommandHandler } from '../commands/scores.js';
+import { modelsCommandHandler } from '../commands/models.js';
 
 const simpleScore: Score = {
   id: 'cli-test',
@@ -402,5 +403,111 @@ describe('CLI commands', () => {
     }
 
     expect(logs.some((l) => l.includes('Status:  completed'))).toBe(true);
+  });
+
+  it('lists models for all registered harnesses', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok', usage: { spend: 1, tokens: 1 } },
+      models: [
+        { provider: 'anthropic', model: 'claude-3' },
+        { provider: 'openai', model: 'gpt-4o' },
+      ],
+    });
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, undefined, false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    expect(logs.some((l) => l.includes('fake:'))).toBe(true);
+    expect(logs.some((l) => l.includes('anthropic/claude-3'))).toBe(true);
+    expect(logs.some((l) => l.includes('openai/gpt-4o'))).toBe(true);
+  });
+
+  it('lists models for a single harness', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', new FakeHarnessAdapter({ models: [{ provider: 'x', model: 'y' }] })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, 'fake', false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    expect(logs.some((l) => l.includes('fake:'))).toBe(true);
+    expect(logs.some((l) => l.includes('x/y'))).toBe(true);
+  });
+
+  it('lists models as JSON', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', new FakeHarnessAdapter({ models: [{ provider: 'x', model: 'y' }] })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, undefined, true);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const parsed = JSON.parse(logs.join('\n'));
+    expect(parsed).toEqual([{ harness: 'fake', models: [{ provider: 'x', model: 'y' }] }]);
+  });
+
+  it('reports an error for an unknown harness in models command', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', new FakeHarnessAdapter({})]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    await expect(modelsCommandHandler(orchestron, 'nope', false)).rejects.toThrow(
+      "No adapter registered for harness 'nope'",
+    );
+    orchestron.store.close();
   });
 });

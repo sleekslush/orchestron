@@ -497,4 +497,62 @@ describe('OpencodeAdapter', () => {
     expect(r1.output).toBe('hello');
     expect(r2.output).toBe('hello');
   });
+
+  it('lists models from the server catalog', async () => {
+    const adapter = new OpencodeAdapter();
+
+    const models = await adapter.listModels();
+
+    expect(mockModelList).toHaveBeenCalledTimes(1);
+    expect(models).toEqual([
+      { provider: 'anthropic', model: 'claude-3' },
+      { provider: 'openai', model: 'gpt-4o' },
+    ]);
+  });
+
+  it('caches the catalog across listModels calls', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.listModels();
+    await adapter.listModels();
+
+    expect(mockModelList).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares the catalog cache with model validation', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.listModels();
+    await adapter.execute('x', { shared: {} }, { provider: 'anthropic', model: 'claude-3' });
+
+    expect(mockModelList).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws HARNESS_FAILURE when the catalog fetch fails', async () => {
+    mockModelList.mockRejectedValueOnce(new Error('connection refused'));
+    const adapter = new OpencodeAdapter();
+
+    await expect(adapter.listModels()).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining('Failed to fetch opencode models'),
+    });
+  });
+
+  it('passes options.variant to the prompt', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('x', { shared: {} }, { options: { variant: 'effort-high' } });
+
+    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    expect(prompt.variant).toBe('effort-high');
+  });
+
+  it('omits variant when options.variant is missing', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('x', { shared: {} });
+
+    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    expect(prompt.variant).toBeUndefined();
+  });
 });

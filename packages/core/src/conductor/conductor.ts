@@ -401,6 +401,7 @@ export class Conductor implements IConductor {
           sessionId,
           model: modelConfig.model,
           provider: modelConfig.provider,
+          options: modelConfig.options,
           onProgress,
         });
 
@@ -639,7 +640,8 @@ export class Conductor implements IConductor {
   }
 
   /**
-   * Resolve model/provider for a movement based on the resolved harness type.
+   * Resolve model/provider/options for a movement based on the resolved
+   * harness type.
    *
    * Precedence:
    * 1. Movement-level per-harness map — select entry matching harness type
@@ -650,14 +652,14 @@ export class Conductor implements IConductor {
   private resolveModelConfig(
     movement: Movement,
     harnessType: string,
-  ): { model?: string; provider?: string } {
+  ): { model?: string; provider?: string; options?: Record<string, unknown> } {
     const modelSpec = movement.model;
 
     // 1. Per-harness map on the movement
     if (modelSpec && typeof modelSpec === 'object') {
       const entry = modelSpec[harnessType];
       if (entry) {
-        return { model: entry.model, provider: entry.provider };
+        return { model: entry.model, provider: entry.provider, options: entry.options };
       }
       throw new ConductorPanic(
         `Movement '${movement.id}' has per-harness model config but no entry for harness '${harnessType}'`,
@@ -675,7 +677,7 @@ export class Conductor implements IConductor {
     if (this.score.models) {
       const entry = this.score.models[harnessType];
       if (entry) {
-        return { model: entry.model, provider: entry.provider };
+        return { model: entry.model, provider: entry.provider, options: entry.options };
       }
     }
 

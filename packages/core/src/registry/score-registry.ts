@@ -1,7 +1,11 @@
 import { readFileSync, existsSync } from 'node:fs';
 import yaml from 'js-yaml';
-import type { Score, Movement, ScoreID, MovementID } from '../types/score.js';
+import type { Score, Movement, ScoreID, MovementID, HarnessModelConfig } from '../types/score.js';
 import { ScoreValidationError } from '../types/errors.js';
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 export interface ScoreValidationResult {
   valid: boolean;
@@ -83,6 +87,17 @@ export class ScoreRegistry {
 
     const movementIds = new Set(score.movements.map((m) => m.id));
 
+    for (const [scope, entry] of this.collectModelEntries(score)) {
+      if (entry.options !== undefined && !isPlainObject(entry.options)) {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${score.id}': ${scope} model entry 'options' must be a plain object`,
+            'INVALID_SCORE',
+          ),
+        );
+      }
+    }
+
     if (!movementIds.has(score.startMovement)) {
       errors.push(
         new ScoreValidationError(
@@ -141,6 +156,23 @@ export class ScoreRegistry {
     }
 
     return errors;
+  }
+
+  /** All per-harness model entries in a score, with a scope label for errors. */
+  private collectModelEntries(
+    score: Score,
+  ): Array<[scope: string, entry: HarnessModelConfig]> {
+    const entries: Array<[string, HarnessModelConfig]> = [];
+    for (const [harness, entry] of Object.entries(score.models ?? {})) {
+      entries.push([`models.${harness}`, entry]);
+    }
+    for (const movement of score.movements) {
+      if (typeof movement.model !== 'object' || movement.model === null) continue;
+      for (const [harness, entry] of Object.entries(movement.model)) {
+        entries.push([`movement '${movement.id}' models.${harness}`, entry]);
+      }
+    }
+    return entries;
   }
 
   private detectCycle(

@@ -1,6 +1,5 @@
-import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
+import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
-import type { OutputConfig } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
 import {
   HarnessError,
@@ -125,15 +124,7 @@ export class OpencodeAdapter implements HarnessAdapter {
   async execute(
     prompt: string,
     _context: ConcertContext,
-    options?: {
-      signal?: AbortSignal;
-      output?: OutputConfig;
-      movementId?: string;
-      sessionId?: string;
-      model?: string;
-      provider?: string;
-      onProgress?: (update: import('@orchestron/core').ProgressUpdate) => void;
-    },
+    options?: HarnessAdapterExecuteOptions,
   ): Promise<HarnessResponse> {
     await this.ensureInitialized();
 
@@ -184,6 +175,7 @@ export class OpencodeAdapter implements HarnessAdapter {
         model?: { providerID: string; modelID: string };
         format?: { type: 'json_schema'; schema: Record<string, unknown> };
         tools?: Record<string, boolean>;
+        variant?: string;
       } = {
         sessionID: opencodeSessionId,
         parts: [{ type: 'text', text: prompt }],
@@ -191,6 +183,10 @@ export class OpencodeAdapter implements HarnessAdapter {
 
       if (provider && modelId) {
         parameters.model = { providerID: provider, modelID: modelId };
+      }
+
+      if (typeof options?.options?.variant === 'string' && options.options.variant) {
+        parameters.variant = options.options.variant;
       }
 
       if (options?.output?.mode === 'structured' && options.output.schema) {
@@ -345,6 +341,24 @@ export class OpencodeAdapter implements HarnessAdapter {
   }
 
   /**
+   * Return all (provider, model) pairs the server knows about. Throws a
+   * HARNESS_FAILURE when the catalog cannot be fetched.
+   */
+  async listModels(): Promise<HarnessModelInfo[]> {
+    await this.ensureInitialized();
+    try {
+      await this.fetchModelCatalog();
+    } catch (err) {
+      if (err instanceof HarnessError) throw err;
+      throw new HarnessError(
+        `Failed to fetch opencode models: ${(err as Error).message ?? String(err)}`,
+        'HARNESS_FAILURE',
+      );
+    }
+    return (this.validatedModels ?? []).map((m) => ({ provider: m.providerID, model: m.modelID }));
+  }
+
+  /**
    * Validate that the requested model exists on the Opencode server.
    *
    * Fetches the model catalog on first call and caches it.  When the
@@ -355,15 +369,7 @@ export class OpencodeAdapter implements HarnessAdapter {
     if (!this.client) return;
 
     try {
-      if (!this.validatedModels) {
-        const result = await this.client.v2.model.list();
-        if (result.data?.data) {
-          this.validatedModels = result.data.data.map((m) => ({
-            providerID: m.providerID,
-            modelID: m.id,
-          }));
-        }
-      }
+      await this.fetchModelCatalog();
 
       if (this.validatedModels) {
         const found = this.validatedModels.some(
@@ -385,6 +391,20 @@ export class OpencodeAdapter implements HarnessAdapter {
     } catch (err) {
       if (err instanceof HarnessError) throw err;
       // Server unreachable or other transient error — skip validation.
+    }
+  }
+
+  /** Fetch and cache the server model catalog (no-op when already cached). */
+  private async fetchModelCatalog(): Promise<void> {
+    if (!this.client) return;
+    if (this.validatedModels) return;
+
+    const result = await this.client.v2.model.list();
+    if (result.data?.data) {
+      this.validatedModels = result.data.data.map((m) => ({
+        providerID: m.providerID,
+        modelID: m.id,
+      }));
     }
   }
 

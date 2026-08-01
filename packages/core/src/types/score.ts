@@ -40,6 +40,10 @@ export type MovementPrompt = string | { initial: string; subsequent: string };
 export interface HarnessModelConfig {
   provider: string;
   model: string;
+  /** Harness-specific options, passed through to the adapter on execute
+   *  (e.g. Pi `thinkingLevel`, Opencode `variant`). Structural validation
+   *  only — each adapter decides which keys it honors. */
+  options?: Record<string, unknown>;
 }
 
 export interface Movement {

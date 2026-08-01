@@ -1,5 +1,5 @@
 import { dirname, join, resolve } from 'node:path';
-import type { Evaluator, HarnessAdapter, HarnessAdapterResolver, SqliteLoge, ScoreRegistry, ConcertHall } from '@orchestron/core';
+import type { Evaluator, HarnessAdapter, HarnessAdapterResolver, HarnessModelInfo, SqliteLoge, ScoreRegistry, ConcertHall } from '@orchestron/core';
 import { resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR, ensureDir, loadScoresFromDir } from '@orchestron/core';
 
 export { DEFAULT_CONFIG_DIR, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR };
@@ -12,10 +12,17 @@ export interface OrchestronOptions {
   defaultHarness?: string;
 }
 
+export interface OrchestronModelEntry {
+  harness: string;
+  models: HarnessModelInfo[];
+}
+
 export interface Orchestron {
   store: SqliteLoge;
   registry: ScoreRegistry;
   hall: ConcertHall;
+  /** List available models for one harness, or for all registered harnesses. */
+  listModels(harness?: string): Promise<OrchestronModelEntry[]>;
 }
 
 export async function withOrchestron<T>(
@@ -71,6 +78,16 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     adapterResolver.register('pi', new PiAdapter({ provider: piProvider, modelId: piModelId }));
   }
 
+  const listModels = async (harness?: string): Promise<OrchestronModelEntry[]> => {
+    const names = harness ? [harness] : adapterNames(adapterResolver);
+    const entries: OrchestronModelEntry[] = [];
+    for (const name of names) {
+      const adapter = await resolveAdapterFor(adapterResolver, name);
+      entries.push({ harness: name, models: (await adapter.listModels?.()) ?? [] });
+    }
+    return entries;
+  };
+
   let evaluator = options.evaluator;
   if (!evaluator) {
     const effectiveDefaultHarness = defaultHarness;
@@ -106,7 +123,31 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     defaultHarness,
   });
 
-  return { store, registry, hall };
+  return { store, registry, hall, listModels };
+}
+
+function adapterNames(source: Map<string, HarnessAdapter> | HarnessAdapterResolver): string[] {
+  if (source instanceof Map) {
+    return Array.from(source.keys());
+  }
+  if (source instanceof LazyAdapterResolver) {
+    return source.names();
+  }
+  return [];
+}
+
+async function resolveAdapterFor(
+  source: Map<string, HarnessAdapter> | HarnessAdapterResolver,
+  name: string,
+): Promise<HarnessAdapter> {
+  if (source instanceof Map) {
+    const adapter = source.get(name);
+    if (!adapter) {
+      throw new Error(`No adapter registered for harness '${name}'`);
+    }
+    return adapter;
+  }
+  return source.resolve(name);
 }
 
 class LazyAdapterResolver implements HarnessAdapterResolver {
@@ -114,6 +155,10 @@ class LazyAdapterResolver implements HarnessAdapterResolver {
 
   register(name: string, adapter: HarnessAdapter): void {
     this.adapters.set(name, adapter);
+  }
+
+  names(): string[] {
+    return Array.from(this.adapters.keys());
   }
 
   async resolve(name: string): Promise<HarnessAdapter> {

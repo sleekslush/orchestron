@@ -15,8 +15,9 @@ const createAgentSessionMock = vi.fn() as Mock<
 createAgentSessionMock.mockImplementation(async () => ({ session: mockSession, extensionsResult: {} }));
 
 const registryFindMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
+const registryGetAllMock = vi.fn() as Mock<() => unknown[]>;
 
-const mockRegistry = { find: registryFindMock };
+const mockRegistry = { find: registryFindMock, getAll: registryGetAllMock };
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   AuthStorage: { create: vi.fn(() => ({ id: 'auth' })) },
@@ -335,5 +336,67 @@ describe('PiAdapter', () => {
     expect(options).toBeDefined();
     expect(options!.tools).toEqual(['read']);
     expect(options!.excludeTools).toEqual(['bash']);
+  });
+
+  it('lists models from the shared registry', async () => {
+    registryGetAllMock.mockReturnValue([
+      { id: 'claude-3', provider: 'anthropic', name: 'Claude 3' },
+      { id: 'gpt-4o', provider: 'openai', name: 'GPT-4o' },
+    ]);
+    const adapter = new PiAdapter();
+
+    const models = await adapter.listModels();
+
+    expect(models).toEqual([
+      { provider: 'anthropic', model: 'claude-3' },
+      { provider: 'openai', model: 'gpt-4o' },
+    ]);
+  });
+
+  it('passes thinkingLevel to a fresh session', async () => {
+    mockSession.prompt.mockResolvedValue(undefined);
+    const adapter = new PiAdapter();
+
+    await adapter.execute('x', { shared: {} }, { options: { thinkingLevel: 'high' } });
+
+    const options = createAgentSessionMock.mock.calls[0]?.[0];
+    expect(options!.thinkingLevel).toBe('high');
+  });
+
+  it('sets thinkingLevel on a reused session before prompting', async () => {
+    mockSession.prompt.mockResolvedValue(undefined);
+    const setThinkingLevel = vi.fn();
+    const sessionWithLevel = { ...mockSession, setThinkingLevel };
+    createAgentSessionMock.mockResolvedValueOnce({ session: sessionWithLevel, extensionsResult: {} });
+
+    const adapter = new PiAdapter();
+    await adapter.execute('first', { shared: {} }, { sessionId: 'c1:m1' });
+    await adapter.execute('second', { shared: {} }, { sessionId: 'c1:m1', options: { thinkingLevel: 'low' } });
+
+    expect(setThinkingLevel).toHaveBeenCalledWith('low');
+  });
+
+  it('does not set a thinking level when none is provided', async () => {
+    mockSession.prompt.mockResolvedValue(undefined);
+    const setThinkingLevel = vi.fn();
+    const sessionWithLevel = { ...mockSession, setThinkingLevel };
+    createAgentSessionMock.mockResolvedValueOnce({ session: sessionWithLevel, extensionsResult: {} });
+
+    const adapter = new PiAdapter();
+    await adapter.execute('first', { shared: {} }, { sessionId: 'c1:m1' });
+    await adapter.execute('second', { shared: {} }, { sessionId: 'c1:m1' });
+
+    expect(setThinkingLevel).not.toHaveBeenCalled();
+  });
+
+  it('throws HARNESS_FAILURE for an invalid thinking level', async () => {
+    const adapter = new PiAdapter();
+
+    await expect(
+      adapter.execute('x', { shared: {} }, { options: { thinkingLevel: 'ultra' } }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining("Invalid Pi thinking level 'ultra'"),
+    });
   });
 });

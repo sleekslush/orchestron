@@ -397,4 +397,70 @@ program: {}
       ),
     ).not.toThrow();
   });
+
+  it('should reject score-level model options that are not a plain object', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          models: {
+            pi: { provider: 'anthropic', model: 'claude-3', options: ['not', 'an', 'object'] } as any,
+          },
+        }),
+      ),
+    ).toThrow("model entry 'options' must be a plain object");
+  });
+
+  it('should reject movement model options that are not a plain object', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              description: 'First step',
+              harness: 'pi',
+              model: { pi: { provider: 'anthropic', model: 'claude-3', options: 'nope' } as any },
+              prompt: 'Do step A',
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow("'options' must be a plain object");
+  });
+
+  it('should accept plain-object model options at score and movement level', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          models: {
+            pi: { provider: 'anthropic', model: 'claude-3', options: { thinkingLevel: 'high' } },
+          },
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              description: 'First step',
+              harness: 'pi',
+              model: {
+                pi: { provider: 'anthropic', model: 'claude-3', options: { thinkingLevel: 'low' } },
+              },
+              prompt: 'Do step A',
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).not.toThrow();
+  });
 });

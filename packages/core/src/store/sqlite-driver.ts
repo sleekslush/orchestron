@@ -14,11 +14,13 @@ type DatabaseCtor = new (path: string, options?: Record<string, unknown>) => Sql
 
 let ctor: DatabaseCtor;
 
-const isBun = typeof Bun !== 'undefined' && Bun.version != null;
+const isBun = typeof (globalThis as { Bun?: { version?: string } }).Bun !== 'undefined';
 
 if (isBun) {
-  const { Database } = await import('bun:sqlite');
-  ctor = Database as unknown as DatabaseCtor;
+  // Cast away the literal specifier: 'bun:sqlite' is a Bun builtin with no
+  // package-level type declarations, so TS skips module resolution here.
+  const mod = (await import('bun:sqlite' as string)) as { Database: unknown };
+  ctor = mod.Database as unknown as DatabaseCtor;
 } else {
   const mod = await import('better-sqlite3');
   const BetterDB = mod.default ?? mod;

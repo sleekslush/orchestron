@@ -15,7 +15,16 @@ export interface HarnessAdapterExecuteOptions {
   sessionId?: string;
   model?: string;
   provider?: string;
+  /** Harness-specific options (e.g. thinking level, variant) passed through
+   *  from the score's per-harness model config. Each adapter decides which
+   *  keys it honors. */
+  options?: Record<string, unknown>;
   onProgress?: (update: ProgressUpdate) => void;
+}
+
+export interface HarnessModelInfo {
+  provider: string;
+  model: string;
 }
 
 export interface HarnessAdapter {
@@ -25,6 +34,9 @@ export interface HarnessAdapter {
     context: ConcertContext,
     options?: HarnessAdapterExecuteOptions,
   ): Promise<HarnessResponse>;
+  /** Return the (provider, model) pairs this adapter can execute with.
+   *  Adapters that cannot enumerate models omit this method. */
+  listModels?(): Promise<HarnessModelInfo[]>;
   /** Return session trace events for the given session since the given offset.
    *  No offset → return all events. Offset 0 → all events. Called after execute()
    *  — even if execute() threw. Returns [] when tracing is not supported. */
