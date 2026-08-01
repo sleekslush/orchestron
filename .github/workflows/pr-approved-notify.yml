@@ -1,4 +1,4 @@
-name: Notify on PR approval
+name: Notify on PR label
 
 on:
   pull_request_review:
@@ -13,7 +13,7 @@ jobs:
     if: >
       (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
       || (github.event_name == 'pull_request' && github.event.action == 'labeled'
-          && github.event.label.name == 'approved:orchestron')
+          && startsWith(github.event.label.name, 'orchestron'))
     runs-on: ubuntu-latest
     steps:
       - name: Push notification
@@ -21,5 +21,5 @@ jobs:
           NTFY_URL: ${{ secrets.NTFY_URL }}
         run: |
           curl -s \
-            -d "PR approved: ${{ github.event.pull_request.title }} (${{ github.event.pull_request.html_url }})" \
+            -d "PR [${{ github.event.label.name }}]: ${{ github.event.pull_request.title }} (${{ github.event.pull_request.html_url }})" \
             "$NTFY_URL"
