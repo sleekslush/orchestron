@@ -898,7 +898,7 @@ describe('Dual prompt selection', () => {
         {
           id: 'step_b', name: 'B', section: 'x', harness: 'fake', prompt: 'B',
           goal: { description: 'done', strategy: 'llm_judge' },
-          transitions: [{ to: 'step_a', on: 'failure' }, { to: '__end__', on: 'success' }],
+          transitions: [{ to: 'step_a', on: 'rejection' }, { to: '__end__', on: 'success' }],
         },
       ],
       program: { maxMovements: 5 },
@@ -1101,6 +1101,146 @@ describe('Dual prompt selection', () => {
     const state = await conductor.getState();
     expect(state.usage.spend).toBeUndefined();
     expect(state.usage.tokens).toBe(100);
+  });
+
+  it('marks movement as rejected when harness succeeds but goal not achieved', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'reject-movement',
+      name: 'Reject Movement',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }, { to: '__fail__', on: 'rejection' }],
+        },
+      ],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({
+        defaultResult: { achieved: false, confidence: 0, summary: 'reject', evidence: '' },
+      }),
+    });
+    const conductor = await hall.createConcert('reject-movement');
+    await conductor.start();
+    // The concert itself fails (no success path out), but the
+    // movement record is `rejected`, not `failed`.
+    expect(conductor.status).toBe('failed');
+    const state = await conductor.getState();
+    expect(state.history[0].status).toBe('rejected');
+    expect(state.history[0].goalEvaluation.achieved).toBe(false);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    expect(events.some((e) => e.type === 'movement:rejected')).toBe(true);
+    expect(events.some((e) => e.type === 'movement:failed')).toBe(false);
+  });
+
+  it('routes rejection through a `rejection` transition, distinct from failure', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'reject-route',
+      name: 'Reject Route',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [
+            { to: '__end__', on: 'success' },
+            { to: 'refine', on: 'rejection' },
+            { to: '__fail__', on: 'failure' },
+          ],
+        },
+        {
+          id: 'refine', name: 'Refine', section: 'x', harness: 'fake',
+          prompt: 'Refine',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({
+        perMovement: {
+          step_a: { achieved: false, confidence: 0, summary: 'reject', evidence: '' },
+          refine: { achieved: true, confidence: 1, summary: 'ok', evidence: '' },
+        },
+      }),
+    });
+    const conductor = await hall.createConcert('reject-route');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    const state = await conductor.getState();
+    // step_a was rejected (not failed) and routed to the refinement movement.
+    expect(state.history[0].status).toBe('rejected');
+    expect(state.history[1].movementId).toBe('refine');
+    expect(state.history[1].status).toBe('completed');
+  });
+
+  it('retryOnRejection retries on goal rejection and recovers', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'reject-retry',
+      name: 'Reject Retry',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          retryOnRejection: true,
+          budget: { maxRetries: 2 },
+          transitions: [{ to: '__end__', on: 'success' }, { to: '__fail__', on: 'rejection' }],
+        },
+      ],
+      program: {},
+    });
+    // First attempt is rejected by the evaluator, subsequent attempts succeed.
+    let attempts = 0;
+    const evaluator = {
+      async evaluate() {
+        attempts++;
+        if (attempts === 1) {
+          return { achieved: false, confidence: 0, summary: 'rejected', evidence: '' };
+        }
+        return { achieved: true, confidence: 1, summary: 'ok', evidence: '' };
+      },
+    };
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator,
+    });
+    const conductor = await hall.createConcert('reject-retry');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    const state = await conductor.getState();
+    // Two attempts happened (initial + one rejection retry); final is completed
+    // and spend is accumulated across both.
+    expect(attempts).toBe(2);
+    expect(state.history[0].status).toBe('completed');
+    expect(state.usage.spend).toBe(20);
+    expect(state.usage.tokens).toBe(200);
   });
 
   it('program budget enforced with retryOnFailure', async () => {

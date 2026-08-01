@@ -63,7 +63,8 @@ A valid score requires only:
 | `goal` | Yes | object | `{ description: string, strategy: "llm_judge" }`. The evaluator uses this to judge success. |
 | `transitions` | Yes | array | Array of `{ to, on }` objects defining what happens next. |
 | `budget` | No | object | Movement-level budget overrides. `{ maxSpendDollars?, maxRetries?, timeoutMs? }`. |
-| `retryOnFailure` | No | boolean | If `true`, retry the movement on failure up to `budget.maxRetries` (default `2`). |
+| `retryOnFailure` | No | boolean | If `true`, retry the movement on a technical execution failure (harness/adapter error, timeout, crash) up to `budget.maxRetries` (default `2`). Does **not** retry goal rejections. |
+| `retryOnRejection` | No | boolean | If `true`, retry the movement when the harness produced a valid output but the evaluator judged the goal was not achieved (a rejection) up to `budget.maxRetries` (default `2`). Independent of `retryOnFailure`. |
 | `subscore` | No | object | Run another score as a child concert. `{ scoreId: string, contextMapping: Record<string, string> }`. |
 
 ## Per-Harness Model Configuration
@@ -185,8 +186,9 @@ Each transition is `{ to, on }`:
 | `on` value | Meaning |
 |------------|---------|
 | `success` | Movement completed and goal was achieved. |
-| `failure` | Movement failed or goal was not achieved. |
-| `any` | Wildcard: matches either `success` or `failure`. |
+| `failure` | A technical execution failure (harness/adapter error, timeout, crash) — the prompt/model combination itself broke. |
+| `rejection` | The harness produced a valid output but the evaluator judged the goal was not achieved. |
+| `any` | Wildcard: matches `success`, `failure`, or `rejection`. |
 
 | `to` value | Meaning |
 |------------|---------|

@@ -220,6 +220,14 @@ export function rowToEvent(row: EventRow): ConcertEvent {
         error: isObject(parsed.error) ? (parsed.error as unknown as SerializedError) : { code: 'UNKNOWN', message: 'Unknown', retryable: false },
         retryCount: safeNumber(parsed.retryCount),
       };
+    case 'movement:rejected':
+      return {
+        type: 'movement:rejected',
+        ...base,
+        movementId: safeString(parsed.movementId),
+        result: isObject(parsed.result) ? (parsed.result as unknown as MovementRecord) : ({} as unknown as MovementRecord),
+        retryCount: safeNumber(parsed.retryCount),
+      };
     case 'constraint:breached':
       return {
         type: 'constraint:breached',
