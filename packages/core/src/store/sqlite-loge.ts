@@ -39,7 +39,8 @@ const SCHEMA_SQL = `
         parent_concert_id TEXT,
         child_concert_ids TEXT NOT NULL DEFAULT '[]',
         nesting_depth INTEGER,
-        explicit_harness TEXT
+        explicit_harness TEXT,
+        worktree TEXT
       );
 
       CREATE TABLE IF NOT EXISTS movements (
@@ -131,6 +132,9 @@ export class SqliteLoge implements ConcertStore {
     if (!concertColumns.some((col) => col.name === 'explicit_harness')) {
       this.db.exec(`ALTER TABLE concerts ADD COLUMN explicit_harness TEXT`);
     }
+    if (!concertColumns.some((col) => col.name === 'worktree')) {
+      this.db.exec(`ALTER TABLE concerts ADD COLUMN worktree TEXT`);
+    }
     const sessionTraceColumns = this.db
       .prepare(`PRAGMA table_info(session_traces)`)
       .all() as Array<{ name: string }>;
@@ -146,8 +150,8 @@ export class SqliteLoge implements ConcertStore {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO concerts
         (id, score_id, score_yaml, status, started_at, completed_at, current_movement,
-         context, usage, triggered_by, parent_concert_id, child_concert_ids, nesting_depth, explicit_harness)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         context, usage, triggered_by, parent_concert_id, child_concert_ids, nesting_depth, explicit_harness, worktree)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       concert.id,
@@ -164,6 +168,7 @@ export class SqliteLoge implements ConcertStore {
       JSON.stringify(concert.childConcertIds),
       concert.nestingDepth ?? null,
       concert.explicitHarness ?? null,
+      concert.worktree ? JSON.stringify(concert.worktree) : null,
     );
 
     this.db.prepare('DELETE FROM movements WHERE concert_id = ?').run(concert.id);
@@ -204,6 +209,10 @@ export class SqliteLoge implements ConcertStore {
     if (concert.nestingDepth !== undefined) {
       fields.push('nesting_depth = ?');
       values.push(concert.nestingDepth);
+    }
+    if (concert.worktree !== undefined) {
+      fields.push('worktree = ?');
+      values.push(concert.worktree ? JSON.stringify(concert.worktree) : null);
     }
 
     if (fields.length === 0) return;

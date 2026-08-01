@@ -462,3 +462,43 @@ describe('PiAdapter', () => {
     });
   });
 });
+
+describe('PiAdapter cwd', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createAgentSessionMock.mockResolvedValue({ session: mockSession, extensionsResult: {} });
+    modelRuntimeCreateMock.mockResolvedValue(mockModelRuntime);
+  });
+
+  it('passes cwd to createAgentSession for an ephemeral session', async () => {
+    mockSession.prompt.mockResolvedValue(undefined);
+    const adapter = new PiAdapter();
+
+    await adapter.execute('hello', { shared: {} }, { cwd: '/worktree/path' });
+
+    expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+    const sessionOptions = (createAgentSessionMock as Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(sessionOptions.cwd).toBe('/worktree/path');
+  });
+
+  it('passes cwd to createAgentSession for a pooled session', async () => {
+    mockSession.prompt.mockResolvedValue(undefined);
+    const adapter = new PiAdapter();
+
+    await adapter.execute('hello', { shared: {} }, { sessionId: 'c1:m1', cwd: '/worktree/path' });
+
+    expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+    const sessionOptions = (createAgentSessionMock as Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(sessionOptions.cwd).toBe('/worktree/path');
+  });
+
+  it('does not pass cwd when none is provided', async () => {
+    mockSession.prompt.mockResolvedValue(undefined);
+    const adapter = new PiAdapter();
+
+    await adapter.execute('hello', { shared: {} });
+
+    const sessionOptions = (createAgentSessionMock as Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(sessionOptions.cwd).toBeUndefined();
+  });
+});

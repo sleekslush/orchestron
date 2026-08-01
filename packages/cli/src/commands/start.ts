@@ -46,15 +46,22 @@ function printLiveEvent(event: ConcertEvent): void {
   }
 }
 
+export interface StartWorktreeOptions {
+  baseBranch?: string;
+  keep?: boolean;
+}
+
 export async function startCommandHandler(
   orchestron: Orchestron,
   scoreId: string,
   context: Record<string, unknown>,
   json: boolean,
+  worktree?: StartWorktreeOptions | undefined,
 ): Promise<void> {
   const conductor = await orchestron.hall.createConcert(scoreId, {
     initialContext: context,
     triggeredBy: 'cli',
+    ...(worktree ? { worktree } : {}),
   });
 
   console.error(`Concert ID: ${conductor.concertId}`);

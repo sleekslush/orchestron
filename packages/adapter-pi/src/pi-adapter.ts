@@ -42,6 +42,8 @@ export class PiAdapter implements HarnessAdapter {
   private excludeTools: string[] | undefined;
   private sessionPool: SessionPool<PiSessionData>;
   private modelRuntime: ModelRuntime | undefined;
+  /** Working directory per persistent session id (from execute options). */
+  private sessionCwds = new Map<string, string>();
 
   constructor(config: PiAdapterConfig = {}) {
     this.provider = config.provider;
@@ -49,7 +51,7 @@ export class PiAdapter implements HarnessAdapter {
     this.tools = config.tools;
     this.excludeTools = config.excludeTools;
     this.sessionPool = new SessionPool(
-      () => this.createPiSession(),
+      (sessionId) => this.createPiSession(undefined, this.sessionCwds.get(sessionId)),
       (data) => Promise.resolve(data.session.dispose()),
     );
   }
@@ -81,6 +83,7 @@ export class PiAdapter implements HarnessAdapter {
 
     try {
       if (options?.sessionId) {
+        if (options.cwd) this.sessionCwds.set(options.sessionId, options.cwd);
         const existing = await this.sessionPool.getOrCreate(options.sessionId);
         session = existing.session;
         if (thinkingLevel) {
@@ -88,7 +91,7 @@ export class PiAdapter implements HarnessAdapter {
         }
       } else {
         ownSession = true;
-        const fresh = await this.createPiSession(thinkingLevel);
+        const fresh = await this.createPiSession(thinkingLevel, options?.cwd);
         session = fresh.session;
       }
 
@@ -228,6 +231,7 @@ export class PiAdapter implements HarnessAdapter {
   }
 
   async disposeSession(sessionId: string): Promise<void> {
+    this.sessionCwds.delete(sessionId);
     await this.sessionPool.disposeSession(sessionId);
   }
 
@@ -347,7 +351,7 @@ export class PiAdapter implements HarnessAdapter {
     return value;
   }
 
-  private async createPiSession(thinkingLevel?: ThinkingLevel): Promise<PiSessionData> {
+  private async createPiSession(thinkingLevel?: ThinkingLevel, cwd?: string): Promise<PiSessionData> {
     const modelRuntime = await this.ensureModelRuntime();
 
     const sessionOptions: Parameters<typeof createAgentSession>[0] = {
@@ -356,6 +360,9 @@ export class PiAdapter implements HarnessAdapter {
       modelRuntime,
     };
 
+    if (cwd !== undefined) {
+      sessionOptions.cwd = cwd;
+    }
     if (thinkingLevel !== undefined) {
       sessionOptions.thinkingLevel = thinkingLevel;
     }

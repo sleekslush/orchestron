@@ -21,6 +21,26 @@ export function startConcertTool(getOrchestron: () => Promise<import('@orchestro
           description: 'Optional explicit harness to use for the concert. Overrides the score\'s default harness.',
         }),
       ),
+      cwd: Type.Optional(
+        Type.String({
+          description: 'Optional working directory for the concert (tool calls land here). Defaults to the current working directory.',
+        }),
+      ),
+      worktree: Type.Optional(
+        Type.Union([
+          Type.Boolean(),
+          Type.Object({
+            baseBranch: Type.Optional(
+              Type.String({ description: "Base branch for the worktree (default: score metadata.baseBranch or 'origin/main')" }),
+            ),
+            keep: Type.Optional(
+              Type.Boolean({ description: 'Keep the worktree after the concert finishes' }),
+            ),
+          }),
+        ], {
+          description: 'Run the concert in an isolated git worktree',
+        }),
+      ),
     }),
     promptSnippet: 'Start an Orchestron workflow concert from a registered score',
     promptGuidelines: [

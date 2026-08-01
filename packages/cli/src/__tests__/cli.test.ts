@@ -11,6 +11,7 @@ import { statusCommandHandler } from '../commands/status.js';
 import { listCommandHandler } from '../commands/list.js';
 import { scoresCommandHandler } from '../commands/scores.js';
 import { modelsCommandHandler } from '../commands/models.js';
+import { worktreeCommandHandler } from '../commands/worktree.js';
 
 const simpleScore: Score = {
   id: 'cli-test',
@@ -845,5 +846,37 @@ describe('CLI commands', () => {
     const output = logs.join('\n');
     expect(output).not.toContain('$0.000000');
     expect(output).toContain('Usage: unknown / 50 tokens');
+  });
+
+  it('lists concert worktrees', async () => {
+    const orchestron = await createTestOrchestron(dir);
+    try {
+      await orchestron.store.saveConcert({
+        id: 'wt-concert',
+        scoreId: 'cli-test',
+        status: 'running',
+        startedAt: new Date(),
+        currentMovement: null,
+        history: [],
+        context: { shared: {} },
+        usage: {},
+        triggeredBy: 'cli',
+        childConcertIds: [],
+        worktree: { path: '/tmp/foo-wt', branch: 'orchestron/wt-x', baseDir: '/tmp', keep: true },
+      }, 'yaml');
+
+      const { logs, restore } = captureOutput();
+      try {
+        await worktreeCommandHandler(orchestron, false, false);
+      } finally {
+        restore();
+      }
+
+      expect(logs.some((l) => l.includes('wt-concert'))).toBe(true);
+      expect(logs.some((l) => l.includes('orchestron/wt-x'))).toBe(true);
+      expect(logs.some((l) => l.includes('/tmp/foo-wt'))).toBe(true);
+    } finally {
+      orchestron.store.close();
+    }
   });
 });

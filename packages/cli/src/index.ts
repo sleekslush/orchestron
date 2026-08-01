@@ -11,6 +11,7 @@ import { statusCommandHandler } from './commands/status.js';
 import { listCommandHandler } from './commands/list.js';
 import { scoresCommandHandler } from './commands/scores.js';
 import { modelsCommandHandler } from './commands/models.js';
+import { worktreeCommandHandler } from './commands/worktree.js';
 import { wantsJson } from './output.js';
 
 function safeAction<T extends unknown[]>(
@@ -48,12 +49,26 @@ const program = new Command()
 program
   .command('start <score-id>')
   .description('Start a new concert from a score')
+  .option('--worktree', 'Run the concert in an isolated git worktree')
+  .option('--worktree-base <branch>', "Base branch for the worktree (default: score metadata.baseBranch or 'origin/main')")
+  .option('--worktree-keep', 'Keep the worktree after the concert finishes (for debugging)')
   .allowUnknownOption()
   .action(safeAction(async (scoreId: string, _options: unknown, command: Command) => {
     const { parseContextArgs } = await import('./context.js');
     const context = parseContextArgs(process.argv);
+    const opts = command.opts() as {
+      worktree?: boolean;
+      worktreeBase?: string;
+      worktreeKeep?: boolean;
+    };
+    if (opts.worktree !== true && (opts.worktreeBase !== undefined || opts.worktreeKeep === true)) {
+      console.error('warning: --worktree-base/--worktree-keep have no effect without --worktree');
+    }
+    const worktree = opts.worktree === true
+      ? { baseBranch: opts.worktreeBase, keep: opts.worktreeKeep === true }
+      : undefined;
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
-      startCommandHandler(orchestron, scoreId, context, wantsJson(command)),
+      startCommandHandler(orchestron, scoreId, context, wantsJson(command), worktree),
     );
   }));
 
@@ -135,6 +150,17 @@ program
   .action(safeAction(async (harness: string | undefined, _options: unknown, command: Command) => {
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
       modelsCommandHandler(orchestron, harness, wantsJson(command)),
+    );
+  }));
+
+program
+  .command('worktree')
+  .description('List concert git worktrees and clean orphaned ones')
+  .option('--clean', 'Remove worktrees for finished concerts that were not kept')
+  .action(safeAction(async (_options: unknown, command: Command) => {
+    const opts = command.opts() as { clean?: boolean };
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      worktreeCommandHandler(orchestron, opts.clean === true, wantsJson(command)),
     );
   }));
 
