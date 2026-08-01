@@ -153,7 +153,9 @@ async function resolveAdapterFor(
   if (source instanceof Map) {
     const adapter = source.get(name);
     if (!adapter) {
-      throw new Error(`No adapter registered for harness '${name}'`);
+      throw new Error(
+        `No adapter registered for harness '${name}'. Registered: ${Array.from(source.keys()).join(', ') || 'none'}.`,
+      );
     }
     return adapter;
   }
@@ -184,7 +186,9 @@ class LazyAdapterResolver implements HarnessAdapterResolver {
         ({ OpencodeAdapter: Adapter } = await import('@orchestron/adapter-opencode'));
         break;
       default:
-        throw new Error(`No adapter registered for harness '${name}'`);
+        throw new Error(
+          `No adapter registered for harness '${name}'. Registered: ${Array.from(this.adapters.keys()).join(', ') || 'none'}.`,
+        );
     }
 
     const adapter = new Adapter();

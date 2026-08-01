@@ -504,7 +504,7 @@ describe('CLI commands', () => {
     });
 
     await expect(modelsCommandHandler(orchestron, 'nope', false)).rejects.toThrow(
-      "No adapter registered for harness 'nope'",
+      /No adapter registered for harness 'nope'\. Registered: (opencode, pi|pi, opencode)\./,
     );
     orchestron.store.close();
   });
@@ -539,6 +539,39 @@ describe('CLI commands', () => {
 
     const parsed = JSON.parse(logs.join('\n'));
     expect(parsed).toEqual([{ harness: 'stub', models: [] }]);
+  });
+
+  it('shows "(no models available)" in human output for an adapter without models', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const stubAdapter: HarnessAdapter = {
+      type: 'stub',
+      async execute() {
+        return { output: 'ok', summary: 'ok', usage: { spend: 0, tokens: 0 } };
+      },
+    };
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['stub', stubAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'stub',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, 'stub', false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const output = logs.join('\n');
+    expect(output).toContain('stub:');
+    expect(output).toContain('(no models available)');
   });
 
   it('continues listing other harnesses when one harness fails to list models', async () => {
