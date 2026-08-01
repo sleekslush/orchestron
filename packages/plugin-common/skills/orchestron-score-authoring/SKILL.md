@@ -39,12 +39,14 @@ Use this skill when the user wants to create, edit, run, or manage an Orchestron
 Model names differ between harnesses. When authoring scores:
 
 - **Check the harness first.** A movement's `harness` field determines which model namespace applies. Pi uses Pi built-in model IDs; Opencode uses Opencode server model IDs.
+- **Discover models with `orchestron models`.** Run `orchestron models` (or `orchestron models <harness>` for a single harness) to list valid `(provider, model)` pairs instead of guessing.
 - **Use per-harness model config for cross-harness scores.** When a score may run on multiple harnesses, use the per-harness map form:
   ```yaml
   model:
     pi: { provider: "anthropic", model: "claude-sonnet-4.5" }
     opencode: { provider: "opencode", model: "claude-opus-4-7" }
   ```
+- **Control effort with per-harness `options`.** Add `options` to a per-harness model entry to control effort/thinking: `options: { thinkingLevel: "high" }` for Pi, `options: { variant: "effort-high" }` for Opencode (variant must be preconfigured on the opencode server). See the yaml reference for valid values.
 - **Use flat strings for single-harness scores.** When the harness is fixed, a flat string is simpler:
   ```yaml
   harness: pi

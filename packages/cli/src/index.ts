@@ -10,6 +10,7 @@ import {
 import { statusCommandHandler } from './commands/status.js';
 import { listCommandHandler } from './commands/list.js';
 import { scoresCommandHandler } from './commands/scores.js';
+import { modelsCommandHandler } from './commands/models.js';
 import { wantsJson } from './output.js';
 
 function safeAction<T extends unknown[]>(
@@ -123,6 +124,15 @@ program
     const opts = command.opts();
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
       scoresCommandHandler(orchestron, opts.validate === true, wantsJson(command)),
+    );
+  }));
+
+program
+  .command('models [harness]')
+  .description('List available models for all harnesses, or a single harness')
+  .action(safeAction(async (harness: string | undefined, _options: unknown, command: Command) => {
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      modelsCommandHandler(orchestron, harness, wantsJson(command)),
     );
   }));
 

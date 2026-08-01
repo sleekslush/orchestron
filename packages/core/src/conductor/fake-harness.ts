@@ -1,4 +1,4 @@
-import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, ProgressUpdate } from '../types/adapter.js';
+import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo, ProgressUpdate } from '../types/adapter.js';
 import type { ConcertContext } from '../types/concert.js';
 import { HarnessError } from '../types/errors.js';
 
@@ -18,12 +18,18 @@ export interface FakeHarnessConfig {
   defaultResponse?: FakeHarnessScenario;
   perMovement?: Record<string, FakeHarnessScenario>;
   globalDelayMs?: number;
+  /** Models reported by listModels(). Omit to keep the adapter unable to enumerate. */
+  models?: HarnessModelInfo[];
 }
 
 export class FakeHarnessAdapter implements HarnessAdapter {
   readonly type = 'fake';
 
   constructor(private config: FakeHarnessConfig) {}
+
+  async listModels(): Promise<HarnessModelInfo[]> {
+    return this.config.models ?? [];
+  }
 
   async execute(
     _prompt: string,

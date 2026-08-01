@@ -34,7 +34,7 @@ A valid score requires only:
 | `startMovement` | Yes | string | `id` of the first movement to run. |
 | `program` | No | object | Execution constraints and global settings. All sub-fields are optional. Omit entirely to use defaults. |
 | `evaluator` | No | object | Configures the evaluator that judges whether movement goals are achieved. All sub-fields are optional. |
-| `models` | No | object | Score-level model defaults keyed by harness type (e.g., `pi`, `opencode`). Each entry is `{ provider: string, model: string }`. Movements inherit these unless they specify their own `model`. See [Per-Harness Model Configuration](#per-harness-model-configuration). |
+| `models` | No | object | Score-level model defaults keyed by harness type (e.g., `pi`, `opencode`). Each entry is `{ provider: string, model: string, options?: object }`. Movements inherit these unless they specify their own `model`. See [Per-Harness Model Configuration](#per-harness-model-configuration). |
 | `movements` | Yes | array | Non-empty list of movements. |
 | `metadata` | No | object | Arbitrary key-value data attached to the score. |
 
@@ -56,7 +56,7 @@ A valid score requires only:
 | `section` | Yes | string | Logical grouping (e.g., `planning`, `execution`, `review`, `delivery`). |
 | `description` | No | string | Brief explanation of the movement's purpose. |
 | `harness` | No | string | Harness to execute the movement. Defaults to the plugin's `defaultHarness` (usually `pi`). |
-| `model` | No | string \| object | Model to use for this movement. **Flat string** (backward-compatible): used for all harnesses. **Per-harness map**: keyed by harness type (e.g., `pi`, `opencode`), each with `provider` and `model` fields. The conductor selects the entry matching the movement's resolved harness. |
+| `model` | No | string \| object | Model to use for this movement. **Flat string** (backward-compatible): used for all harnesses. **Per-harness map**: keyed by harness type (e.g., `pi`, `opencode`), each with `provider`, `model`, and optional `options` fields. The conductor selects the entry matching the movement's resolved harness. |
 | `provider` | No | string | Provider name. Only used when `model` is a flat string. |
 | `prompt` | No | string \| object | The prompt text. Supports templating. Optional when the movement does not need a prompt (e.g., subscores). |
 | `output` | No | object | Output configuration. Defaults to `{ mode: "text" }`. Use `structured` with a JSON Schema when downstream movements need predictable, machine-readable output. |
@@ -123,10 +123,30 @@ movements:
 3. Score-level `models` map (selected by harness type)
 4. Nothing — the harness adapter uses its own default
 
+### Per-Harness Options (effort / thinking level)
+
+Each per-harness model entry accepts an `options` map that is passed through to the harness adapter on every movement execution. It is structural pass-through — the score layer only checks that it is a plain object; each adapter decides which keys it honors:
+
+| Key | Harness | Meaning |
+|-----|---------|---------|
+| `thinkingLevel` | `pi` | Pi thinking level. Valid values: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Applied at session creation and re-applied with `setThinkingLevel` on reused sessions, so per-movement toggling works. |
+| `variant` | `opencode` | Named model variant forwarded to the opencode server on each prompt. The variant must be preconfigured on the server (effort levels live in provider model `options`/`variants` in the server config — the SDK only forwards the variant name per prompt). |
+
+```yaml
+models:
+  pi: { provider: "anthropic", model: "claude-opus-4-7", options: { thinkingLevel: "high" } }
+  opencode: { provider: "anthropic", model: "claude-opus-4-7", options: { variant: "effort-high" } }
+```
+
+Unknown `options` keys are ignored by the adapters.
+
+When both a movement-level entry and a score-level `models` entry apply, the movement-level entry wins entirely — its `options` replace the score-level ones, they are not merged (matching the model/provider precedence above).
+
 ### How to determine the right model per harness
 
-- **Pi**: Use `pi --list-models` to see available models. Provider IDs are Pi built-in names (`openai`, `anthropic`, `google`, `deepseek`, etc.). Model IDs are Pi built-in model names (`gpt-5`, `claude-sonnet-4.5`, etc.).
-- **Opencode**: Use `opencode models` to list available models (optionally filtered by provider: `opencode models <provider>`), or the TUI model picker. Provider and model IDs come from the Opencode server's registry.
+- Run `orchestron models` to list available `(provider, model)` pairs for every registered harness, or `orchestron models <harness>` for a single harness. Add `--json` for machine-readable output. A harness whose listing fails (e.g. the opencode server is unreachable) is reported per-harness (`(error: ...)` in human output, an `error` field in JSON) without aborting the rest of the listing.
+- **Pi**: `orchestron models pi` (equivalent to `pi --list-models`). Provider IDs are Pi built-in names (`openai`, `anthropic`, `google`, `deepseek`, etc.). Model IDs are Pi built-in model names (`gpt-5`, `claude-sonnet-4.5`, etc.).
+- **Opencode**: `orchestron models opencode` (equivalent to `opencode models`). Provider and model IDs come from the Opencode server's registry.
 
 ## Prompt Templating
 

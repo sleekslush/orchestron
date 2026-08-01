@@ -1,15 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeHarnessAdapter, FakeEvaluator } from '@orchestron/core';
 import type { Score, HarnessAdapter, HarnessResponse, ConcertContext, OutputConfig } from '@orchestron/core';
-import { createOrchestron } from '../orchestron.js';
+import { createOrchestron, withOrchestron } from '../orchestron.js';
 import { startCommandHandler } from '../commands/start.js';
 import { pauseCommandHandler, resumeCommandHandler } from '../commands/lifecycle.js';
 import { statusCommandHandler } from '../commands/status.js';
 import { listCommandHandler } from '../commands/list.js';
 import { scoresCommandHandler } from '../commands/scores.js';
+import { modelsCommandHandler } from '../commands/models.js';
 
 const simpleScore: Score = {
   id: 'cli-test',
@@ -402,5 +403,273 @@ describe('CLI commands', () => {
     }
 
     expect(logs.some((l) => l.includes('Status:  completed'))).toBe(true);
+  });
+
+  it('lists models for all registered harnesses', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok', usage: { spend: 1, tokens: 1 } },
+      models: [
+        { provider: 'anthropic', model: 'claude-3' },
+        { provider: 'openai', model: 'gpt-4o' },
+      ],
+    });
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, undefined, false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    expect(logs.some((l) => l.includes('fake: anthropic/claude-3'))).toBe(true);
+    expect(logs.some((l) => l.includes('fake: openai/gpt-4o'))).toBe(true);
+  });
+
+  it('lists models for a single harness', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', new FakeHarnessAdapter({ models: [{ provider: 'x', model: 'y' }] })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, 'fake', false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    expect(logs.some((l) => l.includes('fake: x/y'))).toBe(true);
+  });
+
+  it('lists models as JSON', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', new FakeHarnessAdapter({ models: [{ provider: 'x', model: 'y' }] })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, undefined, true);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const parsed = JSON.parse(logs.join('\n'));
+    expect(parsed).toEqual([{ harness: 'fake', models: [{ provider: 'x', model: 'y' }] }]);
+  });
+
+  it('reports an error for an unknown harness in models command', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    // Default resolver path — the one the `orchestron` binary actually uses.
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+    });
+
+    await expect(modelsCommandHandler(orchestron, 'nope', false)).rejects.toThrow(
+      /No adapter registered for harness 'nope'\. Registered: (opencode, pi|pi, opencode)\./,
+    );
+    orchestron.store.close();
+  });
+
+  it('lists no models for an adapter that cannot enumerate them', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const stubAdapter: HarnessAdapter = {
+      type: 'stub',
+      async execute() {
+        return { output: 'ok', summary: 'ok', usage: { spend: 0, tokens: 0 } };
+      },
+    };
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['stub', stubAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'stub',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, 'stub', true);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const parsed = JSON.parse(logs.join('\n'));
+    expect(parsed).toEqual([{ harness: 'stub', models: [] }]);
+  });
+
+  it('shows "(no models available)" in human output for an adapter without models', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const stubAdapter: HarnessAdapter = {
+      type: 'stub',
+      async execute() {
+        return { output: 'ok', summary: 'ok', usage: { spend: 0, tokens: 0 } };
+      },
+    };
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['stub', stubAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'stub',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, 'stub', false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const output = logs.join('\n');
+    expect(output).toContain('stub: (no models available)');
+  });
+
+  it('continues listing other harnesses when one harness fails to list models', async () => {
+    class FailingListHarnessAdapter extends FakeHarnessAdapter {
+      async listModels(): Promise<never> {
+        throw new Error('catalog unavailable');
+      }
+    }
+
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([
+        ['good', new FakeHarnessAdapter({ models: [{ provider: 'anthropic', model: 'claude-3' }] })],
+        ['bad', new FailingListHarnessAdapter({})],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'good',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, undefined, true);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const parsed = JSON.parse(logs.join('\n'));
+    const good = parsed.find((e: { harness: string }) => e.harness === 'good');
+    const bad = parsed.find((e: { harness: string }) => e.harness === 'bad');
+    expect(good.models).toEqual([{ provider: 'anthropic', model: 'claude-3' }]);
+    expect(good.error).toBeUndefined();
+    expect(bad.models).toEqual([]);
+    expect(bad.error).toContain('catalog unavailable');
+  });
+
+  it('shows a per-harness error in human output', async () => {
+    class FailingListHarnessAdapter extends FakeHarnessAdapter {
+      async listModels(): Promise<never> {
+        throw new Error('catalog unavailable');
+      }
+    }
+
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([
+        ['good', new FakeHarnessAdapter({ models: [{ provider: 'anthropic', model: 'claude-3' }] })],
+        ['bad', new FailingListHarnessAdapter({})],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'good',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, undefined, false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const output = logs.join('\n');
+    expect(output).toContain('good: anthropic/claude-3');
+    expect(output).toContain('bad: (error: catalog unavailable)');
+  });
+
+  it('disposes adapters when the orchestron is torn down', async () => {
+    class DisposableFakeHarnessAdapter extends FakeHarnessAdapter {
+      dispose = vi.fn(async () => {});
+    }
+
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const adapter = new DisposableFakeHarnessAdapter({});
+
+    await withOrchestron(
+      {
+        storePath,
+        scoresDirs: [scoresDir],
+        adapters: new Map([['fake', adapter]]),
+        evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+        defaultHarness: 'fake',
+      },
+      async () => {},
+    );
+
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
   });
 });

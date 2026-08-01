@@ -9,9 +9,9 @@ import type { Score, MovementID } from '../types/score.js';
 import type { Concert, ConcertID } from '../types/concert.js';
 
 class CapturingFakeHarnessAdapter extends FakeHarnessAdapter {
-  prompts: { movementId?: string; prompt: string }[] = [];
+  prompts: { movementId?: string; prompt: string; options?: Record<string, unknown> }[] = [];
   async execute(prompt: string, context: any, options?: any) {
-    this.prompts.push({ movementId: options?.movementId, prompt });
+    this.prompts.push({ movementId: options?.movementId, prompt, options: options?.options });
     return super.execute(prompt, context, options);
   }
 }
@@ -2160,5 +2160,168 @@ describe('model resolution', () => {
     const state = await conductor.getState();
     expect(state.history[0].model).toBe('gpt-4o');
     expect(state.history[0].provider).toBe('openai');
+  });
+
+  it('movement-level options fully replace score-level options', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'options-override',
+      name: 'Options Override Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      models: {
+        fake: { provider: 'anthropic', model: 'claude-opus', options: { thinkingLevel: 'low' } },
+      },
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          model: {
+            fake: { provider: 'anthropic', model: 'claude-3', options: { thinkingLevel: 'high' } },
+          },
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('options-override');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    expect(adapter.prompts[0].options).toEqual({ thinkingLevel: 'high' });
+  });
+
+  it('passes movement-level per-harness model options to the adapter', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'movement-options',
+      name: 'Movement Options Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          model: {
+            fake: { provider: 'anthropic', model: 'claude-3', options: { thinkingLevel: 'high' } },
+          },
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('movement-options');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    expect(adapter.prompts[0].options).toEqual({ thinkingLevel: 'high' });
+  });
+
+  it('passes score-level model options to the adapter', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'score-options',
+      name: 'Score Options Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      models: {
+        fake: { provider: 'anthropic', model: 'claude-opus', options: { thinkingLevel: 'low' } },
+      },
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('score-options');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    expect(adapter.prompts[0].options).toEqual({ thinkingLevel: 'low' });
+  });
+
+  it('passes no options when the model config has none', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'no-options',
+      name: 'No Options Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          model: {
+            fake: { provider: 'anthropic', model: 'claude-3' },
+          },
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('no-options');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    expect(adapter.prompts[0].options).toBeUndefined();
   });
 });

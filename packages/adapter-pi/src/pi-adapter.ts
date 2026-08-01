@@ -1,6 +1,5 @@
-import type { HarnessAdapter, HarnessResponse } from '@orchestron/core';
+import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
-import type { OutputConfig } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
 import { HarnessError, dollarsToMicro, tryParseStructuredFromText, SessionPool } from '@orchestron/core';
 import {
@@ -11,6 +10,13 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage, Model, Usage, Api } from '@earendil-works/pi-ai';
+
+const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return typeof value === 'string' && (THINKING_LEVELS as readonly string[]).includes(value);
+}
 
 export interface PiAdapterConfig {
   /** Built-in provider id (e.g. `openai`, `anthropic`). If omitted, Pi selects from settings. */
@@ -54,15 +60,7 @@ export class PiAdapter implements HarnessAdapter {
   async execute(
     prompt: string,
     _context: ConcertContext,
-    options?: {
-      signal?: AbortSignal;
-      output?: OutputConfig;
-      movementId?: string;
-      sessionId?: string;
-      model?: string;
-      provider?: string;
-      onProgress?: (update: import('@orchestron/core').ProgressUpdate) => void;
-    },
+    options?: HarnessAdapterExecuteOptions,
   ): Promise<HarnessResponse> {
     let finalPrompt = prompt;
     if (options?.output?.mode === 'structured' && options.output.schema) {
@@ -76,6 +74,7 @@ export class PiAdapter implements HarnessAdapter {
     // Use model/provider from options (per-movement) if provided, otherwise fall back to config
     const modelId = options?.model ?? this.modelId;
     const provider = options?.provider ?? this.provider;
+    const thinkingLevel = this.extractThinkingLevel(options?.options?.thinkingLevel);
 
     this.resolveModel(provider, modelId);
 
@@ -87,9 +86,12 @@ export class PiAdapter implements HarnessAdapter {
       if (options?.sessionId) {
         const existing = await this.sessionPool.getOrCreate(options.sessionId);
         session = existing.session;
+        if (thinkingLevel) {
+          session.setThinkingLevel(thinkingLevel);
+        }
       } else {
         ownSession = true;
-        const fresh = await this.createPiSession();
+        const fresh = await this.createPiSession(thinkingLevel);
         session = fresh.session;
       }
 
@@ -220,6 +222,11 @@ export class PiAdapter implements HarnessAdapter {
     }
   }
 
+  async listModels(): Promise<HarnessModelInfo[]> {
+    const { modelRegistry } = this.ensureRegistry();
+    return modelRegistry.getAll().map((m) => ({ provider: m.provider, model: m.id }));
+  }
+
   async disposeSession(sessionId: string): Promise<void> {
     await this.sessionPool.disposeSession(sessionId);
   }
@@ -325,7 +332,18 @@ export class PiAdapter implements HarnessAdapter {
     this.model = resolved;
   }
 
-  private async createPiSession(): Promise<PiSessionData> {
+  private extractThinkingLevel(value: unknown): ThinkingLevel | undefined {
+    if (value === undefined) return undefined;
+    if (!isThinkingLevel(value)) {
+      throw new HarnessError(
+        `Invalid Pi thinking level '${String(value)}'. Valid values: ${THINKING_LEVELS.join(', ')}.`,
+        'HARNESS_FAILURE',
+      );
+    }
+    return value;
+  }
+
+  private async createPiSession(thinkingLevel?: ThinkingLevel): Promise<PiSessionData> {
     const { authStorage, modelRegistry } = this.ensureRegistry();
 
     const sessionOptions: Parameters<typeof createAgentSession>[0] = {
@@ -335,6 +353,9 @@ export class PiAdapter implements HarnessAdapter {
       modelRegistry,
     };
 
+    if (thinkingLevel !== undefined) {
+      sessionOptions.thinkingLevel = thinkingLevel;
+    }
     if (this.tools !== undefined) {
       sessionOptions.tools = this.tools;
     }
