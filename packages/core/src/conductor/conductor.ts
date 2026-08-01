@@ -543,7 +543,13 @@ export class Conductor implements IConductor {
 
     for (const childRecord of childConcert.history) {
       if (childRecord.usage.spend || childRecord.usage.tokens) {
-        record.usage.spend = (record.usage.spend ?? 0) + (childRecord.usage.spend ?? 0);
+        // Accumulate spend only when it is measurable; a sub-score whose
+        // spend is unmeasured must not synthesize a numeric 0.
+        const cur = record.usage.spend;
+        const child = childRecord.usage.spend;
+        if (typeof cur === 'number' || typeof child === 'number') {
+          record.usage.spend = (cur ?? 0) + (child ?? 0);
+        }
         record.usage.tokens = (record.usage.tokens ?? 0) + (childRecord.usage.tokens ?? 0);
       }
     }
@@ -839,8 +845,10 @@ export class Conductor implements IConductor {
       if (record.status === 'failed' && movement.retryOnFailure) {
         const maxRetries = movement.budget?.maxRetries ?? 2;
         // Accumulate spend/tokens across all retry attempts so budget
-        // enforcement counts every attempt, not just the final one.
-        let totalSpend = record.usage.spend ?? 0;
+        // enforcement counts every attempt, not just the final one. Spend stays
+        // `undefined` when no attempt reports a cost (unmeasured) rather than
+        // being coerced to 0.
+        let totalSpend: number | undefined = record.usage.spend;
         let totalTokens = record.usage.tokens ?? 0;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           this.emit({
@@ -852,7 +860,10 @@ export class Conductor implements IConductor {
             timestamp: new Date(),
           });
           const retryRecord = await this.executeMovement(movement, previousOutputs, signal);
-          totalSpend += retryRecord.usage.spend ?? 0;
+          totalSpend =
+            totalSpend !== undefined || retryRecord.usage.spend !== undefined
+              ? (totalSpend ?? 0) + (retryRecord.usage.spend ?? 0)
+              : undefined;
           totalTokens += retryRecord.usage.tokens ?? 0;
           if (retryRecord.status === 'completed') {
             Object.assign(record, retryRecord);

@@ -619,7 +619,11 @@ export class OpencodeAdapter implements HarnessAdapter {
    * carrying its own cost/token usage; those per-step figures must be
    * aggregated to report honest totals. When no assistant message in the turn
    * reports a numeric cost, `spend` is left `undefined` (unmeasured) rather
-   * than coerced to zero.
+   * than coerced to zero. If only some messages report a cost (partial
+   * measurement), the defined costs are summed and the unmeasured ones
+   * contribute nothing — so a partially-measured turn is reported as the sum
+   * of its known costs. Token figures are summed whenever any message reports
+   * them.
    */
   private aggregateUsage(
     messages: Array<{ info: Message; parts: Part[] }>,
