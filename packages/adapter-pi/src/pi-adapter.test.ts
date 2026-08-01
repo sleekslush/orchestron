@@ -15,7 +15,7 @@ const createAgentSessionMock = vi.fn() as Mock<
 createAgentSessionMock.mockImplementation(async () => ({ session: mockSession, extensionsResult: {} }));
 
 const registryFindMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
-const registryGetAllMock = vi.fn() as Mock<() => unknown[]>;
+const registryGetAllMock = vi.fn(() => []) as Mock<() => unknown[]>;
 
 const mockRegistry = { find: registryFindMock, getAll: registryGetAllMock };
 
@@ -32,6 +32,9 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
 describe('PiAdapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset registry mocks so tests don't inherit return values from earlier tests.
+    registryFindMock.mockImplementation(() => undefined);
+    registryGetAllMock.mockImplementation(() => []);
     createAgentSessionMock.mockResolvedValue({ session: mockSession, extensionsResult: {} });
   });
 
@@ -307,14 +310,52 @@ describe('PiAdapter', () => {
     expect(mockSession.abort).not.toHaveBeenCalled();
   });
 
-  it('throws HARNESS_FAILURE when model is not found', async () => {
+  it('throws HARNESS_FAILURE when model and provider are unknown', async () => {
     registryFindMock.mockReturnValue(undefined);
+    registryGetAllMock.mockReturnValue([]);
 
     const adapter = new PiAdapter({ provider: 'openai', modelId: 'gpt-4o' });
 
     await expect(adapter.execute('x', { shared: {} })).rejects.toMatchObject({
       code: 'HARNESS_FAILURE',
       message: expect.stringContaining("Unknown Pi model 'gpt-4o' for provider 'openai'"),
+    });
+  });
+
+  it('accepts a model missing from the static catalog when the provider is known (pass-through)', async () => {
+    // Simulates a dynamic/remote catalog model (e.g. 'deepseek/deepseek-v4-flash-0731')
+    // that pi runs but the static built-in catalog doesn't ship. find() misses, but the
+    // provider 'openrouter' is a known registry provider, so the adapter should construct
+    // the model on the fly instead of hard-failing.
+    registryFindMock.mockReturnValue(undefined);
+    registryGetAllMock.mockReturnValue([
+      { id: 'deepseek/deepseek-v4-flash', provider: 'openrouter', name: 'DeepSeek V4 Flash', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1' },
+    ]);
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter({ provider: 'openrouter', modelId: 'deepseek/deepseek-v4-flash-0731' });
+    await adapter.execute('x', { shared: {} });
+
+    const options = createAgentSessionMock.mock.calls[0]?.[0];
+    expect(options!.model).toMatchObject({
+      id: 'deepseek/deepseek-v4-flash-0731',
+      provider: 'openrouter',
+      api: 'openai-completions',
+      baseUrl: 'https://openrouter.ai/api/v1',
+    });
+  });
+
+  it('keeps hard error for unknown provider even though find misses (typo protection)', async () => {
+    registryFindMock.mockReturnValue(undefined);
+    registryGetAllMock.mockReturnValue([
+      { id: 'claude-3', provider: 'anthropic', name: 'Claude 3' },
+    ]);
+
+    const adapter = new PiAdapter({ provider: 'oppnai', modelId: 'gpt-4o' });
+
+    await expect(adapter.execute('x', { shared: {} })).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining("Unknown Pi model 'gpt-4o' for provider 'oppnai'"),
     });
   });
 

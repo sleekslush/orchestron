@@ -323,14 +323,52 @@ export class PiAdapter implements HarnessAdapter {
 
     const { modelRegistry } = this.ensureRegistry();
     const resolved = modelRegistry.find(targetProvider, targetModelId);
-    if (!resolved) {
-      throw new HarnessError(
-        `Unknown Pi model '${targetModelId}' for provider '${targetProvider}'. ` +
-        `Use 'pi --list-models' to see available models.`,
-        'HARNESS_FAILURE',
-      );
+    if (resolved) {
+      this.model = resolved;
+      return;
     }
-    this.model = resolved;
+
+    // Pass-through fallback. pi's interactive runtime accepts dynamic/remote catalog
+    // models (e.g. models fetched from provider APIs and cached in the models-store) that
+    // the static built-in catalog shipped with pi-ai doesn't include. The adapter's plain
+    // ModelRegistry only knows the static catalog (+ models.json), so a valid model pi
+    // happily runs (e.g. 'deepseek/deepseek-v4-flash-0731') would otherwise be rejected
+    // with a hard error. If the provider is a known registry provider, construct the model
+    // on the fly (inheriting the provider's api/baseUrl) and let the provider API validate
+    // the slug — mirroring pi's permissive resolution. Keep hard errors for genuinely
+    // unknown providers so typos are still caught.
+    const fallback = this.buildPassThroughModel(modelRegistry, targetProvider, targetModelId);
+    if (fallback) {
+      this.model = fallback;
+      return;
+    }
+    throw new HarnessError(
+      `Unknown Pi model '${targetModelId}' for provider '${targetProvider}'. ` +
+      `Use 'pi --list-models' to see available models.`,
+      'HARNESS_FAILURE',
+    );
+  }
+
+  /**
+   * Allow models pi itself runs but that aren't in the static catalog. If the provider is
+   * a known registry provider, clone a sibling model (to inherit api/baseUrl/compat etc.)
+   * and override the id, so the request flows to the same provider API which validates the
+   * model slug. Returns undefined for unknown providers (kept as hard errors).
+   */
+  private buildPassThroughModel(
+    modelRegistry: ModelRegistry,
+    provider: string,
+    modelId: string,
+  ): Model<Api> | undefined {
+    const known = this.isKnownProvider(modelRegistry, provider);
+    if (!known) return undefined;
+    const sibling = modelRegistry.getAll().find((m) => m.provider === provider);
+    if (!sibling) return undefined;
+    return { ...sibling, id: modelId, name: modelId };
+  }
+
+  private isKnownProvider(modelRegistry: ModelRegistry, provider: string): boolean {
+    return modelRegistry.getAll().some((m) => m.provider === provider);
   }
 
   private extractThinkingLevel(value: unknown): ThinkingLevel | undefined {
