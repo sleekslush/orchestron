@@ -268,6 +268,8 @@ describe('plugin-common tool functions', () => {
     orchestron.hall = new ConcertHall({
       store: orchestron.store,
       scoreRegistry: orchestron.registry,
+      tracesDir: orchestron.tracesDir,
+      liveEventLog: orchestron.liveEventLog,
       adapters: new Map([
         [
           'fake',
@@ -399,6 +401,8 @@ describe('plugin-common tool functions', () => {
     orchestron.hall = new ConcertHall({
       store: orchestron.store,
       scoreRegistry: orchestron.registry,
+      tracesDir: orchestron.tracesDir,
+      liveEventLog: orchestron.liveEventLog,
       adapters: new Map([
         [
           'fake',

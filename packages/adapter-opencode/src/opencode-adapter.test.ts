@@ -7,10 +7,13 @@ const mockModelList = vi.fn();
 const mockClient = {
   session: {
     create: vi.fn(),
-    prompt: vi.fn(),
+    promptAsync: vi.fn(),
     delete: vi.fn(),
     abort: vi.fn(),
     messages: vi.fn(),
+  },
+  event: {
+    subscribe: vi.fn(),
   },
   v2: {
     model: {
@@ -74,12 +77,19 @@ describe('OpencodeAdapter', () => {
     mockClient.session.create.mockResolvedValue({
       data: { id: 'session-1', title: 'test' },
     });
-    mockClient.session.prompt.mockResolvedValue({
-      data: {
-        info: makeAssistantMessage({ cost: 0.00012, tokens: { input: 5, output: 3, total: 8 } }),
-        parts: [makeTextPart('hello')],
-      },
+    mockClient.session.promptAsync.mockResolvedValue({ data: {} });
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: makeAssistantMessage({ cost: 0.00012, tokens: { input: 5, output: 3, total: 8 } }),
+          parts: [makeTextPart('hello')],
+        },
+      ],
     });
+    // Default: event subscription is unavailable, so execute falls back to the
+    // post-hoc session trace (session.messages). Tests exercise the live event
+    // stream by overriding subscribe explicitly.
+    mockClient.event.subscribe.mockRejectedValue(new Error('subscription unavailable'));
     mockClient.session.delete.mockResolvedValue({ data: true });
     mockClient.session.abort.mockResolvedValue({ data: true });
     mockModelList.mockResolvedValue({
@@ -99,7 +109,7 @@ describe('OpencodeAdapter', () => {
 
     expect(createOpencodeClientMock).toHaveBeenCalledWith({ baseUrl: 'http://localhost:4096' });
     expect(mockClient.session.create).toHaveBeenCalledWith({ title: 'ephemeral' });
-    expect(mockClient.session.prompt).toHaveBeenCalledWith(
+    expect(mockClient.session.promptAsync).toHaveBeenCalledWith(
       expect.objectContaining({ sessionID: 'session-1', parts: [{ type: 'text', text: 'hello' }] }),
     );
     expect(mockClient.session.delete).toHaveBeenCalledWith({ sessionID: 'session-1' });
@@ -113,7 +123,7 @@ describe('OpencodeAdapter', () => {
     await adapter.execute('second', { shared: {} }, { sessionId: 'c1:m1' });
 
     expect(mockClient.session.create).toHaveBeenCalledTimes(1);
-    expect(mockClient.session.prompt).toHaveBeenCalledTimes(2);
+    expect(mockClient.session.promptAsync).toHaveBeenCalledTimes(2);
     expect(mockClient.session.delete).not.toHaveBeenCalled();
   });
 
@@ -181,7 +191,7 @@ describe('OpencodeAdapter', () => {
       output: { mode: 'structured', schema },
     });
 
-    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    const prompt = (mockClient.session.promptAsync as Mock).mock.calls[0][0];
     expect(prompt).toMatchObject({
       parts: [{ type: 'text', text: 'do it' }],
       format: { type: 'json_schema', schema },
@@ -189,11 +199,13 @@ describe('OpencodeAdapter', () => {
   });
 
   it('returns structured output from response info.structured', async () => {
-    mockClient.session.prompt.mockResolvedValue({
-      data: {
-        info: makeAssistantMessage({ structured: { ok: true } }),
-        parts: [makeTextPart('{"ok":true}')],
-      },
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: makeAssistantMessage({ structured: { ok: true } }),
+          parts: [makeTextPart('{"ok":true}')],
+        },
+      ],
     });
     const adapter = new OpencodeAdapter();
 
@@ -205,11 +217,13 @@ describe('OpencodeAdapter', () => {
   });
 
   it('parses structured output from a string in info.structured', async () => {
-    mockClient.session.prompt.mockResolvedValue({
-      data: {
-        info: makeAssistantMessage({ structured: '{"ok":true}' }),
-        parts: [makeTextPart('{"ok":true}')],
-      },
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: makeAssistantMessage({ structured: '{"ok":true}' }),
+          parts: [makeTextPart('{"ok":true}')],
+        },
+      ],
     });
     const adapter = new OpencodeAdapter();
 
@@ -221,11 +235,13 @@ describe('OpencodeAdapter', () => {
   });
 
   it('falls back to parsing structured output from text parts when info.structured is missing', async () => {
-    mockClient.session.prompt.mockResolvedValue({
-      data: {
-        info: makeAssistantMessage(),
-        parts: [makeTextPart('```json\n{"ok":true}\n```')],
-      },
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: makeAssistantMessage(),
+          parts: [makeTextPart('```json\n{"ok":true}\n```')],
+        },
+      ],
     });
     const adapter = new OpencodeAdapter();
 
@@ -237,11 +253,13 @@ describe('OpencodeAdapter', () => {
   });
 
   it('falls back to parsing raw JSON object from text parts', async () => {
-    mockClient.session.prompt.mockResolvedValue({
-      data: {
-        info: makeAssistantMessage(),
-        parts: [makeTextPart('Some intro {"ok":true} outro')],
-      },
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: makeAssistantMessage(),
+          parts: [makeTextPart('Some intro {"ok":true} outro')],
+        },
+      ],
     });
     const adapter = new OpencodeAdapter();
 
@@ -266,11 +284,13 @@ describe('OpencodeAdapter', () => {
   });
 
   it('falls back to input+output when total tokens is missing', async () => {
-    mockClient.session.prompt.mockResolvedValue({
-      data: {
-        info: makeAssistantMessage({ cost: 0.0001, tokens: { input: 3, output: 2 } }),
-        parts: [makeTextPart('hi')],
-      },
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: makeAssistantMessage({ cost: 0.0001, tokens: { input: 3, output: 2 } }),
+          parts: [makeTextPart('hi')],
+        },
+      ],
     });
     const adapter = new OpencodeAdapter();
 
@@ -281,7 +301,7 @@ describe('OpencodeAdapter', () => {
 
   it('aborts the session when the signal is aborted', async () => {
     let rejectPrompt: ((err: Error) => void) | undefined;
-    mockClient.session.prompt.mockImplementation(
+    mockClient.session.promptAsync.mockImplementation(
       () =>
         new Promise((_, reject) => {
           rejectPrompt = reject;
@@ -292,7 +312,7 @@ describe('OpencodeAdapter', () => {
     const controller = new AbortController();
     const promise = adapter.execute('slow', { shared: {} }, { signal: controller.signal });
 
-    await vi.waitFor(() => expect(mockClient.session.prompt).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockClient.session.promptAsync).toHaveBeenCalled());
     mockClient.session.abort.mockImplementation(() => {
       rejectPrompt?.(new Error('aborted'));
       return { data: true };
@@ -330,7 +350,7 @@ describe('OpencodeAdapter', () => {
 
     await adapter.execute('x', { shared: {} });
 
-    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    const prompt = (mockClient.session.promptAsync as Mock).mock.calls[0][0];
     expect(prompt.model).toEqual({ providerID: 'anthropic', modelID: 'claude-3' });
   });
 
@@ -339,7 +359,7 @@ describe('OpencodeAdapter', () => {
 
     await adapter.execute('x', { shared: {} });
 
-    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    const prompt = (mockClient.session.promptAsync as Mock).mock.calls[0][0];
     expect(prompt.tools).toEqual({ read: true, edit: true });
   });
 
@@ -427,7 +447,7 @@ describe('OpencodeAdapter', () => {
     await adapter.execute('x', { shared: {} }, { provider: 'anthropic', model: 'claude-3' });
 
     expect(mockModelList).toHaveBeenCalled();
-    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    const prompt = (mockClient.session.promptAsync as Mock).mock.calls[0][0];
     expect(prompt.model).toEqual({ providerID: 'anthropic', modelID: 'claude-3' });
   });
 
@@ -449,7 +469,7 @@ describe('OpencodeAdapter', () => {
     // Should not throw — validation skipped, prompt proceeds normally
     await adapter.execute('x', { shared: {} }, { provider: 'anthropic', model: 'claude-3' });
 
-    expect(mockClient.session.prompt).toHaveBeenCalled();
+    expect(mockClient.session.promptAsync).toHaveBeenCalled();
   });
 
   it('skips model validation when no model is specified', async () => {
@@ -543,7 +563,7 @@ describe('OpencodeAdapter', () => {
 
     await adapter.execute('x', { shared: {} }, { options: { variant: 'effort-high' } });
 
-    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    const prompt = (mockClient.session.promptAsync as Mock).mock.calls[0][0];
     expect(prompt.variant).toBe('effort-high');
   });
 
@@ -552,7 +572,100 @@ describe('OpencodeAdapter', () => {
 
     await adapter.execute('x', { shared: {} });
 
-    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    const prompt = (mockClient.session.promptAsync as Mock).mock.calls[0][0];
     expect(prompt.variant).toBeUndefined();
+  });
+
+  it('streams text deltas and tool calls from the event subscription', async () => {
+    const events = [
+      { type: 'session.next.text.delta', properties: { sessionID: 'session-1', delta: 'Hello ' } },
+      { type: 'session.next.text.delta', properties: { sessionID: 'session-1', delta: 'world' } },
+      { type: 'session.next.tool.called', properties: { sessionID: 'session-1', callID: 'c1', tool: 'read', input: { path: 'a.ts' } } },
+      { type: 'session.next.tool.success', properties: { sessionID: 'session-1', callID: 'c1', result: 'content' } },
+      { type: 'session.next.step.ended', properties: { sessionID: 'session-1' } },
+    ];
+    mockClient.event.subscribe.mockResolvedValue({
+      stream: (async function* () {
+        for (const e of events) yield e;
+      })(),
+    });
+    const adapter = new OpencodeAdapter();
+    const onProgress = vi.fn();
+
+    await adapter.execute('x', { shared: {} }, { onProgress });
+
+    expect(onProgress).toHaveBeenCalledWith({ type: 'text_delta', delta: 'Hello ' });
+    expect(onProgress).toHaveBeenCalledWith({ type: 'text_delta', delta: 'world' });
+    expect(onProgress).toHaveBeenCalledWith({
+      type: 'tool_execution_start',
+      toolName: 'read',
+      args: { path: 'a.ts' },
+    });
+    expect(onProgress).toHaveBeenCalledWith({
+      type: 'tool_execution_end',
+      toolName: 'read',
+      isError: false,
+      result: 'content',
+    });
+  });
+
+  it('reports tool failures from the event subscription', async () => {
+    mockClient.event.subscribe.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.next.tool.failed',
+          properties: { sessionID: 'session-1', callID: 'c1', error: { message: 'boom' } },
+        };
+        yield { type: 'session.next.step.ended', properties: { sessionID: 'session-1' } };
+      })(),
+    });
+    const adapter = new OpencodeAdapter();
+    const onProgress = vi.fn();
+
+    await adapter.execute('x', { shared: {} }, { onProgress });
+
+    expect(onProgress).toHaveBeenCalledWith({
+      type: 'tool_execution_end',
+      toolName: 'unknown',
+      isError: true,
+      error: 'boom',
+    });
+  });
+
+  it('ignores events from other sessions in the event subscription', async () => {
+    const events = [
+      { type: 'session.next.text.delta', properties: { sessionID: 'other', delta: 'ignored' } },
+      { type: 'session.next.step.ended', properties: { sessionID: 'session-1' } },
+    ];
+    mockClient.event.subscribe.mockResolvedValue({
+      stream: (async function* () {
+        for (const e of events) yield e;
+      })(),
+    });
+    const adapter = new OpencodeAdapter();
+    const onProgress = vi.fn();
+
+    await adapter.execute('x', { shared: {} }, { onProgress });
+
+    // Only the step.ended for our session applies; the foreign text delta is dropped.
+    expect(onProgress).not.toHaveBeenCalledWith({ type: 'text_delta', delta: 'ignored' });
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it('fails when the event subscription reports a failed step', async () => {
+    mockClient.event.subscribe.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.next.step.failed',
+          properties: { sessionID: 'session-1', error: { message: 'errored' } },
+        };
+      })(),
+    });
+    const adapter = new OpencodeAdapter();
+
+    await expect(adapter.execute('x', { shared: {} })).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining('errored'),
+    });
   });
 });

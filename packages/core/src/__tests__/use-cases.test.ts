@@ -1,10 +1,19 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SqliteLoge } from '../store/sqlite-loge.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { ConcertHall } from '../hall/concert-hall.js';
 import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
 import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
 import type { Score } from '../types/score.js';
+import type { ConcertHallOptions } from '../hall/concert-hall.js';
+
+function createHall(options: Omit<ConcertHallOptions, 'tracesDir'>): ConcertHall {
+  const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-events-'));
+  return new ConcertHall({ ...options, tracesDir });
+}
 
 // ─── Use Case 1: Linear Plan → Review → End ─────────────────
 
@@ -62,7 +71,7 @@ describe('Use Case: Plan → Review → End', () => {
       },
     });
 
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),
@@ -100,7 +109,7 @@ describe('Use Case: Plan → Review → End', () => {
       },
     });
 
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),
@@ -137,7 +146,7 @@ describe('Use Case: Plan → Review → End', () => {
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 5, tokens: 50 } },
     });
 
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),
@@ -147,7 +156,7 @@ describe('Use Case: Plan → Review → End', () => {
     const conductor = await hall.createConcert('plan-review');
     await conductor.start();
 
-    const events = await store.getEvents(conductor.concertId);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     const eventTypes = events.map(e => e.type);
     expect(eventTypes).toEqual([
       'concert:started',
@@ -224,7 +233,7 @@ describe('Use Case: Structured Output Flow', () => {
       },
     });
 
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),

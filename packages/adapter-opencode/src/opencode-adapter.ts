@@ -14,9 +14,11 @@ import {
 } from '@opencode-ai/sdk/v2';
 import type {
   AssistantMessage,
+  Message,
   OpencodeClient,
   Part,
   Session,
+  V2Event,
 } from '@opencode-ai/sdk/v2';
 
 // --------------------------------------------------------------------------
@@ -149,6 +151,7 @@ export class OpencodeAdapter implements HarnessAdapter {
     let sessionData: OpencodeSessionData | undefined;
     let ownSession = false;
     let abortListener: (() => void) | undefined;
+    const eventController = new AbortController();
 
     try {
       if (options?.sessionId) {
@@ -159,15 +162,6 @@ export class OpencodeAdapter implements HarnessAdapter {
       }
 
       const opencodeSessionId = sessionData.opencodeSessionId;
-
-      if (options?.signal) {
-        abortListener = () => {
-          Promise.resolve(
-            this.client?.session.abort({ sessionID: opencodeSessionId }),
-          ).catch(() => {});
-        };
-        options.signal.addEventListener('abort', abortListener, { once: true });
-      }
 
       const parameters: {
         sessionID: string;
@@ -202,9 +196,21 @@ export class OpencodeAdapter implements HarnessAdapter {
         );
       }
 
-      let result: { data?: { info?: AssistantMessage; parts?: Part[] }; error?: unknown };
+      // Register the abort listener before awaiting promptAsync so an abort can
+      // interrupt a prompt that has not yet returned.
+      if (options?.signal) {
+        abortListener = () => {
+          eventController.abort();
+          Promise.resolve(
+            this.client?.session.abort({ sessionID: opencodeSessionId }),
+          ).catch(() => {});
+        };
+        options.signal.addEventListener('abort', abortListener, { once: true });
+      }
+
+      let promptResult: Awaited<ReturnType<OpencodeClient['session']['promptAsync']>> | undefined;
       try {
-        result = await this.client.session.prompt(parameters);
+        promptResult = await this.client.session.promptAsync(parameters);
       } catch (err) {
         if (options?.signal?.aborted) {
           throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
@@ -219,43 +225,131 @@ export class OpencodeAdapter implements HarnessAdapter {
         throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
       }
 
-      if (result.error) {
+      if ('error' in promptResult && promptResult.error) {
         throw new HarnessError(
-          `Opencode harness execution failed: ${String(result.error)}`,
+          `Opencode harness execution failed: ${String(promptResult.error)}`,
           'HARNESS_FAILURE',
         );
       }
 
-      const data = result.data;
-      if (!data?.info) {
-        throw new HarnessError(
-          'Opencode harness returned empty response',
-          'HARNESS_FAILURE',
+      let eventStream: { stream: AsyncIterable<V2Event> } | undefined;
+      try {
+        const subResult = await this.client.event.subscribe(
+          {},
+          { signal: eventController.signal },
+        );
+        eventStream = subResult as { stream: AsyncIterable<V2Event> };
+      } catch {
+        eventStream = undefined;
+      }
+
+      if (eventStream) {
+        const toolCalls = new Map<string, string>();
+        let completed = false;
+        let failed = false;
+        let failureMessage: string | undefined;
+
+        const consumePromise = (async () => {
+          for await (const raw of eventStream.stream) {
+            if (eventController.signal.aborted) break;
+            const event = raw as V2Event;
+            if (!this.isEventForSession(event, opencodeSessionId)) continue;
+
+            const props = (event as Record<string, unknown>).properties as
+              | Record<string, unknown>
+              | undefined;
+            if (!props) continue;
+
+            switch (event.type) {
+              case 'session.next.text.delta': {
+                const delta = props.delta as string;
+                options?.onProgress?.({ type: 'text_delta', delta });
+                break;
+              }
+              case 'session.next.tool.called': {
+                const toolName = props.tool as string;
+                const callID = props.callID as string;
+                const input = props.input as Record<string, unknown> | undefined;
+                toolCalls.set(callID, toolName);
+                options?.onProgress?.({
+                  type: 'tool_execution_start',
+                  toolName,
+                  args: input,
+                });
+                break;
+              }
+              case 'session.next.tool.success': {
+                const callID = props.callID as string;
+                const toolName = toolCalls.get(callID) ?? 'unknown';
+                const result = props.result ?? props.content;
+                options?.onProgress?.({
+                  type: 'tool_execution_end',
+                  toolName,
+                  isError: false,
+                  result,
+                });
+                break;
+              }
+              case 'session.next.tool.failed': {
+                const callID = props.callID as string;
+                const toolName = toolCalls.get(callID) ?? 'unknown';
+                const error = this.extractOpencodeError(props.error);
+                options?.onProgress?.({
+                  type: 'tool_execution_end',
+                  toolName,
+                  isError: true,
+                  error,
+                });
+                break;
+              }
+              case 'session.next.step.ended':
+                completed = true;
+                eventController.abort();
+                break;
+              case 'session.next.step.failed':
+                failed = true;
+                failureMessage = this.extractOpencodeError(props.error);
+                eventController.abort();
+                break;
+            }
+
+            if (completed || failed) break;
+          }
+        })();
+
+        await consumePromise;
+
+        if (options?.signal?.aborted) {
+          throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
+        }
+        if (failed) {
+          throw new HarnessError(
+            `Opencode harness execution failed: ${failureMessage ?? 'Unknown error'}`,
+            'HARNESS_FAILURE',
+          );
+        }
+        if (!completed) {
+          throw new HarnessError(
+            'Opencode harness event stream ended without completion',
+            'HARNESS_FAILURE',
+          );
+        }
+
+        return await this.waitForFinalResponse(
+          opencodeSessionId,
+          options?.signal,
+          options?.output?.mode === 'structured',
         );
       }
 
-      if (data.info.error) {
-        const errorData = (data.info.error as Record<string, unknown>)?.data;
-        const errorMessage =
-          typeof errorData === 'object' && errorData !== null
-            ? (errorData as Record<string, unknown>).message ?? String(data.info.error)
-            : String(data.info.error);
-        throw new HarnessError(
-          `Opencode harness execution failed: ${errorMessage}`,
-          'HARNESS_FAILURE',
-        );
-      }
-
-      const output = this.extractText(data.parts);
-      let structured = tryParseStructured(data.info.structured);
-      if (!structured && options?.output?.mode === 'structured') {
-        structured = tryParseStructuredFromText(output);
-      }
-      const usage = this.toResourceUsage(data.info);
-      const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
-
-      return { output, structured, summary, usage, model: data.info.modelID, provider: data.info.providerID };
+      // Subscription failed; fall back to the post-hoc session trace.
+      return await this.waitForFinalResponse(
+        opencodeSessionId,
+        options?.signal,
+        options?.output?.mode === 'structured',
+      );
     } finally {
+      eventController.abort();
       if (abortListener && options?.signal) {
         options.signal.removeEventListener('abort', abortListener);
       }
@@ -521,5 +615,92 @@ export class OpencodeAdapter implements HarnessAdapter {
       inputTokens: tokens?.input,
       outputTokens: tokens?.output,
     };
+  }
+
+  private isEventForSession(event: V2Event, sessionId: string): boolean {
+    const props = (event as Record<string, unknown>).properties as
+      | Record<string, unknown>
+      | undefined;
+    return props?.sessionID === sessionId;
+  }
+
+  private extractOpencodeError(error: unknown): string {
+    if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
+      return (error as { message: string }).message;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+
+  private isAssistantMessage(
+    msg: { info: Message; parts: Part[] },
+  ): msg is { info: AssistantMessage; parts: Part[] } {
+    return msg.info.role === 'assistant';
+  }
+
+  private responseFromMessages(
+    messages: Array<{ info: Message; parts: Part[] }>,
+    structuredOutput?: boolean,
+  ): HarnessResponse | undefined {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (!this.isAssistantMessage(msg)) continue;
+
+      const info = msg.info;
+      const parts = msg.parts;
+      const output = this.extractText(parts);
+      if (!output) continue;
+
+      let structured = tryParseStructured(info.structured);
+      if (!structured && structuredOutput) {
+        structured = tryParseStructuredFromText(output);
+      }
+
+      const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
+      return {
+        output,
+        structured,
+        summary,
+        usage: this.toResourceUsage(info),
+        model: info.modelID,
+        provider: info.providerID,
+      };
+    }
+    return undefined;
+  }
+
+  private async waitForFinalResponse(
+    sessionId: string,
+    signal?: AbortSignal,
+    structuredOutput = false,
+  ): Promise<HarnessResponse> {
+    if (!this.client) {
+      throw new HarnessError('Opencode client is not initialized', 'HARNESS_FAILURE');
+    }
+
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (signal?.aborted) {
+        throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
+      }
+
+      const result = await this.client.session.messages({ sessionID: sessionId });
+      if (!result.error && result.data) {
+        const response = this.responseFromMessages(
+          result.data as Array<{ info: Message; parts: Part[] }>,
+          structuredOutput,
+        );
+        if (response) return response;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    throw new HarnessError(
+      'Opencode harness did not produce a final response',
+      'HARNESS_FAILURE',
+    );
   }
 }

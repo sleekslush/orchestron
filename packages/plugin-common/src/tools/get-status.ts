@@ -1,4 +1,5 @@
 import type { Orchestron } from '../orchestron.js';
+import type { ConcertEvent } from '@orchestron/core';
 import { toUsageView, type UsageView } from '../util.js';
 
 export interface GetStatusInput {
@@ -44,25 +45,35 @@ export async function getConcertStatus(
   }
 
   const history = await orchestron.store.getMovementHistory(input.concertId);
-  const latestProgress = state.currentMovement
-    ? await orchestron.store.getEvents(input.concertId, {
-        types: ['movement:progress'],
-        limit: 1,
-        order: 'desc',
-      })
-    : [];
-  const progressEvent = latestProgress[0];
+  let events: ConcertEvent[] = [];
+  if (state.currentMovement) {
+    // Prefer the live event log; fall back to SQLite events (backward compat)
+    // when no live log exists for the concert yet.
+    const live = orchestron.liveEventLog
+      ? await orchestron.liveEventLog.read(input.concertId)
+      : [];
+    events = live.length > 0
+      ? live
+      : await orchestron.store.getEvents(input.concertId, {
+          types: ['movement:progress'],
+        });
+  }
+  const latestProgress = events.length > 0
+    ? [...events]
+        .filter((e) => e.type === 'movement:progress')
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0]
+    : undefined;
   const currentMovementProgress =
-    progressEvent?.type === 'movement:progress'
+    latestProgress?.type === 'movement:progress'
       ? {
-          type: progressEvent.progressType,
-          toolName: progressEvent.payload.toolName as string | undefined,
-          isError: progressEvent.payload.isError as boolean | undefined,
-          elapsedMs: progressEvent.payload.elapsedMs as number | undefined,
-          message: progressEvent.payload.message as string | undefined,
-          args: progressEvent.payload.args as Record<string, unknown> | undefined,
-          result: progressEvent.payload.result,
-          error: progressEvent.payload.error as string | undefined,
+          type: latestProgress.progressType,
+          toolName: latestProgress.payload.toolName as string | undefined,
+          isError: latestProgress.payload.isError as boolean | undefined,
+          elapsedMs: latestProgress.payload.elapsedMs as number | undefined,
+          message: latestProgress.payload.message as string | undefined,
+          args: latestProgress.payload.args as Record<string, unknown> | undefined,
+          result: latestProgress.payload.result,
+          error: latestProgress.payload.error as string | undefined,
         }
       : undefined;
 

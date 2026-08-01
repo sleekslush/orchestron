@@ -192,6 +192,36 @@ describe('PiAdapter', () => {
     });
   });
 
+  it('forwards text deltas to onProgress', async () => {
+    let messageHandler: ((event: unknown) => void) | undefined;
+    const capturingSession = {
+      ...mockSession,
+      subscribe: vi.fn((handler) => {
+        messageHandler = handler;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        messageHandler?.({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'Hello ' },
+        });
+        messageHandler?.({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'world' },
+        });
+        messageHandler?.({ type: 'agent_end', messages: [], willRetry: false });
+      }),
+    };
+    createAgentSessionMock.mockResolvedValueOnce({ session: capturingSession, extensionsResult: {} });
+
+    const onProgress = vi.fn();
+    const adapter = new PiAdapter();
+    await adapter.execute('do it', { shared: {} }, { onProgress });
+
+    expect(onProgress).toHaveBeenNthCalledWith(1, { type: 'text_delta', delta: 'Hello ' });
+    expect(onProgress).toHaveBeenNthCalledWith(2, { type: 'text_delta', delta: 'world' });
+  });
+
   it('extracts resource usage from agent_end messages', async () => {
     let messageHandler: ((event: unknown) => void) | undefined;
     const capturingSession = {

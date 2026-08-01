@@ -1,32 +1,26 @@
 import type { Orchestron } from '../orchestron.js';
+import type { ConcertEvent } from '@orchestron/core';
 import { printOutput, formatConcertHuman, extractFailure, movementToOutput } from '../output.js';
 
-async function pollAndPrintProgress(
-  orchestron: Orchestron,
-  concertId: string,
-  lastCount: number,
-): Promise<number> {
-  const events = await orchestron.store.getEvents(concertId);
-  for (let i = lastCount; i < events.length; i++) {
-    const e = events[i];
-    switch (e.type) {
-      case 'movement:started':
-        console.error(`→ [${e.movementId}] Running...`);
-        break;
-      case 'movement:completed':
-        console.error(`✓ [${e.movementId}] Completed`);
-        break;
-      case 'movement:failed':
-        console.error(`✗ [${e.movementId}] Failed: ${e.error?.message ?? 'Unknown error'}`);
-        break;
-      case 'movement:progress':
-        if (e.progressType === 'tool_execution_start' && typeof e.payload?.toolName === 'string') {
-          console.error(`  ↳ ${e.payload.toolName}...`);
-        }
-        break;
-    }
+function printLiveEvent(event: ConcertEvent): void {
+  switch (event.type) {
+    case 'movement:started':
+      console.error(`→ [${event.movementId}] Running...`);
+      break;
+    case 'movement:completed':
+      console.error(`✓ [${event.movementId}] Completed`);
+      break;
+    case 'movement:failed':
+      console.error(`✗ [${event.movementId}] Failed: ${event.error?.message ?? 'Unknown error'}`);
+      break;
+    case 'movement:progress':
+      if (event.progressType === 'tool_execution_start' && typeof event.payload?.toolName === 'string') {
+        console.error(`  ↳ ${event.payload.toolName}...`);
+      } else if (event.progressType === 'text_delta' && typeof event.payload?.delta === 'string') {
+        process.stderr.write(event.payload.delta);
+      }
+      break;
   }
-  return events.length;
 }
 
 export async function startCommandHandler(
@@ -42,48 +36,21 @@ export async function startCommandHandler(
 
   console.error(`Concert ID: ${conductor.concertId}`);
 
-  let lastEventCount = 0;
-  let polling = false;
-  let pollingDone = false;
-  let activePoll: Promise<void> | undefined;
-  const pollInterval = 1000;
-  const scheduleNextPoll = () => {
-    if (pollingDone) return;
-    setTimeout(() => {
-      if (pollingDone || polling) return;
-      polling = true;
-      activePoll = (async () => {
-        try {
-          lastEventCount = await pollAndPrintProgress(orchestron, conductor.concertId, lastEventCount);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`Progress poll failed: ${message}`);
-        } finally {
-          polling = false;
-          if (!pollingDone) {
-            scheduleNextPoll();
-          }
-          activePoll = undefined;
-        }
-      })();
-    }, pollInterval);
+  const events: ConcertEvent[] = [];
+  const listener = (event: ConcertEvent) => {
+    events.push(event);
+    printLiveEvent(event);
   };
-  scheduleNextPoll();
+  conductor.onEvent(listener);
 
   try {
     await conductor.start();
   } finally {
-    pollingDone = true;
-    const pending = activePoll;
-    if (pending) {
-      await pending;
-    }
+    conductor.offEvent(listener);
   }
 
   const state = await conductor.getState();
   const history = await orchestron.store.getMovementHistory(conductor.concertId);
-  const events = await orchestron.store.getEvents(conductor.concertId);
-
   const failure = extractFailure(events);
 
   const output = {

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SqliteLoge } from '../store/sqlite-loge.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { ConcertHall } from '../hall/concert-hall.js';
@@ -7,6 +10,12 @@ import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
 import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
 import type { Score, MovementID } from '../types/score.js';
 import type { Concert, ConcertID } from '../types/concert.js';
+import type { ConcertHallOptions } from '../hall/concert-hall.js';
+
+function createHall(options: Omit<ConcertHallOptions, 'tracesDir'>): ConcertHall {
+  const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-events-'));
+  return new ConcertHall({ ...options, tracesDir });
+}
 
 class CapturingFakeHarnessAdapter extends FakeHarnessAdapter {
   prompts: { movementId?: string; prompt: string; options?: Record<string, unknown> }[] = [];
@@ -56,7 +65,7 @@ it('completes linear workflow', async () => {
   const adapter = new FakeHarnessAdapter({
     defaultResponse: { output: 'output', summary: 'summary', usage: { spend: 10, tokens: 100 } },
   });
-  const hall = new ConcertHall({
+  const hall = createHall({
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
@@ -72,7 +81,7 @@ it('persists state', async () => {
   const adapter = new FakeHarnessAdapter({
     defaultResponse: { output: 'output', summary: 'summary', usage: { spend: 10, tokens: 100 } },
   });
-  const hall = new ConcertHall({
+  const hall = createHall({
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
@@ -101,7 +110,7 @@ it('constraint breach', async () => {
   const adapter = new FakeHarnessAdapter({
     defaultResponse: { output: 'o', summary: 's', usage: { spend: 1_000_000, tokens: 100 } },
   });
-  const hall = new ConcertHall({
+  const hall = createHall({
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
@@ -127,14 +136,14 @@ it('movement spend limit breach', async () => {
   const adapter = new FakeHarnessAdapter({
     defaultResponse: { output: 'o', summary: 's', usage: { spend: 600_000, tokens: 100 } },
   });
-  const hall = new ConcertHall({
+  const hall = createHall({
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
   const conductor = await hall.createConcert('movement-constrained');
   await conductor.start();
   expect(conductor.status).toBe('failed');
-  const events = await store.getEvents(conductor.concertId, { types: ['constraint:breached'] });
+  const events = (await hall.getLiveEventLog()!.read(conductor.concertId)).filter(e => e.type === 'constraint:breached');
   expect(events).toHaveLength(1);
   const breachEvent = events[0] as Extract<typeof events[0], { type: 'constraint:breached' }>;
   expect(breachEvent.constraint).toBe('maxSpendDollars');
@@ -146,7 +155,7 @@ it('missing adapter', async () => {
   const store = new SqliteLoge(':memory:');
   const registry = new ScoreRegistry();
   registry.register(linearScore());
-  const hall = new ConcertHall({
+  const hall = createHall({
     store, scoreRegistry: registry, adapters: new Map(),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
@@ -174,7 +183,7 @@ it('retry loop', async () => {
   const adapter = new FakeHarnessAdapter({
     defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
   });
-  const hall = new ConcertHall({
+  const hall = createHall({
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({
       perMovement: {
@@ -206,7 +215,7 @@ it('structured output', async () => {
   const adapter = new FakeHarnessAdapter({
     perMovement: { plan: { output: 't', structured: { s: ['a'] }, summary: 'ok', usage: { spend: 5, tokens: 50 } } },
   });
-  const hall = new ConcertHall({
+  const hall = createHall({
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
@@ -244,7 +253,7 @@ it('sub-scores', async () => {
   const adapter = new FakeHarnessAdapter({
     defaultResponse: { output: 'child out', summary: 'done', usage: { spend: 5, tokens: 50 } },
   });
-  const hall = new ConcertHall({
+  const hall = createHall({
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
@@ -273,7 +282,7 @@ describe('Conductor lifecycle', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 200 },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -312,7 +321,7 @@ describe('Conductor lifecycle', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 1000 },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -343,7 +352,7 @@ describe('Conductor lifecycle', () => {
       }],
       program: {},
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map(),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -366,7 +375,7 @@ describe('Conductor lifecycle', () => {
       }],
       program: {},
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map(),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -401,7 +410,7 @@ describe('Conductor constraints', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 100 },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -409,7 +418,7 @@ describe('Conductor constraints', () => {
     const conductor = await hall.createConcert('duration-limit');
     await conductor.start();
     expect(conductor.status).toBe('failed');
-    const events = await store.getEvents(conductor.concertId);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -439,7 +448,7 @@ describe('Conductor constraints', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -447,7 +456,7 @@ describe('Conductor constraints', () => {
     const conductor = await hall.createConcert('section-movement-limit');
     await conductor.start();
     expect(conductor.status).toBe('failed');
-    const events = await store.getEvents(conductor.concertId);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -477,7 +486,7 @@ describe('Conductor constraints', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 600_000, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -485,7 +494,7 @@ describe('Conductor constraints', () => {
     const conductor = await hall.createConcert('section-spend-limit');
     await conductor.start();
     expect(conductor.status).toBe('failed');
-    const events = await store.getEvents(conductor.concertId);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -514,7 +523,7 @@ describe('Conductor constraints', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -549,7 +558,7 @@ describe('Conductor constraints', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -557,7 +566,7 @@ describe('Conductor constraints', () => {
     const conductor = await hall.createConcert('wildcard-unlisted');
     await conductor.start();
     expect(conductor.status).toBe('failed');
-    const events = await store.getEvents(conductor.concertId);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -589,7 +598,7 @@ describe('Conductor constraints', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -598,7 +607,7 @@ describe('Conductor constraints', () => {
     await conductor.start();
     // execution maxMovements = 1 (explicit override), maxSpendDollars = 0.5 (from wildcard)
     expect(conductor.status).toBe('failed');
-    const events = await store.getEvents(conductor.concertId);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -630,7 +639,7 @@ describe('Conductor constraints', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 600_000, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -640,7 +649,7 @@ describe('Conductor constraints', () => {
     // execution maxMovements = 5 (explicit), maxSpendDollars = 0.5 (from wildcard)
     // First movement costs $0.6, which exceeds $0.5
     expect(conductor.status).toBe('failed');
-    const events = await store.getEvents(conductor.concertId);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -672,7 +681,7 @@ describe('Conductor constraints', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -681,7 +690,7 @@ describe('Conductor constraints', () => {
     await conductor.start();
     // execution maxMovements = 1 (from wildcard), maxSpendDollars = 5 (explicit)
     expect(conductor.status).toBe('failed');
-    const events = await store.getEvents(conductor.concertId);
+    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 });
@@ -714,7 +723,7 @@ describe('Conductor movement progress', () => {
         ],
       },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -722,7 +731,7 @@ describe('Conductor movement progress', () => {
     const conductor = await hall.createConcert('progress-test');
     await conductor.start();
     expect(conductor.status).toBe('completed');
-    const progressEvents = await store.getEvents(conductor.concertId, { types: ['movement:progress'] });
+    const progressEvents = (await hall.getLiveEventLog()!.read(conductor.concertId)).filter(e => e.type === 'movement:progress');
     expect(progressEvents.length).toBeGreaterThanOrEqual(2);
     expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_start')).toBe(true);
     expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_end')).toBe(true);
@@ -745,7 +754,7 @@ describe('Conductor movement progress', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 500 },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -773,7 +782,7 @@ describe('Conductor movement progress', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 500 },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -819,7 +828,7 @@ describe('Dual prompt selection', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -856,7 +865,7 @@ describe('Dual prompt selection', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({
         perMovement: {
@@ -907,7 +916,7 @@ describe('Dual prompt selection', () => {
     })({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -955,7 +964,7 @@ describe('Dual prompt selection', () => {
     })({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -992,7 +1001,7 @@ describe('Dual prompt selection', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, fail: true },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -1033,7 +1042,7 @@ describe('Dual prompt selection', () => {
         return { achieved: true, confidence: 1, summary: 'ok', evidence: '' };
       },
     };
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator,
     });
@@ -1074,7 +1083,7 @@ describe('Dual prompt selection', () => {
         return { achieved: true, confidence: 1, summary: 'ok', evidence: '' };
       },
     };
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator,
     });
@@ -1110,7 +1119,7 @@ describe('Dual prompt selection', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -1157,7 +1166,7 @@ describe('Dual prompt selection', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 }, delayMs: 200 },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -1196,7 +1205,7 @@ describe('ConcertHall', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -1211,7 +1220,7 @@ describe('ConcertHall', () => {
   it('waitForConcert throws for unknown concert', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();
-    const hall = new ConcertHall({ store, scoreRegistry: registry, adapters: new Map(), evaluator: new FakeEvaluator({ alwaysSucceed: true }) });
+    const hall = createHall({ store, scoreRegistry: registry, adapters: new Map(), evaluator: new FakeEvaluator({ alwaysSucceed: true }) });
     await expect(hall.waitForConcert('nonexistent')).rejects.toThrow('not found');
   });
 
@@ -1231,7 +1240,7 @@ describe('ConcertHall', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -1290,7 +1299,7 @@ describe('ConcertHall', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -1506,7 +1515,7 @@ describe('Conductor.recover()', () => {
       defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 10, tokens: 100 } },
     });
     const evaluator = new FakeEvaluator({ alwaysSucceed: true });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]), evaluator,
     });
     return { store, registry, adapter, evaluator, hall };
@@ -1615,7 +1624,7 @@ describe('Conductor.recover()', () => {
       defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 10, tokens: 100 } },
     });
     const evaluator = new FakeEvaluator({ alwaysSucceed: true });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]), evaluator,
     });
 
@@ -1652,7 +1661,7 @@ describe('Conductor.recover()', () => {
 
     const adapter = new FakeHarnessAdapter({});
     const evaluator = new FakeEvaluator({ alwaysSucceed: true });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]), evaluator,
     });
 
@@ -1693,7 +1702,7 @@ describe('Conductor.recover()', () => {
         structured: { achieved: true, confidence: 1, summary: 'Goal achieved' },
       },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([['fake', adapter]]),
@@ -1747,7 +1756,7 @@ describe('Conductor.recover()', () => {
     };
     registry.register(score);
 
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([
@@ -1802,7 +1811,7 @@ describe('Conductor.recover()', () => {
     };
     registry.register(score);
 
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([
@@ -1860,7 +1869,7 @@ describe('Conductor.recover()', () => {
     };
     registry.register(score);
 
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([
@@ -1918,7 +1927,7 @@ describe('Conductor.recover()', () => {
     };
     registry.register(score);
 
-    const hall = new ConcertHall({
+    const hall = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([
@@ -1933,7 +1942,7 @@ describe('Conductor.recover()', () => {
     const concertId = conductor.concertId;
 
     // Simulate process restart by creating a new hall and loading the concert
-    const hall2 = new ConcertHall({
+    const hall2 = createHall({
       store,
       scoreRegistry: registry,
       adapters: new Map([
@@ -1981,7 +1990,7 @@ describe('model resolution', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'ok', summary: 'ok', model: 'claude-3', provider: 'anthropic' },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -2024,7 +2033,7 @@ describe('model resolution', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'ok', summary: 'ok', model: 'claude-3', provider: 'anthropic' },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -2065,7 +2074,7 @@ describe('model resolution', () => {
     registry.register(score);
 
     const adapter = new FakeHarnessAdapter({});
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -2105,7 +2114,7 @@ describe('model resolution', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'ok', summary: 'ok', model: 'claude-opus', provider: 'anthropic' },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -2149,7 +2158,7 @@ describe('model resolution', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'ok', summary: 'ok', model: 'gpt-4o', provider: 'openai' },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -2194,7 +2203,7 @@ describe('model resolution', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'ok', summary: 'ok' },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -2234,7 +2243,7 @@ describe('model resolution', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'ok', summary: 'ok' },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -2274,7 +2283,7 @@ describe('model resolution', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'ok', summary: 'ok' },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
@@ -2314,7 +2323,7 @@ describe('model resolution', () => {
     const adapter = new CapturingFakeHarnessAdapter({
       defaultResponse: { output: 'ok', summary: 'ok' },
     });
-    const hall = new ConcertHall({
+    const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
