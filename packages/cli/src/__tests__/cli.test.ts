@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeHarnessAdapter, FakeEvaluator } from '@orchestron/core';
-import type { Score, HarnessAdapter, HarnessResponse, ConcertContext, OutputConfig } from '@orchestron/core';
+import type { Score, HarnessAdapter, HarnessResponse, ConcertContext, OutputConfig, ProgressUpdate } from '@orchestron/core';
 import { createOrchestron, withOrchestron } from '../orchestron.js';
 import { startCommandHandler } from '../commands/start.js';
 import { pauseCommandHandler, resumeCommandHandler } from '../commands/lifecycle.js';
@@ -645,6 +645,99 @@ describe('CLI commands', () => {
     const output = logs.join('\n');
     expect(output).toContain('good: anthropic/claude-3');
     expect(output).toContain('bad: (error: catalog unavailable)');
+  });
+
+  it('shows tool command and file details in start progress output', async () => {
+    const storePath = join(dir, 'progress-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const updates: ProgressUpdate[] = [
+      { type: 'tool_execution_start', toolName: 'bash', args: { command: 'pnpm test' } },
+      { type: 'tool_execution_start', toolName: 'read', args: { filePath: 'packages/cli/src/commands/start.ts' } },
+      { type: 'tool_execution_start', toolName: 'edit', args: { filePath: 'src/main.ts', content: 'x'.repeat(400) } },
+    ];
+    const progressUpdates = updates.map((update, i) => ({ atMs: i * 30, update }));
+
+    const adapter = new FakeHarnessAdapter({
+      perMovement: {
+        step1: {
+          output: 'ok',
+          summary: 'ok',
+          usage: { spend: 1, tokens: 1 },
+          delayMs: 100,
+          progressUpdates,
+        },
+      },
+    });
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const errLines: string[] = [];
+    const originalErr = console.error;
+    console.error = (msg: string) => errLines.push(msg);
+    try {
+      await startCommandHandler(orchestron, 'cli-test', { task: 'hello' }, false);
+    } finally {
+      console.error = originalErr;
+      orchestron.store.close();
+    }
+
+    expect(errLines.some((l) => l.includes('↳ bash pnpm test'))).toBe(true);
+    expect(errLines.some((l) => l.includes('↳ read packages/cli/src/commands/start.ts'))).toBe(true);
+    expect(errLines.some((l) => l.includes('↳ edit src/main.ts'))).toBe(true);
+    // Large content args are ignored in favor of the file path, so lines stay short.
+    expect(errLines.every((l) => l.length <= 124)).toBe(true);
+  });
+
+  it('truncates long tool target values in start progress output', async () => {
+    const storePath = join(dir, 'progress-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const longCommand = 'pnpm ' + 'a'.repeat(300);
+    const adapter = new FakeHarnessAdapter({
+      perMovement: {
+        step1: {
+          output: 'ok',
+          summary: 'ok',
+          usage: { spend: 1, tokens: 1 },
+          delayMs: 60,
+          progressUpdates: [{ atMs: 0, update: { type: 'tool_execution_start', toolName: 'bash', args: { command: longCommand } } }],
+        },
+      },
+    });
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const errLines: string[] = [];
+    const originalErr = console.error;
+    console.error = (msg: string) => errLines.push(msg);
+    try {
+      await startCommandHandler(orchestron, 'cli-test', { task: 'hello' }, false);
+    } finally {
+      console.error = originalErr;
+      orchestron.store.close();
+    }
+
+    const line = errLines.find((l) => l.includes('↳ bash')) ?? '';
+    expect(line.length).toBeLessThanOrEqual(124);
+    expect(line.endsWith('...')).toBe(true);
+    expect(line).not.toContain(longCommand);
   });
 
   it('disposes adapters when the orchestron is torn down', async () => {
