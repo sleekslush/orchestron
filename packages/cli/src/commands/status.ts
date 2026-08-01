@@ -205,7 +205,7 @@ function formatSystemHuman(
   aggregates: {
     totalConcerts: number;
     activeConcerts: number;
-    totalSpend: number;
+    totalSpend?: number;
     totalTokens: number;
     avgDurationMs: number;
     failureRate: number;

@@ -8,7 +8,8 @@ export interface EventFilter {
 export interface SystemAggregates {
   totalConcerts: number;
   activeConcerts: number;
-  totalSpend: number;
+  /** Aggregate spend in microdollars, or undefined when no concert reports a cost. */
+  totalSpend?: number;
   totalTokens: number;
   avgDurationMs: number;
   failureRate: number;

@@ -458,7 +458,9 @@ export class SqliteLoge implements ConcertStore {
     return {
       totalConcerts: row.totalConcerts ?? 0,
       activeConcerts: row.activeConcerts ?? 0,
-      totalSpend: row.totalSpend ?? 0,
+      // Keep unmeasured spend undefined (not 0) so the overview can render
+      // "unknown" instead of implying the aggregate was genuinely free.
+      totalSpend: row.totalSpend ?? undefined,
       totalTokens: row.totalTokens ?? 0,
       avgDurationMs: row.avgDurationMs ?? 0,
       failureRate: row.totalConcerts > 0 ? failed.cnt / row.totalConcerts : 0,
