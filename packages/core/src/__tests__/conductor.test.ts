@@ -1402,6 +1402,42 @@ describe('ConcertHall', () => {
     const childConductor = hall.getConcert(children[0]);
     expect(childConductor).toBeDefined();
   });
+
+  it('createConcert and createChildConcert are behaviorally equivalent child creation paths (#67)', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'child-alias', name: 'Child Alias', version: '1.0.0',
+      startMovement: 'c',
+      movements: [{
+        id: 'c', name: 'C', section: 'x', harness: 'fake', prompt: 'C',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    // A child spawned through the decoupled ChildConcertFactory path...
+    const parent = await hall.createConcert('child-alias');
+    const viaFactory = await hall.createChildConcert('child-alias', { parentConcertId: parent.concertId });
+    // ...and one spawned through the single createConcert creation path.
+    const viaCreate = await hall.createConcert('child-alias', { parentConcertId: parent.concertId });
+
+    const children = hall.getChildConcerts(parent.concertId);
+    expect(children).toHaveLength(2);
+    expect(children).toContain(viaFactory.concertId);
+    expect(children).toContain(viaCreate.concertId);
+    // Both are identical in behavior: same concrete conductor, same parent link.
+    expect(hall.getConcert(viaFactory.concertId)).toBeInstanceOf(Conductor);
+    expect(hall.getConcert(viaCreate.concertId)).toBeInstanceOf(Conductor);
+  });
 });
 
 // ─── FakeHarnessAdapter Direct Tests ─────────────────────────

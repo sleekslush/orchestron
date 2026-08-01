@@ -131,21 +131,18 @@ export class ConcertHall implements ChildConcertFactory {
     return conductor;
   }
 
+  /**
+   * Create a concert and build a {@link Conductor} for it. This is the single
+   * creation path for all concerts.
+   *
+   * Child concerts are intentionally not behaviorally distinct from top-level
+   * concerts: any child-specific concern (parent linkage, nesting depth,
+   * lifecycle cascade, budget inheritance) is carried through
+   * {@link StartOptions} and handled by the {@link Conductor} itself. Parent
+   * conductors should use {@link createChildConcert}, which is a decoupled alias
+   * of this method.
+   */
   async createConcert(
-    scoreId: ScoreID,
-    options?: StartOptions,
-  ): Promise<Conductor> {
-    return this.doCreateConcert(scoreId, options);
-  }
-
-  async createChildConcert(
-    scoreId: ScoreID,
-    options?: StartOptions,
-  ): Promise<IConductor> {
-    return this.doCreateConcert(scoreId, options);
-  }
-
-  private async doCreateConcert(
     scoreId: ScoreID,
     options?: StartOptions,
   ): Promise<Conductor> {
@@ -180,6 +177,22 @@ export class ConcertHall implements ChildConcertFactory {
     }
 
     return conductor;
+  }
+
+  /**
+   * Create a child concert on behalf of a parent conductor.
+   *
+   * Behaviorally identical to {@link createConcert}; it exists purely to satisfy
+   * {@link ChildConcertFactory} so parent conductors can spawn sub-scores
+   * without depending on the full {@link ConcertHall}. It returns the
+   * {@link IConductor} interface rather than the concrete {@link Conductor} to
+   * keep that decoupling complete.
+   */
+  async createChildConcert(
+    scoreId: ScoreID,
+    options?: StartOptions,
+  ): Promise<IConductor> {
+    return this.createConcert(scoreId, options);
   }
 
   async loadConcert(id: ConcertID): Promise<Conductor | undefined> {
