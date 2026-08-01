@@ -1989,9 +1989,9 @@ describe('model resolution', () => {
     await conductor.start();
 
     expect(conductor.status).toBe('completed');
-    const history = (conductor as any).concert.history;
-    expect(history[0].model).toBe('claude-3');
-    expect(history[0].provider).toBe('anthropic');
+    const state = await conductor.getState();
+    expect(state.history[0].model).toBe('claude-3');
+    expect(state.history[0].provider).toBe('anthropic');
   });
 
   it('resolves per-harness model map to the matching harness entry', async () => {
@@ -2032,9 +2032,9 @@ describe('model resolution', () => {
     await conductor.start();
 
     expect(conductor.status).toBe('completed');
-    const history = (conductor as any).concert.history;
-    expect(history[0].model).toBe('claude-3');
-    expect(history[0].provider).toBe('anthropic');
+    const state = await conductor.getState();
+    expect(state.history[0].model).toBe('claude-3');
+    expect(state.history[0].provider).toBe('anthropic');
   });
 
   it('throws when per-harness model map has no entry for the resolved harness', async () => {
@@ -2113,9 +2113,9 @@ describe('model resolution', () => {
     await conductor.start();
 
     expect(conductor.status).toBe('completed');
-    const history = (conductor as any).concert.history;
-    expect(history[0].model).toBe('claude-opus');
-    expect(history[0].provider).toBe('anthropic');
+    const state = await conductor.getState();
+    expect(state.history[0].model).toBe('claude-opus');
+    expect(state.history[0].provider).toBe('anthropic');
   });
 
   it('movement-level model overrides score-level defaults', async () => {
@@ -2157,8 +2157,8 @@ describe('model resolution', () => {
     await conductor.start();
 
     expect(conductor.status).toBe('completed');
-    const history = (conductor as any).concert.history;
-    expect(history[0].model).toBe('gpt-4o');
-    expect(history[0].provider).toBe('openai');
+    const state = await conductor.getState();
+    expect(state.history[0].model).toBe('gpt-4o');
+    expect(state.history[0].provider).toBe('openai');
   });
 });
