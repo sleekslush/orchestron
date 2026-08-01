@@ -434,7 +434,7 @@ describe('CLI commands', () => {
       orchestron.store.close();
     }
 
-    expect(logs.some((l) => l.includes('fake:'))).toBe(true);
+    expect(logs.some((l) => l.includes('=== fake ==='))).toBe(true);
     expect(logs.some((l) => l.includes('anthropic/claude-3'))).toBe(true);
     expect(logs.some((l) => l.includes('openai/gpt-4o'))).toBe(true);
   });
@@ -461,7 +461,7 @@ describe('CLI commands', () => {
       orchestron.store.close();
     }
 
-    expect(logs.some((l) => l.includes('fake:'))).toBe(true);
+    expect(logs.some((l) => l.includes('=== fake ==='))).toBe(true);
     expect(logs.some((l) => l.includes('x/y'))).toBe(true);
   });
 
@@ -570,7 +570,7 @@ describe('CLI commands', () => {
     }
 
     const output = logs.join('\n');
-    expect(output).toContain('stub:');
+    expect(output).toContain('=== stub ===');
     expect(output).toContain('(no models available)');
   });
 
@@ -646,9 +646,9 @@ describe('CLI commands', () => {
     }
 
     const output = logs.join('\n');
-    expect(output).toContain('good:');
+    expect(output).toContain('=== good ===');
     expect(output).toContain('anthropic/claude-3');
-    expect(output).toContain('bad:');
+    expect(output).toContain('=== bad ===');
     expect(output).toContain('(error: catalog unavailable)');
   });
 

@@ -18,7 +18,10 @@ function formatModelsHuman(entries: OrchestronModelEntry[]): string {
 
   const lines: string[] = [];
   for (const entry of entries) {
-    lines.push(`${entry.harness}:`);
+    if (lines.length > 0) {
+      lines.push('');
+    }
+    lines.push(`=== ${entry.harness} ===`);
     if (entry.error) {
       lines.push(`  (error: ${entry.error})`);
       continue;
