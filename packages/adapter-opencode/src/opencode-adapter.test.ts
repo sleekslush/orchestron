@@ -532,14 +532,21 @@ describe('OpencodeAdapter', () => {
     });
   });
 
-  it('skips model validation when server is unreachable', async () => {
+  it('throws HARNESS_FAILURE when server is unreachable during model validation', async () => {
     mockModelList.mockRejectedValueOnce(new Error('connection refused'));
     const adapter = new OpencodeAdapter();
 
-    // Should not throw — validation skipped, prompt proceeds normally
-    await adapter.execute('x', { shared: {} }, { provider: 'anthropic', model: 'claude-3' });
+    await expect(
+      adapter.execute('x', { shared: {} }, { provider: 'anthropic', model: 'claude-3' }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining(
+        "Cannot verify model 'claude-3' for provider 'anthropic'",
+      ),
+    });
 
-    expect(mockClient.session.promptAsync).toHaveBeenCalled();
+    // Prompt must not be reached when validation fails.
+    expect(mockClient.session.promptAsync).not.toHaveBeenCalled();
   });
 
   it('skips model validation when no model is specified', async () => {
