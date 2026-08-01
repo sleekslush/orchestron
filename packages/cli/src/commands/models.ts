@@ -18,20 +18,16 @@ function formatModelsHuman(entries: OrchestronModelEntry[]): string {
 
   const lines: string[] = [];
   for (const entry of entries) {
-    if (lines.length > 0) {
-      lines.push('');
-    }
-    lines.push(`=== ${entry.harness} ===`);
     if (entry.error) {
-      lines.push(`  (error: ${entry.error})`);
+      lines.push(`${entry.harness}: (error: ${entry.error})`);
       continue;
     }
     if (entry.models.length === 0) {
-      lines.push('  (no models available)');
+      lines.push(`${entry.harness}: (no models available)`);
       continue;
     }
     for (const { provider, model } of entry.models) {
-      lines.push(`  ${provider}/${model}`);
+      lines.push(`${entry.harness}: ${provider}/${model}`);
     }
   }
   return lines.join('\n');

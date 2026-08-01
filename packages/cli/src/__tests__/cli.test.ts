@@ -434,9 +434,8 @@ describe('CLI commands', () => {
       orchestron.store.close();
     }
 
-    expect(logs.some((l) => l.includes('=== fake ==='))).toBe(true);
-    expect(logs.some((l) => l.includes('anthropic/claude-3'))).toBe(true);
-    expect(logs.some((l) => l.includes('openai/gpt-4o'))).toBe(true);
+    expect(logs.some((l) => l.includes('fake: anthropic/claude-3'))).toBe(true);
+    expect(logs.some((l) => l.includes('fake: openai/gpt-4o'))).toBe(true);
   });
 
   it('lists models for a single harness', async () => {
@@ -461,8 +460,7 @@ describe('CLI commands', () => {
       orchestron.store.close();
     }
 
-    expect(logs.some((l) => l.includes('=== fake ==='))).toBe(true);
-    expect(logs.some((l) => l.includes('x/y'))).toBe(true);
+    expect(logs.some((l) => l.includes('fake: x/y'))).toBe(true);
   });
 
   it('lists models as JSON', async () => {
@@ -570,8 +568,7 @@ describe('CLI commands', () => {
     }
 
     const output = logs.join('\n');
-    expect(output).toContain('=== stub ===');
-    expect(output).toContain('(no models available)');
+    expect(output).toContain('stub: (no models available)');
   });
 
   it('continues listing other harnesses when one harness fails to list models', async () => {
@@ -646,10 +643,8 @@ describe('CLI commands', () => {
     }
 
     const output = logs.join('\n');
-    expect(output).toContain('=== good ===');
-    expect(output).toContain('anthropic/claude-3');
-    expect(output).toContain('=== bad ===');
-    expect(output).toContain('(error: catalog unavailable)');
+    expect(output).toContain('good: anthropic/claude-3');
+    expect(output).toContain('bad: (error: catalog unavailable)');
   });
 
   it('disposes adapters when the orchestron is torn down', async () => {
