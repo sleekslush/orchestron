@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { OpencodeAdapter } from './opencode-adapter.js';
 import type { HarnessResponse } from '@orchestron/core';
 
+const mockModelList = vi.fn();
+
 const mockClient = {
   session: {
     create: vi.fn(),
@@ -9,6 +11,11 @@ const mockClient = {
     delete: vi.fn(),
     abort: vi.fn(),
     messages: vi.fn(),
+  },
+  v2: {
+    model: {
+      list: (...args: unknown[]) => mockModelList(...args),
+    },
   },
 };
 
@@ -75,6 +82,14 @@ describe('OpencodeAdapter', () => {
     });
     mockClient.session.delete.mockResolvedValue({ data: true });
     mockClient.session.abort.mockResolvedValue({ data: true });
+    mockModelList.mockResolvedValue({
+      data: {
+        data: [
+          { id: 'claude-3', providerID: 'anthropic', name: 'Claude 3' },
+          { id: 'gpt-4o', providerID: 'openai', name: 'GPT-4o' },
+        ],
+      },
+    });
   });
 
   it('executes a prompt without sessionId using a fresh session', async () => {
@@ -404,6 +419,65 @@ describe('OpencodeAdapter', () => {
     expect((events[1] as any).toolName).toBe('read');
     expect(events[2].type).toBe('tool_execution_end');
     expect((events[2] as any).toolName).toBe('read');
+  });
+
+  it('validates model before prompt when model and provider are specified', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('x', { shared: {} }, { provider: 'anthropic', model: 'claude-3' });
+
+    expect(mockModelList).toHaveBeenCalled();
+    const prompt = (mockClient.session.prompt as Mock).mock.calls[0][0];
+    expect(prompt.model).toEqual({ providerID: 'anthropic', modelID: 'claude-3' });
+  });
+
+  it('throws HARNESS_FAILURE when model is not in the server catalog', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await expect(
+      adapter.execute('x', { shared: {} }, { provider: 'openai', model: 'gpt-999' }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining("does not recognize model 'gpt-999' for provider 'openai'"),
+    });
+  });
+
+  it('skips model validation when server is unreachable', async () => {
+    mockModelList.mockRejectedValueOnce(new Error('connection refused'));
+    const adapter = new OpencodeAdapter();
+
+    // Should not throw — validation skipped, prompt proceeds normally
+    await adapter.execute('x', { shared: {} }, { provider: 'anthropic', model: 'claude-3' });
+
+    expect(mockClient.session.prompt).toHaveBeenCalled();
+  });
+
+  it('skips model validation when no model is specified', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('x', { shared: {} });
+
+    expect(mockModelList).not.toHaveBeenCalled();
+  });
+
+  it('caches model catalog and only fetches once', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('a', { shared: {} }, { provider: 'anthropic', model: 'claude-3' });
+    await adapter.execute('b', { shared: {} }, { provider: 'openai', model: 'gpt-4o' });
+
+    expect(mockModelList).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears model cache on dispose', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('a', { shared: {} }, { provider: 'anthropic', model: 'claude-3' });
+    await adapter.dispose();
+
+    // After dispose, cache is cleared — will fetch again
+    await adapter.execute('b', { shared: {} }, { provider: 'openai', model: 'gpt-4o' });
+    expect(mockModelList).toHaveBeenCalledTimes(2);
   });
 
   it('handles concurrent execute calls for the same sessionId', async () => {
