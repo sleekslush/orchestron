@@ -25,6 +25,8 @@ export interface Orchestron {
   hall: ConcertHall;
   /** List available models for one harness, or for all registered harnesses. */
   listModels(harness?: string): Promise<OrchestronModelEntry[]>;
+  /** Dispose all resolved adapters (e.g. stop embedded servers). Idempotent. */
+  dispose(): Promise<void>;
 }
 
 export async function withOrchestron<T>(
@@ -37,6 +39,11 @@ export async function withOrchestron<T>(
   } finally {
     try {
       await orchestron.hall.close();
+    } catch {
+      // ignore
+    }
+    try {
+      await orchestron.dispose();
     } catch {
       // ignore
     }
@@ -98,6 +105,30 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     return entries;
   };
 
+  const dispose = async (): Promise<void> => {
+    const adapters: HarnessAdapter[] = [];
+    if (adapterResolver instanceof Map) {
+      adapters.push(...adapterResolver.values());
+    } else if (adapterResolver instanceof LazyAdapterResolver) {
+      for (const name of adapterResolver.names()) {
+        try {
+          adapters.push(await adapterResolver.resolve(name));
+        } catch {
+          // ignore
+        }
+      }
+    }
+    await Promise.all(
+      adapters.map(async (adapter) => {
+        try {
+          await adapter.dispose?.();
+        } catch {
+          // ignore
+        }
+      }),
+    );
+  };
+
   let evaluator = options.evaluator;
   if (!evaluator) {
     const effectiveDefaultHarness = defaultHarness;
@@ -133,7 +164,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     defaultHarness,
   });
 
-  return { store, registry, hall, listModels };
+  return { store, registry, hall, listModels, dispose };
 }
 
 function adapterNames(source: Map<string, HarnessAdapter> | HarnessAdapterResolver): string[] {

@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeHarnessAdapter, FakeEvaluator } from '@orchestron/core';
 import type { Score, HarnessAdapter, HarnessResponse, ConcertContext, OutputConfig } from '@orchestron/core';
-import { createOrchestron } from '../orchestron.js';
+import { createOrchestron, withOrchestron } from '../orchestron.js';
 import { startCommandHandler } from '../commands/start.js';
 import { pauseCommandHandler, resumeCommandHandler } from '../commands/lifecycle.js';
 import { statusCommandHandler } from '../commands/status.js';
@@ -650,5 +650,31 @@ describe('CLI commands', () => {
     expect(output).toContain('anthropic/claude-3');
     expect(output).toContain('bad:');
     expect(output).toContain('(error: catalog unavailable)');
+  });
+
+  it('disposes adapters when the orchestron is torn down', async () => {
+    class DisposableFakeHarnessAdapter extends FakeHarnessAdapter {
+      dispose = vi.fn(async () => {});
+    }
+
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const adapter = new DisposableFakeHarnessAdapter({});
+
+    await withOrchestron(
+      {
+        storePath,
+        scoresDirs: [scoresDir],
+        adapters: new Map([['fake', adapter]]),
+        evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+        defaultHarness: 'fake',
+      },
+      async () => {},
+    );
+
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
   });
 });
