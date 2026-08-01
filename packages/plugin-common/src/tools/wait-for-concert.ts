@@ -122,12 +122,10 @@ export async function waitForConcert(
       break;
     }
 
-    const events = await orchestron.store.getEvents(input.concertId, {
-      types: ['movement:progress'],
-      since: lastTimestamp,
-    });
+    const events = await orchestron.liveEventLog.read(input.concertId);
     for (const event of events) {
       if (event.type !== 'movement:progress') continue;
+      if (event.timestamp.getTime() <= lastTimestamp.getTime()) continue;
       const payload = event.payload;
       let text =
         (payload.message as string | undefined) ??
@@ -145,6 +143,9 @@ export async function waitForConcert(
       }
       if (event.progressType === 'tool_execution_end' && payload.isError) {
         text += ` [error]`;
+      }
+      if (event.progressType === 'text_delta' && typeof payload.delta === 'string') {
+        text += ` ${payload.delta}`;
       }
       onUpdate?.(text);
       lastTimestamp = event.timestamp;

@@ -1,5 +1,8 @@
 import type { Concert, ConcertID, ConcertStatus } from '../types/concert.js';
+import type { ConcertEvent } from '../types/events.js';
 import type { StartOptions } from './start-options.js';
+
+export type ConcertEventListener = (event: ConcertEvent) => void;
 
 export interface IConductor {
   readonly concertId: ConcertID;
@@ -11,4 +14,6 @@ export interface IConductor {
   cancel(): Promise<void>;
   getState(): Promise<Concert>;
   recover(): Promise<void>;
+  onEvent(listener: ConcertEventListener): void;
+  offEvent(listener: ConcertEventListener): void;
 }

@@ -1,13 +1,24 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { mkdtempSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import type {
   ConcertHall,
   Evaluator,
   HarnessAdapter,
   HarnessAdapterResolver,
+  LiveEventLog,
   ScoreRegistry,
   SqliteLoge,
 } from '@orchestron/core';
-import { resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR, ensureDir, loadScoresFromDir } from '@orchestron/core';
+import {
+  resolveOrchestronConfig,
+  DEFAULT_CONFIG_DIR,
+  DEFAULT_STORE_PATH,
+  DEFAULT_SCORES_DIR,
+  LOCAL_SCORES_DIR,
+  ensureDir,
+  loadScoresFromDir,
+} from '@orchestron/core';
 
 export { DEFAULT_CONFIG_DIR, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR };
 
@@ -23,6 +34,8 @@ export interface Orchestron {
   store: SqliteLoge;
   registry: ScoreRegistry;
   hall: ConcertHall;
+  liveEventLog: LiveEventLog;
+  tracesDir: string;
   scoresDirs: string[];
 }
 
@@ -37,7 +50,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     ensureDir(dir);
   }
 
-  const { SqliteLoge, ScoreRegistry, ConcertHall, HarnessEvaluator } = await import(
+  const { SqliteLoge, ScoreRegistry, ConcertHall, HarnessEvaluator, LiveEventLog } = await import(
     '@orchestron/core'
   );
 
@@ -70,15 +83,21 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     return new HarnessEvaluator({ adapter });
   })());
 
+  const tracesDir = storePath === ':memory:'
+    ? mkdtempSync(join(realpathSync(tmpdir()), 'orchestron-trace-'))
+    : join(dirname(storePath), 'traces');
+  ensureDir(tracesDir);
+  const liveEventLog = new LiveEventLog(tracesDir);
+
   const hall = new ConcertHall({
     store,
     scoreRegistry: registry,
     adapters: adapterResolver,
     evaluator,
+    tracesDir,
+    liveEventLog,
     defaultHarness,
   });
 
-  return { store, registry, hall, scoresDirs };
+  return { store, registry, hall, liveEventLog, tracesDir, scoresDirs };
 }
-
-

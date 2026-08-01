@@ -108,6 +108,7 @@ export class PiAdapter implements HarnessAdapter {
           const ame = event.assistantMessageEvent;
           if (ame.type === 'text_delta') {
             output += ame.delta;
+            options?.onProgress?.({ type: 'text_delta', delta: ame.delta });
           }
         }
         if (event.type === 'tool_execution_start') {

@@ -11,10 +11,13 @@ import type {
   MovementID,
   SectionBudget,
 } from '../types/score.js';
+import { EventEmitter } from 'node:events';
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
+import type { ConcertEvent } from '../types/events.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
 import type { ConcertStore } from '../store/concert-store.js';
 import { TraceService } from '../store/trace-service.js';
+import { LiveEventLog } from '../store/live-event-log.js';
 import type { ChildConcertFactory } from './child-concert-factory.js';
 import type { IConductor } from './conductor-interface.js';
 import type { StartOptions } from './start-options.js';
@@ -45,6 +48,8 @@ export class Conductor implements IConductor {
   private adapterResolver: { get(name: string, concertId?: string): Promise<HarnessAdapter> };
   private loopPromise?: Promise<void>;
   private traceService?: TraceService;
+  private liveEventLog?: LiveEventLog;
+  private eventEmitter = new EventEmitter();
   private childConductors = new Map<ConcertID, IConductor>();
   private promptBuilder = new PromptBuilder();
   private constraintChecker: ConstraintChecker;
@@ -61,6 +66,7 @@ export class Conductor implements IConductor {
     tracesDir?: string,
     private defaultHarness?: string,
     private onFinalized?: (concertId: ConcertID) => void,
+    liveEventLog?: LiveEventLog,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
@@ -68,6 +74,7 @@ export class Conductor implements IConductor {
     if (tracesDir) {
       this.traceService = new TraceService(tracesDir, store);
     }
+    this.liveEventLog = liveEventLog ?? (tracesDir ? new LiveEventLog(tracesDir) : undefined);
     this.adapterResolver = createAdapterResolver(adapters);
   }
 
@@ -112,7 +119,7 @@ export class Conductor implements IConductor {
       context: this.concert.context,
       nestingDepth: this.nestingDepth,
     });
-    await this.store.pushEvent({
+    this.emit({
       type: 'concert:started',
       concertId: this.concert.id,
       scoreId: this.score.id,
@@ -148,7 +155,7 @@ export class Conductor implements IConductor {
     this.nestingDepth = this.concert.nestingDepth ?? (this.concert.parentConcertId ? 1 : 0);
 
     await this.store.updateConcert({ id: this.concert.id, status: 'running' });
-    await this.store.pushEvent({
+    this.emit({
       type: 'concert:recovered',
       concertId: this.concert.id,
       timestamp: new Date(),
@@ -195,7 +202,7 @@ export class Conductor implements IConductor {
         };
 
         await this.store.appendMovement(this.concert.id, failedRecord);
-        await this.store.pushEvent({
+        this.emit({
           type: 'movement:failed',
           concertId: this.concert.id,
           movementId: failedMovement.id,
@@ -230,7 +237,7 @@ export class Conductor implements IConductor {
     this._status = 'paused';
     this.concert.status = 'paused';
     await this.store.updateConcert({ id: this.concert.id, status: 'paused' });
-    await this.store.pushEvent({
+    this.emit({
       type: 'concert:paused',
       concertId: this.concert.id,
       timestamp: new Date(),
@@ -244,7 +251,7 @@ export class Conductor implements IConductor {
     this.pauseResolver?.();
     this.pauseResolver = null;
     await this.store.updateConcert({ id: this.concert.id, status: 'running' });
-    await this.store.pushEvent({
+    this.emit({
       type: 'concert:resumed',
       concertId: this.concert.id,
       timestamp: new Date(),
@@ -305,6 +312,29 @@ export class Conductor implements IConductor {
 
   async getState(): Promise<Concert> {
     return { ...this.concert };
+  }
+
+  onEvent(listener: (event: ConcertEvent) => void): void {
+    this.eventEmitter.on('event', listener);
+  }
+
+  offEvent(listener: (event: ConcertEvent) => void): void {
+    this.eventEmitter.off('event', listener);
+  }
+
+  private emit(event: ConcertEvent): void {
+    // Fan out to the in-process event bus synchronously so listeners never block.
+    this.eventEmitter.emit('event', event);
+    // Persist to the live event log fire-and-forget to keep the hot path
+    // non-blocking; surface write failures instead of silently swallowing them.
+    if (this.liveEventLog) {
+      this.liveEventLog.append(this.concert.id, event).catch((err) => {
+        console.error(
+          `Failed to append event to live log for concert '${this.concert.id}':`,
+          err,
+        );
+      });
+    }
   }
 
   private buildPreviousOutputs(): Map<MovementID, MovementRecord> {
@@ -380,7 +410,7 @@ export class Conductor implements IConductor {
         this.activeSessions.set(sessionId, harnessAdapter);
       }
 
-      await this.store.pushEvent({
+      this.emit({
         type: 'movement:started',
         concertId: this.concert.id,
         movementId: movement.id,
@@ -495,7 +525,7 @@ export class Conductor implements IConductor {
       childConcertIds: [...this.concert.childConcertIds],
     });
 
-    await this.store.pushEvent({
+    this.emit({
       type: 'child:created',
       concertId: this.concert.id,
       childConcertId: childConductor.concertId,
@@ -518,7 +548,7 @@ export class Conductor implements IConductor {
       }
     }
 
-    await this.store.pushEvent({
+    this.emit({
       type: 'child:completed',
       concertId: this.concert.id,
       childConcertId: childConductor.concertId,
@@ -569,7 +599,7 @@ export class Conductor implements IConductor {
 
     const heartbeatHandle = setInterval(() => {
       const elapsedMs = Date.now() - startedAt.getTime();
-      this.store.pushEvent({
+      this.emit({
         type: 'movement:progress',
         concertId: this.concert.id,
         movementId: movement.id,
@@ -579,7 +609,7 @@ export class Conductor implements IConductor {
           message: `Movement '${movement.id}' still running (${Math.round(elapsedMs / 1000)}s)`,
         },
         timestamp: new Date(),
-      }).catch(() => {});
+      });
     }, HEARTBEAT_INTERVAL_MS);
 
     return { movementSignal, onParentAbort, timeoutHandle, heartbeatHandle };
@@ -596,6 +626,14 @@ export class Conductor implements IConductor {
           id: this.concert.id,
           usage: update.usage,
         }).catch(() => {});
+        this.emit({
+          type: 'movement:progress',
+          concertId: this.concert.id,
+          movementId,
+          progressType: 'usage_update',
+          payload: { usage: update.usage },
+          timestamp: new Date(),
+        });
         return;
       }
       const payload: Record<string, unknown> = { type: update.type };
@@ -607,15 +645,17 @@ export class Conductor implements IConductor {
         payload.isError = update.isError;
         if (update.result !== undefined) payload.result = update.result;
         if (update.error) payload.error = update.error;
+      } else if (update.type === 'text_delta') {
+        payload.delta = update.delta;
       }
-      this.store.pushEvent({
+      this.emit({
         type: 'movement:progress',
         concertId: this.concert.id,
         movementId,
         progressType: update.type,
         payload,
         timestamp: new Date(),
-      }).catch(() => {});
+      });
     };
   }
 
@@ -803,7 +843,7 @@ export class Conductor implements IConductor {
         let totalSpend = record.usage.spend ?? 0;
         let totalTokens = record.usage.tokens ?? 0;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          await this.store.pushEvent({
+          this.emit({
             type: 'movement:failed',
             concertId: this.concert.id,
             movementId: movement.id,
@@ -839,7 +879,7 @@ export class Conductor implements IConductor {
 
       await this.store.appendMovement(this.concert.id, record);
       if (achieved) {
-        await this.store.pushEvent({
+        this.emit({
           type: 'movement:completed',
           concertId: this.concert.id,
           movementId: movement.id,
@@ -847,7 +887,7 @@ export class Conductor implements IConductor {
           timestamp: new Date(),
         });
       } else {
-        await this.store.pushEvent({
+        this.emit({
           type: 'movement:failed',
           concertId: this.concert.id,
           movementId: movement.id,
@@ -892,7 +932,7 @@ export class Conductor implements IConductor {
 
   private async handleExecutionError(err: unknown): Promise<void> {
     if (err instanceof ConstraintBreachError) {
-      await this.store.pushEvent({
+      this.emit({
         type: 'constraint:breached',
         concertId: this.concert.id,
         constraint: err.constraint,
@@ -949,19 +989,19 @@ export class Conductor implements IConductor {
     });
 
     if (status === 'completed') {
-      await this.store.pushEvent({
+      this.emit({
         type: 'concert:completed',
         concertId: this.concert.id,
         timestamp: new Date(),
       });
     } else if (status === 'cancelled') {
-      await this.store.pushEvent({
+      this.emit({
         type: 'concert:cancelled',
         concertId: this.concert.id,
         timestamp: new Date(),
       });
     } else {
-      await this.store.pushEvent({
+      this.emit({
         type: 'concert:failed',
         concertId: this.concert.id,
         error: { code: 'CONCERT_FAILED', message: reason ?? 'Unknown error', retryable: false, concertId: this.concert.id },
@@ -971,5 +1011,6 @@ export class Conductor implements IConductor {
 
     this.childConductors.clear();
     this.onFinalized?.(this.concert.id);
+    await this.liveEventLog?.close(this.concert.id);
   }
 }

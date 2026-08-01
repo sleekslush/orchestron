@@ -1,4 +1,5 @@
 import type { Orchestron } from '../orchestron.js';
+import type { ConcertEvent } from '@orchestron/core';
 
 export type ProgressCallback = (text: string) => void;
 
@@ -7,6 +8,32 @@ export interface StartConcertInput {
   context?: Record<string, unknown>;
   /** Explicit harness for this concert, overriding the global default. */
   harness?: string;
+}
+
+function progressText(event: ConcertEvent): string | undefined {
+  if (event.type !== 'movement:progress') return undefined;
+  const payload = event.payload;
+  let text =
+    (payload.message as string | undefined) ??
+    `Progress: ${event.progressType}${payload.toolName ? ` (${payload.toolName as string})` : ''}`;
+  if (event.progressType === 'tool_execution_start' && payload.args) {
+    const args = payload.args as Record<string, unknown>;
+    const cmd =
+      (args.command as string | undefined) ??
+      (args.filePath as string | undefined) ??
+      (args.file as string | undefined) ??
+      (args.path as string | undefined);
+    if (cmd) {
+      text += ` → ${cmd}`;
+    }
+  }
+  if (event.progressType === 'tool_execution_end' && payload.isError) {
+    text += ` [error]`;
+  }
+  if (event.progressType === 'text_delta' && typeof payload.delta === 'string') {
+    text += ` ${payload.delta}`;
+  }
+  return text;
 }
 
 export async function startConcert(
@@ -25,8 +52,6 @@ export async function startConcert(
     harness: input.harness,
   });
 
-  conductor.start().catch(() => {});
-
   const state = await conductor.getState();
   const result = {
     concertId: state.id,
@@ -40,55 +65,42 @@ export async function startConcert(
       `Started concert ${state.id}. Current movement: ${state.currentMovement ?? 'none'}.`,
     );
 
-    const startTime = Date.now();
+    // Stream live progress from the conductor bus for a bounded window (or until
+    // the concert reaches a terminal state), then return so the caller can act
+    // on the concertId while execution continues in the background.
     const maxStreamingMs = 10000;
-    const pollIntervalMs = 500;
-    let lastTimestamp = new Date(0);
-    let lastMovement = state.currentMovement;
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        conductor.offEvent(listener);
+        resolve();
+      };
 
-    while (Date.now() - startTime < maxStreamingMs) {
-      const events = await orchestron.store.getEvents(state.id, {
-        types: ['movement:progress'],
-        since: lastTimestamp,
-      });
-      for (const event of events) {
-        if (event.type !== 'movement:progress') continue;
-        const payload = event.payload;
-        let text =
-          (payload.message as string | undefined) ??
-          `Progress: ${event.progressType}${payload.toolName ? ` (${payload.toolName as string})` : ''}`;
-        if (event.progressType === 'tool_execution_start' && payload.args) {
-          const args = payload.args as Record<string, unknown>;
-          const cmd =
-            (args.command as string | undefined) ??
-            (args.filePath as string | undefined) ??
-            (args.file as string | undefined) ??
-            (args.path as string | undefined);
-          if (cmd) {
-            text += ` → ${cmd}`;
-          }
+      const listener = (event: ConcertEvent) => {
+        if (event.type === 'movement:started') {
+          onUpdate(`Movement ${event.movementId} started.`);
+        } else if (event.type === 'movement:progress') {
+          const text = progressText(event);
+          if (text) onUpdate(text);
+        } else if (
+          event.type === 'concert:completed' ||
+          event.type === 'concert:failed' ||
+          event.type === 'concert:cancelled'
+        ) {
+          onUpdate(`Concert finished with status: ${event.type.replace('concert:', '')}.`);
+          finish();
         }
-        if (event.progressType === 'tool_execution_end' && payload.isError) {
-          text += ` [error]`;
-        }
-        onUpdate(text);
-        lastTimestamp = event.timestamp;
-      }
+      };
+      conductor.onEvent(listener);
 
-      const current = await orchestron.store.getConcert(state.id);
-      if (current && current.currentMovement !== lastMovement) {
-        onUpdate(
-          `Movement advanced from ${lastMovement ?? 'none'} to ${current.currentMovement ?? 'completed'}.`,
-        );
-        lastMovement = current.currentMovement;
-      }
-      if (current && current.status !== 'running' && current.status !== 'pending') {
-        onUpdate(`Concert finished with status: ${current.status}.`);
-        break;
-      }
-
-      await new Promise((r) => setTimeout(r, pollIntervalMs));
-    }
+      const timer = setTimeout(finish, maxStreamingMs);
+      conductor.start().catch(() => {});
+    });
+  } else {
+    conductor.start().catch(() => {});
   }
 
   return result;

@@ -88,11 +88,13 @@ program
   .command('status [concert-id]')
   .description('Show system status or detailed concert status')
   .option('--verbose', 'Show detailed movement information')
+  .option('--watch', 'Tail live events for a running concert')
   .action(safeAction(async (concertId: string | undefined, _options: unknown, command: Command) => {
     const opts = command.optsWithGlobals();
     const verbose = opts.verbose === true;
+    const watch = opts.watch === true;
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
-      statusCommandHandler(orchestron, concertId, wantsJson(command), verbose),
+      statusCommandHandler(orchestron, concertId, wantsJson(command), verbose, watch),
     );
   }));
 
