@@ -222,6 +222,46 @@ describe('CLI commands', () => {
     expect(logs.some((l) => l.includes('System Status'))).toBe(true);
   });
 
+  it('renders aggregate spend as unknown when all concerts are unmeasured', async () => {
+    const storePath = join(dir, 'agg-spend.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    // Adapter reports tokens but no cost — spend is unmeasured (undefined).
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'Fake output', summary: 'Done', usage: { tokens: 50 } },
+    });
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { restore: restoreStart } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'cli-test', {}, false);
+    } finally {
+      restoreStart();
+    }
+
+    const { logs, restore } = captureOutput();
+    try {
+      await statusCommandHandler(orchestron, undefined, false, false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const output = logs.join('\n');
+    expect(output).toContain('System Status');
+    // Unmeasured aggregate spend must not render as a literal $0.000000.
+    expect(output).not.toContain('$0.000000');
+    expect(output).toContain('Total spend: unknown / 50 tokens');
+  });
+
   it('lists scores', async () => {
     const orchestron = await createTestOrchestron(dir);
 
