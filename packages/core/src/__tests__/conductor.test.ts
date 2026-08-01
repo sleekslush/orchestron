@@ -2162,6 +2162,49 @@ describe('model resolution', () => {
     expect(state.history[0].provider).toBe('openai');
   });
 
+  it('movement-level options fully replace score-level options', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score: Score = {
+      id: 'options-override',
+      name: 'Options Override Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      models: {
+        fake: { provider: 'anthropic', model: 'claude-opus', options: { thinkingLevel: 'low' } },
+      },
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          model: {
+            fake: { provider: 'anthropic', model: 'claude-3', options: { thinkingLevel: 'high' } },
+          },
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    registry.register(score);
+
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = new ConcertHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('options-override');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    expect(adapter.prompts[0].options).toEqual({ thinkingLevel: 'high' });
+  });
+
   it('passes movement-level per-harness model options to the adapter', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();

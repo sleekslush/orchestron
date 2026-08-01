@@ -140,6 +140,8 @@ models:
 
 Unknown `options` keys are ignored by the adapters.
 
+When both a movement-level entry and a score-level `models` entry apply, the movement-level entry wins entirely — its `options` replace the score-level ones, they are not merged (matching the model/provider precedence above).
+
 ### How to determine the right model per harness
 
 - Run `orchestron models` to list available `(provider, model)` pairs for every registered harness, or `orchestron models <harness>` for a single harness. Add `--json` for machine-readable output. A harness whose listing fails (e.g. the opencode server is unreachable) is reported per-harness (`(error: ...)` in human output, an `error` field in JSON) without aborting the rest of the listing.
