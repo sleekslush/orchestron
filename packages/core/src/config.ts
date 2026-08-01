@@ -24,9 +24,6 @@ export interface OrchestronConfig {
   evaluator?: {
     promptTemplate?: string;
   };
-  dashboard?: {
-    port?: number;
-  };
 }
 
 export interface ResolvedOrchestronConfig {
@@ -111,11 +108,6 @@ function normalizeConfig(raw: unknown): OrchestronConfig | undefined {
     const ev = input.evaluator as Record<string, unknown>;
     config.evaluator = {};
     if (typeof ev.promptTemplate === 'string') config.evaluator.promptTemplate = ev.promptTemplate;
-  }
-  if (input.dashboard && typeof input.dashboard === 'object') {
-    const db = input.dashboard as Record<string, unknown>;
-    config.dashboard = {};
-    if (typeof db.port === 'number') config.dashboard.port = db.port;
   }
 
   return Object.keys(config).length > 0 ? config : undefined;
