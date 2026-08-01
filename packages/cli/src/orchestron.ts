@@ -15,6 +15,8 @@ export interface OrchestronOptions {
 export interface OrchestronModelEntry {
   harness: string;
   models: HarnessModelInfo[];
+  /** Set when the harness is known but its model listing failed. */
+  error?: string;
 }
 
 export interface Orchestron {
@@ -83,7 +85,15 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     const entries: OrchestronModelEntry[] = [];
     for (const name of names) {
       const adapter = await resolveAdapterFor(adapterResolver, name);
-      entries.push({ harness: name, models: (await adapter.listModels?.()) ?? [] });
+      try {
+        entries.push({ harness: name, models: (await adapter.listModels?.()) ?? [] });
+      } catch (err) {
+        entries.push({
+          harness: name,
+          models: [],
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     return entries;
   };
@@ -174,7 +184,7 @@ class LazyAdapterResolver implements HarnessAdapterResolver {
         ({ OpencodeAdapter: Adapter } = await import('@orchestron/adapter-opencode'));
         break;
       default:
-        throw new Error(`Unknown harness adapter: ${name}`);
+        throw new Error(`No adapter registered for harness '${name}'`);
     }
 
     const adapter = new Adapter();

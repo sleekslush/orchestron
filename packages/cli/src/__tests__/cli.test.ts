@@ -497,17 +497,125 @@ describe('CLI commands', () => {
     mkdirSync(scoresDir, { recursive: true });
     writeScore(scoresDir, simpleScore);
 
+    // Default resolver path — the one the `orchestron` binary actually uses.
     const orchestron = await createOrchestron({
       storePath,
       scoresDirs: [scoresDir],
-      adapters: new Map([['fake', new FakeHarnessAdapter({})]]),
-      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-      defaultHarness: 'fake',
     });
 
     await expect(modelsCommandHandler(orchestron, 'nope', false)).rejects.toThrow(
       "No adapter registered for harness 'nope'",
     );
     orchestron.store.close();
+  });
+
+  it('lists no models for an adapter that cannot enumerate them', async () => {
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const stubAdapter: HarnessAdapter = {
+      type: 'stub',
+      async execute() {
+        return { output: 'ok', summary: 'ok', usage: { spend: 0, tokens: 0 } };
+      },
+    };
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([['stub', stubAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'stub',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, 'stub', true);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const parsed = JSON.parse(logs.join('\n'));
+    expect(parsed).toEqual([{ harness: 'stub', models: [] }]);
+  });
+
+  it('continues listing other harnesses when one harness fails to list models', async () => {
+    class FailingListHarnessAdapter extends FakeHarnessAdapter {
+      async listModels(): Promise<never> {
+        throw new Error('catalog unavailable');
+      }
+    }
+
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([
+        ['good', new FakeHarnessAdapter({ models: [{ provider: 'anthropic', model: 'claude-3' }] })],
+        ['bad', new FailingListHarnessAdapter({})],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'good',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, undefined, true);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const parsed = JSON.parse(logs.join('\n'));
+    const good = parsed.find((e: { harness: string }) => e.harness === 'good');
+    const bad = parsed.find((e: { harness: string }) => e.harness === 'bad');
+    expect(good.models).toEqual([{ provider: 'anthropic', model: 'claude-3' }]);
+    expect(good.error).toBeUndefined();
+    expect(bad.models).toEqual([]);
+    expect(bad.error).toContain('catalog unavailable');
+  });
+
+  it('shows a per-harness error in human output', async () => {
+    class FailingListHarnessAdapter extends FakeHarnessAdapter {
+      async listModels(): Promise<never> {
+        throw new Error('catalog unavailable');
+      }
+    }
+
+    const storePath = join(dir, 'models-store.db');
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, simpleScore);
+
+    const orchestron = await createOrchestron({
+      storePath,
+      scoresDirs: [scoresDir],
+      adapters: new Map([
+        ['good', new FakeHarnessAdapter({ models: [{ provider: 'anthropic', model: 'claude-3' }] })],
+        ['bad', new FailingListHarnessAdapter({})],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'good',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await modelsCommandHandler(orchestron, undefined, false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const output = logs.join('\n');
+    expect(output).toContain('good:');
+    expect(output).toContain('anthropic/claude-3');
+    expect(output).toContain('bad:');
+    expect(output).toContain('(error: catalog unavailable)');
   });
 });

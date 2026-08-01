@@ -1,4 +1,4 @@
-import type { Orchestron } from '../orchestron.js';
+import type { Orchestron, OrchestronModelEntry } from '../orchestron.js';
 import { printOutput } from '../output.js';
 
 export async function modelsCommandHandler(
@@ -11,9 +11,7 @@ export async function modelsCommandHandler(
   printOutput(json, entries, () => formatModelsHuman(entries));
 }
 
-function formatModelsHuman(
-  entries: Array<{ harness: string; models: Array<{ provider: string; model: string }> }>,
-): string {
+function formatModelsHuman(entries: OrchestronModelEntry[]): string {
   if (entries.length === 0) {
     return 'No harnesses registered.';
   }
@@ -21,6 +19,10 @@ function formatModelsHuman(
   const lines: string[] = [];
   for (const entry of entries) {
     lines.push(`${entry.harness}:`);
+    if (entry.error) {
+      lines.push(`  (error: ${entry.error})`);
+      continue;
+    }
     if (entry.models.length === 0) {
       lines.push('  (no models available)');
       continue;

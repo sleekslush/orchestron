@@ -142,7 +142,7 @@ Unknown `options` keys are ignored by the adapters.
 
 ### How to determine the right model per harness
 
-- Run `orchestron models` to list available `(provider, model)` pairs for every registered harness, or `orchestron models <harness>` for a single harness. Add `--json` for machine-readable output.
+- Run `orchestron models` to list available `(provider, model)` pairs for every registered harness, or `orchestron models <harness>` for a single harness. Add `--json` for machine-readable output. A harness whose listing fails (e.g. the opencode server is unreachable) is reported per-harness (`(error: ...)` in human output, an `error` field in JSON) without aborting the rest of the listing.
 - **Pi**: `orchestron models pi` (equivalent to `pi --list-models`). Provider IDs are Pi built-in names (`openai`, `anthropic`, `google`, `deepseek`, etc.). Model IDs are Pi built-in model names (`gpt-5`, `claude-sonnet-4.5`, etc.).
 - **Opencode**: `orchestron models opencode` (equivalent to `opencode models`). Provider and model IDs come from the Opencode server's registry.
 
