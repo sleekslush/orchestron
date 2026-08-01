@@ -6,6 +6,7 @@ import type {
   MovementRecord,
 } from '../types/concert.js';
 import type { ConcertEvent, EventFilter, SystemAggregates, SessionTrace } from '../types/index.js';
+import type { CostResolution, CostResolutionInput } from '../cost/types.js';
 
 export interface ConcertStore {
   saveConcert(concert: Concert, scoreYaml: string): Promise<void>;
@@ -22,6 +23,16 @@ export interface ConcertStore {
     record: Partial<MovementRecord> & { movementId: string },
   ): Promise<void>;
   getMovementHistory(concertId: ConcertID): Promise<MovementRecord[]>;
+
+  /**
+   * Compute estimated spend for persisted movements that have tokens + model/
+   * provider but no spend yet, persist it (marked `estimated`) and fold it
+   * into the owning concert's usage. Idempotent: movements that already carry
+   * spend are left untouched.
+   */
+  backfillSpend(
+    resolve: (input: CostResolutionInput) => Promise<CostResolution | null>,
+  ): Promise<{ updatedMovements: number; updatedConcerts: number }>;
 
   pushEvent(event: ConcertEvent): Promise<void>;
   getEvents(concertId: ConcertID, filter?: EventFilter): Promise<ConcertEvent[]>;

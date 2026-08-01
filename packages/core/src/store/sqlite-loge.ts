@@ -6,6 +6,7 @@ import type {
   MovementRecord,
 } from '../types/concert.js';
 import type { ConcertEvent, EventFilter, SystemAggregates, SessionTrace } from '../types/index.js';
+import type { CostResolution, CostResolutionInput } from '../cost/types.js';
 import type { ConcertStore } from './concert-store.js';
 import { createSqliteDb } from './sqlite-driver.js';
 import {
@@ -425,6 +426,88 @@ export class SqliteLoge implements ConcertStore {
     return rows.map(rowToMovementRecord);
   }
 
+  async backfillSpend(
+    resolve: (input: CostResolutionInput) => Promise<CostResolution | null>,
+  ): Promise<{ updatedMovements: number; updatedConcerts: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT id, concert_id, movement_id, model, provider, usage
+         FROM movements
+         WHERE json_extract(usage, '$.spend') IS NULL
+           AND (model IS NOT NULL OR provider IS NOT NULL)`,
+      )
+      .all() as Array<{
+      id: number;
+      concert_id: string;
+      movement_id: string;
+      model: string | null;
+      provider: string | null;
+      usage: string;
+    }>;
+
+    // Per-concert accumulation of newly-estimated spend, so we can fold it
+    // into the concert-level usage aggregate without double counting.
+    const concertTotals = new Map<
+      string,
+      { added: number; estimatedAdded: number; addedTokens: number }
+    >();
+    const updateStmt = this.db.prepare('UPDATE movements SET usage = ? WHERE id = ?');
+    let updatedMovements = 0;
+
+    for (const row of rows) {
+      const usage = jsonParse(row.usage, {}) as Record<string, unknown>;
+      const resolution = await resolve({
+        model: row.model ?? undefined,
+        provider: row.provider ?? undefined,
+        inputTokens: typeof usage.inputTokens === 'number' ? usage.inputTokens : undefined,
+        outputTokens: typeof usage.outputTokens === 'number' ? usage.outputTokens : undefined,
+      });
+      if (!resolution) continue;
+
+      usage.spend = resolution.spend;
+      usage.spendSource = resolution.source;
+      updateStmt.run(JSON.stringify(usage), row.id);
+      updatedMovements++;
+
+      const t = concertTotals.get(row.concert_id) ?? {
+        added: 0,
+        estimatedAdded: 0,
+        addedTokens: 0,
+      };
+      t.added += resolution.spend;
+      if (resolution.source === 'estimated') t.estimatedAdded += resolution.spend;
+      t.addedTokens += typeof usage.tokens === 'number' ? usage.tokens : 0;
+      concertTotals.set(row.concert_id, t);
+    }
+
+    let updatedConcerts = 0;
+    const concertStmt = this.db.prepare('SELECT usage FROM concerts WHERE id = ?');
+    const updateConcertStmt = this.db.prepare('UPDATE concerts SET usage = ? WHERE id = ?');
+    for (const [concertId, t] of concertTotals) {
+      const row = concertStmt.get(concertId) as { usage: string } | undefined;
+      if (!row) continue;
+      const usage = jsonParse(row.usage, {}) as Record<string, unknown>;
+      const priorSpend = typeof usage.spend === 'number' ? usage.spend : 0;
+      const priorSource =
+        usage.spendSource === 'measured' || usage.spendSource === 'estimated'
+          ? usage.spendSource
+          : usage.spend !== undefined
+            ? 'measured'
+            : undefined;
+      usage.spend = priorSpend + t.added;
+      usage.tokens = (typeof usage.tokens === 'number' ? usage.tokens : 0) + t.addedTokens;
+      // Flag the concert as estimated whenever any estimated spend was folded in.
+      usage.spendSource =
+        t.estimatedAdded > 0
+          ? 'estimated'
+          : (priorSource ?? 'estimated');
+      updateConcertStmt.run(JSON.stringify(usage), concertId);
+      updatedConcerts++;
+    }
+
+    return { updatedMovements, updatedConcerts };
+  }
+
   async pushEvent(event: ConcertEvent): Promise<void> {
     const { concertId, type, timestamp, ...rest } = event as ConcertEvent & { timestamp: Date };
     this.db
@@ -471,6 +554,10 @@ export class SqliteLoge implements ConcertStore {
           COUNT(*) as totalConcerts,
           SUM(CASE WHEN status IN ('running','paused') THEN 1 ELSE 0 END) as activeConcerts,
           SUM(CAST(json_extract(usage, '$.spend') AS REAL)) as totalSpend,
+          SUM(CASE WHEN json_extract(usage, '$.spendSource') = 'estimated'
+              THEN CAST(json_extract(usage, '$.spend') AS REAL) ELSE 0 END) as estimatedSpend,
+          SUM(CASE WHEN json_extract(usage, '$.spendSource') = 'measured'
+              THEN CAST(json_extract(usage, '$.spend') AS REAL) ELSE 0 END) as measuredSpend,
           SUM(CAST(json_extract(usage, '$.tokens') AS REAL)) as totalTokens,
           AVG(
             CASE WHEN completed_at IS NOT NULL
@@ -484,6 +571,8 @@ export class SqliteLoge implements ConcertStore {
       totalConcerts: number;
       activeConcerts: number;
       totalSpend: number | null;
+      estimatedSpend: number | null;
+      measuredSpend: number | null;
       totalTokens: number | null;
       avgDurationMs: number | null;
     };
@@ -498,6 +587,8 @@ export class SqliteLoge implements ConcertStore {
       // Keep unmeasured spend undefined (not 0) so the overview can render
       // "unknown" instead of implying the aggregate was genuinely free.
       totalSpend: row.totalSpend ?? undefined,
+      estimatedSpend: row.estimatedSpend ?? undefined,
+      measuredSpend: row.measuredSpend ?? undefined,
       totalTokens: row.totalTokens ?? 0,
       avgDurationMs: row.avgDurationMs ?? 0,
       failureRate: row.totalConcerts > 0 ? failed.cnt / row.totalConcerts : 0,

@@ -459,6 +459,7 @@ export class Conductor implements IConductor {
         if (response.structured) record.structured = response.structured;
         record.summary = response.summary;
         record.usage = response.usage;
+        if (record.usage.spend !== undefined) record.usage.spendSource = 'measured';
         if (response.model) record.model = response.model;
         if (response.provider) record.provider = response.provider;
         record.durationMs = Date.now() - startedAt.getTime();
@@ -573,6 +574,7 @@ export class Conductor implements IConductor {
         record.usage.tokens = (record.usage.tokens ?? 0) + (childRecord.usage.tokens ?? 0);
       }
     }
+    if (record.usage.spend !== undefined) record.usage.spendSource = 'measured';
 
     this.emit({
       type: 'child:completed',
@@ -1073,6 +1075,7 @@ export class Conductor implements IConductor {
       );
       this.concert.usage.spend = usageResult.totalSpend;
       this.concert.usage.tokens = usageResult.totalTokens;
+      if (this.concert.usage.spend !== undefined) this.concert.usage.spendSource = 'measured';
       this.checkSectionSpendLimit(movement, record);
 
       await this.store.updateConcert({

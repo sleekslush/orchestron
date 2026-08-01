@@ -29,13 +29,24 @@ export function formatDuration(ms: number | undefined): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export function formatUsage(usage: { spend?: number; tokens?: number }): string {
+export function formatUsage(usage: {
+  spend?: number;
+  tokens?: number;
+  spendSource?: string;
+}): string {
   const tokens = usage.tokens ?? 0;
   const spend =
     usage.spend === undefined
       ? 'unknown'
-      : `$${microToDollars(usage.spend).toFixed(6)}`;
+      : `${usage.spendSource === 'estimated' ? '~' : ''}$${formatDollars(usage.spend)}`;
   return `${spend} / ${tokens} tokens`;
+}
+
+/** Render microdollars as a compact USD string (e.g. `0.0214`), trimming zeros. */
+export function formatDollars(micro: number): string {
+  const dollars = microToDollars(micro);
+  const fixed = dollars.toFixed(6).replace(/\.?0+$/, '');
+  return fixed === '-0' || fixed === '' ? '0' : fixed;
 }
 
 /**
