@@ -61,8 +61,7 @@ Harness resolution priority: movement-level > explicit CLI arg > config default.
    `persistSession: false`.
 5. **Plugin packages** (`plugin-pi`, `plugin-opencode`) provide harness-specific
    session plugins. `plugin-common` has shared tool infrastructure.
-6. **CLI** lives in `packages/cli`. The dashboard is a simple embedded web server
-   reading/writing the Loge store.
+6. **CLI** lives in `packages/cli`.
 
 ## Config Precedence
 

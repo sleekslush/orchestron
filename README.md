@@ -90,9 +90,6 @@ pnpm orchestron cancel <concert-id>
 # List available scores
 pnpm orchestron scores
 pnpm orchestron scores --validate
-
-# Launch the web dashboard
-pnpm orchestron dashboard --port 3000
 ```
 
 Use `--json` for scriptable output and `--store <path>` for a custom SQLite
@@ -124,9 +121,6 @@ Create `~/.orchestron/config.json` to set persistent defaults:
   "pi": {
     "provider": "anthropic",
     "modelId": "claude-sonnet-4-20250514"
-  },
-  "dashboard": {
-    "port": 3000
   }
 }
 ```
@@ -306,7 +300,7 @@ packages/
   core/              # Types, Conductor, ConcertHall, ScoreRegistry, Loge
   adapter-pi/        # Pi harness adapter
   adapter-opencode/  # Opencode harness adapter
-  cli/               # orchestron CLI + basic web dashboard
+  cli/               # orchestron CLI
   plugin-common/     # Shared plugin logic (tools, orchestron bootstrap)
   plugin-pi/         # Pi session plugin
   plugin-opencode/   # Opencode session plugin
@@ -354,10 +348,8 @@ movement A cannot see movement B's conversation history. Set
 - [x] Conductor engine with crash recovery
 - [x] Pi harness adapter
 - [x] Opencode harness adapter
-- [x] CLI (`orchestron start`, `status`, `list`, `dashboard`, etc.)
-- [x] Basic dashboard (`orchestron dashboard`)
+- [x] CLI (`orchestron start`, `status`, `list`, etc.)
 - [x] Opencode session plugin
-- [ ] Rich dashboard (web UI + WebSocket)
 - [ ] Claude harness adapter
 - [ ] More example scores
 

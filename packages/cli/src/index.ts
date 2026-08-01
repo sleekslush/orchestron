@@ -10,7 +10,6 @@ import {
 import { statusCommandHandler } from './commands/status.js';
 import { listCommandHandler } from './commands/list.js';
 import { scoresCommandHandler } from './commands/scores.js';
-import { dashboardCommandHandler } from './commands/dashboard.js';
 import { wantsJson } from './output.js';
 
 function safeAction<T extends unknown[]>(
@@ -124,22 +123,6 @@ program
     const opts = command.opts();
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
       scoresCommandHandler(orchestron, opts.validate === true, wantsJson(command)),
-    );
-  }));
-
-program
-  .command('dashboard')
-  .description('Launch the dashboard server')
-  .option('--port <port>', 'Port to run the dashboard server on', '3000')
-  .action(safeAction(async (_options: unknown, command: Command) => {
-    const opts = command.opts();
-    const port = Number(opts.port);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      console.error(`error: option '--port <port>' argument '${opts.port}' is invalid. Must be an integer between 1 and 65535.`);
-      process.exit(1);
-    }
-    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
-      dashboardCommandHandler(orchestron, port),
     );
   }));
 
