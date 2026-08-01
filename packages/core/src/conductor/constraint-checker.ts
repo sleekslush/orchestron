@@ -5,7 +5,12 @@ import { dollarsToMicro, microToDollars } from '../money.js';
 import type { Program } from '../types/score.js';
 
 export interface ConstraintResult {
-  totalSpend: number;
+  /**
+   * Cumulative spend in microdollars, or `undefined` when spend is unmeasured
+   * (the adapter/server reported no cost). An unknown cost must not be
+   * indistinguishable from a genuinely free execution.
+   */
+  totalSpend: number | undefined;
   totalTokens: number;
 }
 
@@ -53,12 +58,20 @@ export class ConstraintChecker {
     startedAt: number,
     concertId: string,
   ): ConstraintResult {
-    const totalSpend = (currentUsage.spend ?? 0) + (recordUsage.spend ?? 0);
+    // Keep spend honest: only produce a numeric total when spend is
+    // measurable. If neither side reports spend, leave it undefined so
+    // downstream callers can render it as "unknown" rather than $0.00.
+    const totalSpend =
+      currentUsage.spend !== undefined || recordUsage.spend !== undefined
+        ? (currentUsage.spend ?? 0) + (recordUsage.spend ?? 0)
+        : undefined;
     const totalTokens = (currentUsage.tokens ?? 0) + (recordUsage.tokens ?? 0);
     const program = this.program ?? {};
 
     const maxSpendMicro = program.maxSpendDollars ? dollarsToMicro(program.maxSpendDollars) : undefined;
-    if (maxSpendMicro && totalSpend > maxSpendMicro) {
+    // Only enforce spend limits when spend is measurable; an unmeasured cost
+    // must not trip (or silently pass) a numeric budget.
+    if (totalSpend !== undefined && maxSpendMicro && totalSpend > maxSpendMicro) {
       const totalSpendDollars = microToDollars(totalSpend);
       throw new ConstraintBreachError(
         `Spend limit exceeded: $${totalSpendDollars.toFixed(6)} > $${program.maxSpendDollars!.toFixed(6)}`,

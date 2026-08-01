@@ -30,9 +30,12 @@ export function formatDuration(ms: number | undefined): string {
 }
 
 export function formatUsage(usage: { spend?: number; tokens?: number }): string {
-  const spend = usage.spend ?? 0;
   const tokens = usage.tokens ?? 0;
-  return `$${microToDollars(spend).toFixed(6)} / ${tokens} tokens`;
+  const spend =
+    usage.spend === undefined
+      ? 'unknown'
+      : `$${microToDollars(usage.spend).toFixed(6)}`;
+  return `${spend} / ${tokens} tokens`;
 }
 
 export function extractFailure(events: ConcertEvent[]) {

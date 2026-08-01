@@ -263,6 +263,47 @@ it('sub-scores', async () => {
   expect((await conductor.getState()).childConcertIds).toHaveLength(1);
 });
 
+it('sub-scores keep spend undefined when the child cost is unmeasured', async () => {
+  const store = new SqliteLoge(':memory:');
+  const registry = new ScoreRegistry();
+  registry.register({
+    id: 'parent-unmeasured', name: 'Parent Unmeasured', description: 'x', version: '1.0.0',
+    startMovement: 'p1',
+    movements: [{
+      id: 'p1', name: 'P1', section: 'x', description: 'x',
+      subscore: { scoreId: 'child', contextMapping: { input: 'shared.input' } },
+      goal: { description: 'done', strategy: 'llm_judge' },
+      transitions: [{ to: '__end__', on: 'success' }],
+    }],
+    program: {},
+  });
+  registry.register({
+    id: 'child', name: 'Child', description: 'x', version: '1.0.0',
+    startMovement: 'c1',
+    movements: [{
+      id: 'c1', name: 'C1', section: 'x', description: 'x',
+      harness: 'fake', prompt: 'Child {{context.input}}',
+      goal: { description: 'done', strategy: 'llm_judge' },
+      transitions: [{ to: '__end__', on: 'success' }],
+    }],
+    program: {},
+  });
+  // Child reports tokens but no cost — spend is unmeasured.
+  const adapter = new FakeHarnessAdapter({
+    defaultResponse: { output: 'child out', summary: 'done', usage: { tokens: 50 } },
+  });
+  const hall = createHall({
+    store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+  });
+  const conductor = await hall.createConcert('parent-unmeasured', { initialContext: { input: 'hello' } });
+  await conductor.start();
+  expect(conductor.status).toBe('completed');
+  const state = await conductor.getState();
+  expect(state.usage.spend).toBeUndefined();
+  expect(state.usage.tokens).toBe(50);
+});
+
 // ─── Conductor Lifecycle Tests ───────────────────────────────
 
 describe('Conductor lifecycle', () => {
@@ -1009,9 +1050,57 @@ describe('Dual prompt selection', () => {
     await conductor.start();
     expect(conductor.status).toBe('failed');
     const state = await conductor.getState();
-    // All attempts threw — no usage recorded
-    expect(state.usage.spend).toBe(0);
+    // All attempts threw — no spend reported, so it stays unmeasured (undefined)
+    // rather than being coerced to $0.
+    expect(state.usage.spend).toBeUndefined();
     expect(state.usage.tokens).toBe(0);
+  });
+
+  it('retryOnFailure keeps spend undefined when the movement cost is unmeasured', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'retry-unmeasured',
+      name: 'Retry Unmeasured',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          retryOnFailure: true,
+          budget: { maxRetries: 2 },
+          transitions: [{ to: '__end__', on: 'success' }, { to: '__fail__', on: 'failure' }],
+        },
+      ],
+      program: {},
+    });
+    // Adapter reports tokens but no cost on every attempt, and the first
+    // attempt fails. Spend is genuinely unmeasured, so it must stay undefined
+    // across the retry accumulation — not be synthesized to $0.
+    let attempts = 0;
+    const adapter = new (class extends FakeHarnessAdapter {
+      async execute(prompt: string, context: any, options?: any) {
+        attempts++;
+        if (options?.movementId === 'step_a' && attempts === 1) {
+          throw new Error('Fake failure');
+        }
+        return super.execute(prompt, context, options);
+      }
+    })({
+      defaultResponse: { output: 'o', summary: 's', usage: { tokens: 100 } },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('retry-unmeasured');
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+    const state = await conductor.getState();
+    expect(state.usage.spend).toBeUndefined();
+    expect(state.usage.tokens).toBe(100);
   });
 
   it('program budget enforced with retryOnFailure', async () => {
