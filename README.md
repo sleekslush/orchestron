@@ -5,7 +5,9 @@ Workflow orchestration for AI harnesses.
 Orchestron turns multi-step, agentic work into repeatable, observable, and
 budget-aware workflows. Define a **Score** (a DAG of **Movements**), pick a
 harness (Pi, opencode, or future adapters), and let a **Conductor** run the
-**Concert** while tracking spend, tokens, and progress in a local SQLite store.
+**Concert** while tracking spend, tokens, and state in a local SQLite store
+(`Loge`), with a live event log per concert at
+`~/.orchestron/traces/<concertId>/live.jsonl`.
 
 ## Why Orchestron?
 
@@ -13,8 +15,10 @@ harness (Pi, opencode, or future adapters), and let a **Conductor** run the
   scores instead of one-off prompts.
 - **Harness-agnostic** — run movements on Pi, opencode, or future adapters through
   the same interface.
-- **Observable** — every movement, prompt, output, goal evaluation, and cost is
-  persisted to a local SQLite database (`Loge`).
+- **Observable** — concerts, movements, outputs, and goal evaluations are
+  persisted to a local SQLite database (`Loge`); real-time progress, prompts, and
+  tool activity are streamed to a per-concert JSONL live event log
+  (`~/.orchestron/traces/<concertId>/live.jsonl`).
 - **Budget-aware** — set spend, movement, and duration limits at the score or
   section level.
 - **Composable** — scores can spawn sub-scores as child concerts.
@@ -79,8 +83,12 @@ pnpm orchestron start opencode-demo --context.topic='Obsidian plugins'
 
 # Monitor it
 pnpm orchestron list
-pnpm orchestron status <concert-id>
-pnpm orchestron status              # overview of all concerts
+pnpm orchestron status <concert-id>   # reads the concert's live event log
+pnpm orchestron status                # overview of all concerts
+pnpm orchestron status <concert-id> --watch   # tail the live event log
+
+Event history is logged to JSONL under `~/.orchestron/traces/<concertId>/live.jsonl`
+(one file per concert) — it is not stored in the SQLite `events` table.
 
 # Pause, resume, or cancel a concert
 pnpm orchestron pause <concert-id>
