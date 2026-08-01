@@ -126,7 +126,7 @@ movements:
 ### How to determine the right model per harness
 
 - **Pi**: Use `pi --list-models` to see available models. Provider IDs are Pi built-in names (`openai`, `anthropic`, `google`, `deepseek`, etc.). Model IDs are Pi built-in model names (`gpt-5.6-sol`, `claude-sonnet-4-5`, etc.).
-- **Opencode**: Use the Opencode server's model list (`opencode model list` or the TUI model picker). Provider and model IDs come from the Opencode server's registry.
+- **Opencode**: Use `opencode models` to list available models (optionally filtered by provider: `opencode models <provider>`), or the TUI model picker. Provider and model IDs come from the Opencode server's registry.
 
 ## Prompt Templating
 
