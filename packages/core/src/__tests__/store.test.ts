@@ -51,6 +51,28 @@ describe('SqliteLoge', () => {
     expect(retrieved!.usage.spend).toBe(100);
   });
 
+  it('should persist liveness fields (pid, hostname, heartbeat)', async () => {
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
+    const heartbeat = new Date();
+    await store.updateConcert({
+      id: 'test-concert-1',
+      status: 'running',
+      processId: 4242,
+      hostname: 'host-a',
+      lastHeartbeatAt: heartbeat,
+    });
+
+    const retrieved = await store.getConcert('test-concert-1');
+    expect(retrieved!.processId).toBe(4242);
+    expect(retrieved!.hostname).toBe('host-a');
+    expect(retrieved!.lastHeartbeatAt!.toISOString()).toBe(heartbeat.toISOString());
+
+    const listed = await store.listConcerts();
+    expect(listed[0].processId).toBe(4242);
+    expect(listed[0].hostname).toBe('host-a');
+    expect(listed[0].lastHeartbeatAt!.toISOString()).toBe(heartbeat.toISOString());
+  });
+
   it('should list concerts with filters', async () => {
     await store.saveConcert(makeConcert({ id: 'c1', status: 'running' }), dummyScoreYaml);
     await store.saveConcert(makeConcert({ id: 'c2', status: 'completed' }), dummyScoreYaml);

@@ -1,5 +1,6 @@
 import type { Orchestron } from '../orchestron.js';
 import type { ConcertEvent } from '@orchestron/core';
+import { computeLiveness } from '@orchestron/core';
 import {
   printOutput,
   formatConcertHuman,
@@ -7,6 +8,7 @@ import {
   formatDate,
   formatDuration,
   formatUsage,
+  formatLivenessHuman,
   movementToOutput,
 } from '../output.js';
 
@@ -106,6 +108,7 @@ async function renderStatus(
   const started = latestStartedEvent(fallbackEvents);
   const currentCommand = currentCommandFromProgress(progress);
   const currentPrompt = started?.prompt;
+  const liveness = computeLiveness(state);
 
   const output = {
     concertId: state.id,
@@ -116,13 +119,14 @@ async function renderStatus(
     currentMovement: state.currentMovement,
     currentCommand,
     currentPrompt,
+    liveness,
     usage: state.usage,
     failure,
     movements: history.map(movementToOutput),
   };
 
   printOutput(json, output, () =>
-    formatConcertHuman(state, history, fallbackEvents, verbose, currentCommand, currentPrompt),
+    formatConcertHuman(state, history, fallbackEvents, verbose, currentCommand, currentPrompt, liveness),
   );
 }
 
@@ -198,6 +202,7 @@ export async function statusCommandHandler(
       scoreId: c.scoreId,
       status: c.status,
       startedAt: c.startedAt.toISOString(),
+      liveness: computeLiveness(c),
     })),
   };
 
@@ -226,7 +231,9 @@ function formatSystemHuman(
   lines.push('');
   lines.push('Recent concerts:');
   for (const c of recent) {
-    lines.push(`  ${c.id}  ${c.scoreId}  ${c.status}  ${formatDate(c.startedAt)}`);
+    const live = computeLiveness(c);
+    const staleTag = live.stale ? '  [STALE]' : '';
+    lines.push(`  ${c.id}  ${c.scoreId}  ${c.status}  ${formatDate(c.startedAt)}${staleTag}`);
   }
   return lines.join('\n');
 }

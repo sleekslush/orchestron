@@ -1,6 +1,7 @@
 import type { ConcertFilter } from '@orchestron/core';
+import { computeLiveness } from '@orchestron/core';
 import type { Orchestron } from '../orchestron.js';
-import { printOutput, formatDate, formatUsage } from '../output.js';
+import { printOutput, formatDate, formatUsage, formatLivenessHuman } from '../output.js';
 
 export async function listCommandHandler(
   orchestron: Orchestron,
@@ -16,6 +17,7 @@ export async function listCommandHandler(
     startedAt: c.startedAt.toISOString(),
     completedAt: c.completedAt?.toISOString(),
     usage: c.usage,
+    liveness: computeLiveness(c),
   }));
 
   printOutput(json, output, () => formatListHuman(concerts));
@@ -45,10 +47,12 @@ function formatListHuman(
     const id = c.id.length > 15 ? `${c.id.slice(0, 12)}...` : c.id;
     const score = c.scoreId.length > 23 ? `${c.scoreId.slice(0, 20)}...` : c.scoreId;
     const started = formatDate(c.startedAt);
+    const live = computeLiveness(c);
+    const statusColumn = live.stale ? `${c.status}*` : c.status;
     lines.push(
-      `${id.padEnd(16)} ${score.padEnd(24)} ${c.status.padEnd(12)} ${started.padEnd(24)} ${formatUsage(
+      `${id.padEnd(16)} ${score.padEnd(24)} ${statusColumn.padEnd(12)} ${started.padEnd(24)} ${formatUsage(
         c.usage,
-      )}`,
+      )}  ${formatLivenessHuman(live)}`,
     );
   }
 
