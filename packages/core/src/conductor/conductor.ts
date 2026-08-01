@@ -663,7 +663,15 @@ export class Conductor implements IConductor {
       this.concert.lastHeartbeatAt = new Date();
       this.store
         .updateConcert({ id: this.concert.id, lastHeartbeatAt: this.concert.lastHeartbeatAt })
-        .catch(() => {});
+        .catch((err) => {
+          // Best-effort by design, but don't swallow failures silently: a
+          // concert that fails to persist heartbeats can be mis-flagged stale
+          // by reader-side liveness, so consecutive failures are a real signal.
+          console.error(
+            `Failed to persist heartbeat for concert '${this.concert.id}':`,
+            err,
+          );
+        });
     }, CONCERT_HEARTBEAT_INTERVAL_MS);
   }
 
@@ -718,8 +726,9 @@ export class Conductor implements IConductor {
     };
   }
 
-  /** Serialize an caught error into a SerializedError for a MovementRecord. */
-  private serializeMovementError(err: unknown, movementId: string): SerializedError {    if (err instanceof OrchestronError) {
+  /** Serialize a caught error into a SerializedError for a MovementRecord. */
+  private serializeMovementError(err: unknown, movementId: string): SerializedError {
+    if (err instanceof OrchestronError) {
       return {
         code: err.code,
         message: err.message,

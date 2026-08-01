@@ -39,7 +39,7 @@ export function formatUsage(usage: { spend?: number; tokens?: number }): string 
 }
 
 /**
- * Human-readable blur level of a concert's liveness: "stale — last seen Ns ago"
+ * Human-readable blurb of a concert's liveness: "stale — last seen Ns ago"
  * for dead/abandoned concerts, or a note that it was recently seen alive.
  */
 export function formatLivenessHuman(live: LivenessInfo, verbose = false): string {

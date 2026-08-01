@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { hostname } from 'node:os';
 import type { Concert } from '../types/concert.js';
 import {
   computeLiveness,
@@ -27,7 +28,7 @@ function makeConcert(overrides: Partial<Concert> = {}): Concert {
 describe('computeLiveness', () => {
   it('is not stale for a live process with a fresh heartbeat', () => {
     const live = computeLiveness(
-      makeConcert({ processId: process.pid, hostname: 'local', lastHeartbeatAt: new Date() }),
+      makeConcert({ processId: process.pid, hostname: hostname(), lastHeartbeatAt: new Date() }),
     );
     expect(live.stale).toBe(false);
   });
@@ -35,15 +36,14 @@ describe('computeLiveness', () => {
   it('flags a concert stale when the hosting process is gone', () => {
     // A PID that cannot exist: use a very high value unlikely to be in use.
     const pid = 2_000_000_000;
+    // Assert the precondition loudly so an environmental change (e.g. an OS
+    // that recycles huge PIDs) fails the test rather than silently skipping it.
+    expect(isProcessAlive(pid, hostname())).toBe(false);
     const info = computeLiveness(
-      makeConcert({ processId: pid, hostname: 'local', lastHeartbeatAt: new Date() }),
+      makeConcert({ processId: pid, hostname: hostname(), lastHeartbeatAt: new Date() }),
     );
-    // If the OS ever has such a huge PID (essentially never), skip; otherwise
-    // deterministic since the process cannot exist.
-    if (!isProcessAlive(pid, 'local')) {
-      expect(info.stale).toBe(true);
-      expect(info.reason).toBe('pid_dead');
-    }
+    expect(info.stale).toBe(true);
+    expect(info.reason).toBe('pid_dead');
   });
 
   it('does not judge a cross-host process by PID (falls back to heartbeat)', () => {
@@ -57,7 +57,7 @@ describe('computeLiveness', () => {
     const info = computeLiveness(
       makeConcert({
         processId: process.pid,
-        hostname: 'local',
+        hostname: hostname(),
         lastHeartbeatAt: new Date(Date.now() - CONCERT_STALE_AFTER_MS - 10_000),
       }),
     );
