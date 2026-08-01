@@ -45,6 +45,16 @@ export interface Concert {
   childConcertIds: ConcertID[];
   nestingDepth?: number;
   explicitHarness?: string;
+  /** Hosting process ID (written by the conductor on start / recover). */
+  processId?: number;
+  /** Hostname of the machine hosting the conductor process. */
+  hostname?: string;
+  /**
+   * Last time the hosting process reported itself alive. Written on a fixed
+   * interval by the conductor; readers derive staleness from it to detect
+   * processes that died without finalizing the concert.
+   */
+  lastHeartbeatAt?: Date;
   /** Isolated git worktree metadata, persisted so it survives restarts and is discoverable. */
   worktree?: ConcertWorktree;
 }

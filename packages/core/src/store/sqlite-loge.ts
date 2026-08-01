@@ -40,6 +40,9 @@ const SCHEMA_SQL = `
         child_concert_ids TEXT NOT NULL DEFAULT '[]',
         nesting_depth INTEGER,
         explicit_harness TEXT,
+        process_id INTEGER,
+        hostname TEXT,
+        last_heartbeat_at TEXT,
         worktree TEXT
       );
 
@@ -135,6 +138,15 @@ export class SqliteLoge implements ConcertStore {
     if (!concertColumns.some((col) => col.name === 'worktree')) {
       this.db.exec(`ALTER TABLE concerts ADD COLUMN worktree TEXT`);
     }
+    if (!concertColumns.some((col) => col.name === 'process_id')) {
+      this.db.exec(`ALTER TABLE concerts ADD COLUMN process_id INTEGER`);
+    }
+    if (!concertColumns.some((col) => col.name === 'hostname')) {
+      this.db.exec(`ALTER TABLE concerts ADD COLUMN hostname TEXT`);
+    }
+    if (!concertColumns.some((col) => col.name === 'last_heartbeat_at')) {
+      this.db.exec(`ALTER TABLE concerts ADD COLUMN last_heartbeat_at TEXT`);
+    }
     const sessionTraceColumns = this.db
       .prepare(`PRAGMA table_info(session_traces)`)
       .all() as Array<{ name: string }>;
@@ -150,8 +162,9 @@ export class SqliteLoge implements ConcertStore {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO concerts
         (id, score_id, score_yaml, status, started_at, completed_at, current_movement,
-         context, usage, triggered_by, parent_concert_id, child_concert_ids, nesting_depth, explicit_harness, worktree)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         context, usage, triggered_by, parent_concert_id, child_concert_ids, nesting_depth, explicit_harness, worktree,
+         process_id, hostname, last_heartbeat_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       concert.id,
@@ -169,6 +182,9 @@ export class SqliteLoge implements ConcertStore {
       concert.nestingDepth ?? null,
       concert.explicitHarness ?? null,
       concert.worktree ? JSON.stringify(concert.worktree) : null,
+      concert.processId ?? null,
+      concert.hostname ?? null,
+      serializeDate(concert.lastHeartbeatAt),
     );
 
     this.db.prepare('DELETE FROM movements WHERE concert_id = ?').run(concert.id);
@@ -213,6 +229,18 @@ export class SqliteLoge implements ConcertStore {
     if (concert.worktree !== undefined) {
       fields.push('worktree = ?');
       values.push(concert.worktree ? JSON.stringify(concert.worktree) : null);
+    }
+    if (concert.processId !== undefined) {
+      fields.push('process_id = ?');
+      values.push(concert.processId);
+    }
+    if (concert.hostname !== undefined) {
+      fields.push('hostname = ?');
+      values.push(concert.hostname);
+    }
+    if (concert.lastHeartbeatAt !== undefined) {
+      fields.push('last_heartbeat_at = ?');
+      values.push(serializeDate(concert.lastHeartbeatAt));
     }
 
     if (fields.length === 0) return;

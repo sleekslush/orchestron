@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import type { ConcertEvent } from '@orchestron/core';
+import type { ConcertEvent, LivenessInfo } from '@orchestron/core';
 import { microToDollars } from '@orchestron/core';
 
 export function wantsJson(cmd: Command): boolean {
@@ -36,6 +36,22 @@ export function formatUsage(usage: { spend?: number; tokens?: number }): string 
       ? 'unknown'
       : `$${microToDollars(usage.spend).toFixed(6)}`;
   return `${spend} / ${tokens} tokens`;
+}
+
+/**
+ * Human-readable blurb of a concert's liveness: "stale — last seen Ns ago"
+ * for dead/abandoned concerts, or a note that it was recently seen alive.
+ */
+export function formatLivenessHuman(live: LivenessInfo, verbose = false): string {
+  if (!live.stale) return '';
+  const seen =
+    live.secondsSinceLastSeen !== undefined
+      ? `last seen ${live.secondsSinceLastSeen}s ago`
+      : 'no heartbeat';
+  const reason = live.reason === 'pid_dead' ? 'process dead' : live.reason === 'heartbeat_stale' ? 'heartbeat stale' : '';
+  return verbose && reason
+    ? `stale (${reason}, ${seen})`
+    : `stale (${seen})`;
 }
 
 export function extractFailure(events: ConcertEvent[]) {
@@ -114,11 +130,15 @@ export function formatConcertHuman(
   verbose = false,
   currentCommand?: string,
   currentPrompt?: string,
+  liveness?: LivenessInfo,
 ): string {
   const lines: string[] = [];
   lines.push(`Concert: ${state.id}`);
   lines.push(`Score:   ${state.scoreId}`);
   lines.push(`Status:  ${state.status}`);
+  if (liveness?.stale) {
+    lines.push(`Liveness: ${formatLivenessHuman(liveness, true)}`);
+  }
   if (state.currentMovement) {
     lines.push(`Current: ${state.currentMovement}`);
   }
