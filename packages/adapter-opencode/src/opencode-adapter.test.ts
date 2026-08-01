@@ -746,3 +746,33 @@ describe('OpencodeAdapter', () => {
     });
   });
 });
+
+  it('passes directory to session.create when cwd is provided', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('hello', { shared: {} }, { cwd: '/worktree/path' });
+
+    expect(mockClient.session.create).toHaveBeenCalledWith({
+      title: 'ephemeral',
+      directory: '/worktree/path',
+    });
+  });
+
+  it('passes directory for a pooled session created with a cwd', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('hello', { shared: {} }, { sessionId: 'c1:m1', cwd: '/worktree/path' });
+
+    expect(mockClient.session.create).toHaveBeenCalledWith({
+      title: 'c1:m1',
+      directory: '/worktree/path',
+    });
+  });
+
+  it('omits directory when no cwd is provided', async () => {
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('hello', { shared: {} });
+
+    expect(mockClient.session.create).toHaveBeenCalledWith({ title: 'ephemeral' });
+  });

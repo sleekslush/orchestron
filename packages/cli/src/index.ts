@@ -48,12 +48,23 @@ const program = new Command()
 program
   .command('start <score-id>')
   .description('Start a new concert from a score')
+  .option('--worktree', 'Run the concert in an isolated git worktree')
+  .option('--worktree-base <branch>', "Base branch for the worktree (default: score metadata.baseBranch or 'origin/main')")
+  .option('--worktree-keep', 'Keep the worktree after the concert finishes (for debugging)')
   .allowUnknownOption()
   .action(safeAction(async (scoreId: string, _options: unknown, command: Command) => {
     const { parseContextArgs } = await import('./context.js');
     const context = parseContextArgs(process.argv);
+    const opts = command.opts() as {
+      worktree?: boolean;
+      worktreeBase?: string;
+      worktreeKeep?: boolean;
+    };
+    const worktree = opts.worktree === true
+      ? { baseBranch: opts.worktreeBase, keep: opts.worktreeKeep === true }
+      : undefined;
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
-      startCommandHandler(orchestron, scoreId, context, wantsJson(command)),
+      startCommandHandler(orchestron, scoreId, context, wantsJson(command), worktree),
     );
   }));
 

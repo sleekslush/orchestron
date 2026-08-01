@@ -21,6 +21,9 @@ export interface HarnessAdapterExecuteOptions {
    *  keys it honors. */
   options?: Record<string, unknown>;
   onProgress?: (update: ProgressUpdate) => void;
+  /** Working directory for the harness session (tool calls land here).
+   *  Default: process.cwd(). */
+  cwd?: string;
 }
 
 export interface HarnessModelInfo {

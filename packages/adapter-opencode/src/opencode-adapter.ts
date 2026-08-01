@@ -107,6 +107,8 @@ export class OpencodeAdapter implements HarnessAdapter {
   private initialization: Promise<void> | undefined;
   /** Cached model catalog from the server, populated on first successful fetch. */
   private validatedModels: Array<{ providerID: string; modelID: string }> | undefined;
+  /** Working directory per session id (from execute options). */
+  private sessionCwds = new Map<string, string>();
 
   constructor(config: OpencodeAdapterConfig = {}) {
     this.config = config;
@@ -114,7 +116,7 @@ export class OpencodeAdapter implements HarnessAdapter {
     this.modelId = config.modelId;
     this.tools = config.tools;
     this.sessionPool = new SessionPool(
-      (sessionId) => this.createOpencodeSession(sessionId),
+      (sessionId) => this.createOpencodeSession(sessionId, this.sessionCwds.get(sessionId)),
       async (data) => {
         await this.client?.session
           .delete({ sessionID: data.opencodeSessionId })
@@ -156,10 +158,11 @@ export class OpencodeAdapter implements HarnessAdapter {
 
     try {
       if (options?.sessionId) {
+        if (options.cwd) this.sessionCwds.set(options.sessionId, options.cwd);
         sessionData = await this.sessionPool.getOrCreate(options.sessionId);
       } else {
         ownSession = true;
-        sessionData = await this.createOpencodeSession('ephemeral');
+        sessionData = await this.createOpencodeSession('ephemeral', options?.cwd);
       }
 
       const opencodeSessionId = sessionData.opencodeSessionId;
@@ -380,6 +383,7 @@ export class OpencodeAdapter implements HarnessAdapter {
   }
 
   async disposeSession(sessionId: string): Promise<void> {
+    this.sessionCwds.delete(sessionId);
     await this.sessionPool.disposeSession(sessionId);
   }
 
@@ -583,6 +587,7 @@ export class OpencodeAdapter implements HarnessAdapter {
 
   private async createOpencodeSession(
     title: string,
+    cwd?: string,
   ): Promise<OpencodeSessionData> {
     if (!this.client) {
       throw new HarnessError(
@@ -593,6 +598,7 @@ export class OpencodeAdapter implements HarnessAdapter {
 
     const result = await this.client.session.create({
       title,
+      ...(cwd ? { directory: cwd } : {}),
     });
 
     if (result.error) {

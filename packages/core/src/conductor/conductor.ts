@@ -67,6 +67,8 @@ export class Conductor implements IConductor {
     private defaultHarness?: string,
     private onFinalized?: (concertId: ConcertID) => void,
     liveEventLog?: LiveEventLog,
+    private cwd?: string,
+    private worktreeDisposer?: () => Promise<void>,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
@@ -433,6 +435,7 @@ export class Conductor implements IConductor {
           provider: modelConfig.provider,
           options: modelConfig.options,
           onProgress,
+          cwd: this.cwd,
         });
 
         record.status = 'completed';
@@ -510,6 +513,7 @@ export class Conductor implements IConductor {
       triggeredBy: this.concert.triggeredBy,
       parentConcertId: this.concert.id,
       nestingDepth: this.nestingDepth + 1,
+      cwd: this.cwd,
     };
 
     const childConductor = await this.childFactory.createChildConcert(
@@ -1112,5 +1116,10 @@ export class Conductor implements IConductor {
     this.childConductors.clear();
     this.onFinalized?.(this.concert.id);
     await this.liveEventLog?.close(this.concert.id);
+    if (this.worktreeDisposer) {
+      const disposer = this.worktreeDisposer;
+      this.worktreeDisposer = undefined;
+      await disposer().catch(() => {});
+    }
   }
 }

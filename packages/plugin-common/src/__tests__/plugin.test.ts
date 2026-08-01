@@ -96,6 +96,42 @@ describe('plugin-common tool functions', () => {
     expect(result.startedAt).toBeDefined();
   });
 
+  it('forwards cwd to the concert so adapter sessions run there', async () => {
+    const capturedCwds: string[] = [];
+    class RecordingAdapter extends FakeHarnessAdapter {
+      async execute(prompt: string, context: any, options?: any) {
+        if (options?.cwd) capturedCwds.push(options.cwd);
+        return super.execute(prompt, context, options);
+      }
+    }
+    const orchestron = await createOrchestron({
+      storePath: ':memory:',
+      scoresDirs: [],
+      adapters: new Map([
+        ['fake', new RecordingAdapter({
+          defaultResponse: { output: 'output', summary: 'summary', usage: { spend: 10, tokens: 100 } },
+        })],
+      ]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+    orchestron.registry.register(linearScore());
+
+    const result = await startConcert(orchestron, {
+      scoreId: 'linear-test',
+      cwd: '/isolated/dir',
+    });
+
+    // Wait for the concert to reach a terminal state so the movements (and
+    // their adapter sessions) have definitely executed.
+    await waitForConcert(orchestron, { concertId: result.concertId });
+
+    expect(result.concertId).toBeDefined();
+    expect(capturedCwds.length).toBeGreaterThan(0);
+    expect(capturedCwds[0]).toBe('/isolated/dir');
+  });
+
+
   it('gets concert status and movement history', async () => {
     const orchestron = await createTestOrchestron(linearScore());
     const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });

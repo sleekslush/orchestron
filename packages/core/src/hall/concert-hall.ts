@@ -13,6 +13,7 @@ import type { StartOptions } from '../conductor/start-options.js';
 import { HarnessEvaluator, type Evaluator } from '../evaluator/index.js';
 import { ConductorPanic } from '../types/errors.js';
 import { createAdapterResolver, type AdapterResolver } from '../adapter-resolver.js';
+import { WorktreeManager } from '../worktree/worktree-manager.js';
 
 export interface ConcertHallOptions {
   store: ConcertStore;
@@ -22,6 +23,8 @@ export interface ConcertHallOptions {
   tracesDir?: string;
   liveEventLog?: LiveEventLog;
   defaultHarness?: string;
+  /** Optional custom worktree manager (primarily for tests). */
+  worktreeManager?: WorktreeManager;
 }
 
 export class ConcertHall implements ChildConcertFactory {
@@ -34,6 +37,7 @@ export class ConcertHall implements ChildConcertFactory {
   private tracesDir?: string;
   private liveEventLog?: LiveEventLog;
   private defaultHarness?: string;
+  private worktreeManager: WorktreeManager;
 
   constructor(options: ConcertHallOptions) {
     this.store = options.store;
@@ -46,6 +50,7 @@ export class ConcertHall implements ChildConcertFactory {
     this.tracesDir = options.tracesDir;
     this.liveEventLog = options.liveEventLog ?? (options.tracesDir ? new LiveEventLog(options.tracesDir) : undefined);
     this.defaultHarness = options.defaultHarness;
+    this.worktreeManager = options.worktreeManager ?? new WorktreeManager();
   }
 
   getLiveEventLog(): LiveEventLog | undefined {
@@ -56,6 +61,8 @@ export class ConcertHall implements ChildConcertFactory {
     concert: Concert,
     score: Score,
     explicitHarness?: string,
+    cwd?: string,
+    worktreeDisposer?: () => Promise<void>,
   ): Promise<Conductor> {
     const conductor = new Conductor(
       concert,
@@ -68,6 +75,8 @@ export class ConcertHall implements ChildConcertFactory {
       this.defaultHarness,
       (id) => this.cleanupConductor(id),
       this.liveEventLog,
+      cwd,
+      worktreeDisposer,
     );
     return conductor;
   }
@@ -147,26 +156,53 @@ export class ConcertHall implements ChildConcertFactory {
     options?: StartOptions,
   ): Promise<Conductor> {
     const score = this.scoreRegistry.get(scoreId);
+    const startOptions = options ?? {};
+    const concertId = nanoid(12);
+
+    // Resolve the concert's working directory. When `worktree` is set, create an
+    // isolated git worktree first (from the base branch) and run the concert in
+    // it, disposing it when the concert reaches a terminal state.
+    let cwd: string | undefined = startOptions.cwd;
+    let worktreeDisposer: (() => Promise<void>) | undefined;
+    if (startOptions.worktree) {
+      const worktreeOpts =
+        typeof startOptions.worktree === 'boolean'
+          ? {}
+          : startOptions.worktree;
+      const handle = await this.worktreeManager.create(score, worktreeOpts, concertId);
+      cwd = handle.path;
+      if (!worktreeOpts.keep) {
+        const branch = handle.branch;
+        const path = handle.path;
+        worktreeDisposer = () => this.worktreeManager.remove(path, branch);
+      }
+    }
 
     const concert: Concert = {
-      id: nanoid(12),
+      id: concertId,
       scoreId: score.id,
       status: 'pending',
       startedAt: new Date(),
       currentMovement: null,
       history: [],
-      context: { shared: { ...options?.initialContext } },
+      context: { shared: { ...startOptions?.initialContext } },
       usage: {},
-      triggeredBy: options?.triggeredBy ?? 'cli',
-      parentConcertId: options?.parentConcertId,
+      triggeredBy: startOptions?.triggeredBy ?? 'cli',
+      parentConcertId: startOptions?.parentConcertId,
       childConcertIds: [],
-      explicitHarness: options?.harness,
+      explicitHarness: startOptions?.harness,
     };
 
     const scoreYaml = yaml.dump(score);
     await this.store.saveConcert(concert, scoreYaml);
 
-    const conductor = await this.buildConductor(concert, score, options?.harness);
+    const conductor = await this.buildConductor(
+      concert,
+      score,
+      startOptions?.harness,
+      cwd,
+      worktreeDisposer,
+    );
 
     this.conductors.set(concert.id, conductor);
 
