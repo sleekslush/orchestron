@@ -3,12 +3,17 @@ name: Notify on PR approval
 on:
   pull_request_review:
     types: [submitted]
+  pull_request:
+    types: [labeled]
 
 permissions: {}
 
 jobs:
   notify:
-    if: github.event.review.state == 'approved'
+    if: >
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
+      || (github.event_name == 'pull_request' && github.event.action == 'labeled'
+          && github.event.label.name == 'approved:orchestron')
     runs-on: ubuntu-latest
     steps:
       - name: Push notification
