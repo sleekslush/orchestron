@@ -23,7 +23,17 @@ export interface Goal {
 
 export interface Transition {
   to: MovementID | '__end__' | '__fail__';
-  on: 'success' | 'failure' | 'any';
+  /**
+   * Outcome that routes to this transition target.
+   *
+   * - `success`: the harness produced an output and the goal was achieved.
+   * - `failure`: a technical execution failure (harness/adapter error, timeout,
+   *   crash), regardless of goal evaluation.
+   * - `rejection`: the harness produced a valid output but the evaluator judged
+   *   the goal was not achieved.
+   * - `any`: matches any of the above.
+   */
+  on: 'success' | 'failure' | 'rejection' | 'any';
 }
 
 export interface OutputConfig {
@@ -61,7 +71,18 @@ export interface Movement {
   goal: Goal;
   transitions: Transition[];
   budget?: MovementBudget;
+  /**
+   * Retry on a technical execution failure (harness/adapter error, timeout,
+   * crash). Independent of `retryOnRejection`: a goal rejection is not a
+   * technical failure and is only retried when `retryOnRejection` is set.
+   */
   retryOnFailure?: boolean;
+  /**
+   * Retry when the harness produced a valid output but the evaluator judged
+   * the movement's goal was not achieved (a rejection). Independent of
+   * `retryOnFailure`, which covers technical failures.
+   */
+  retryOnRejection?: boolean;
   /**
    * Model to use for this movement.
    *

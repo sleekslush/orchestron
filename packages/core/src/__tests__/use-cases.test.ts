@@ -42,7 +42,7 @@ function linearScore(): Score {
         harness: 'fake',
         prompt: 'Review: {{context.previousOutputs.plan}}',
         goal: { description: 'Plan approved', strategy: 'llm_judge' },
-        transitions: [{ to: '__end__', on: 'success' }, { to: 'plan', on: 'failure' }],
+        transitions: [{ to: '__end__', on: 'success' }, { to: 'plan', on: 'rejection' }],
       },
     ],
     program: { maxMovements: 10 },
@@ -126,7 +126,7 @@ describe('Use Case: Plan → Review → End', () => {
     });
     await conductor.start();
 
-    // Review always fails → should loop and eventually hit maxMovements
+    // Review always rejects (goal not achieved) → should loop and eventually hit maxMovements
     expect(conductor.status).toBe('failed');
     const state = await conductor.getState();
     expect(state.history.length).toBeGreaterThanOrEqual(4);

@@ -33,6 +33,9 @@ function printLiveEvent(event: ConcertEvent): void {
     case 'movement:failed':
       console.error(`✗ [${event.movementId}] Failed: ${event.error?.message ?? 'Unknown error'}`);
       break;
+    case 'movement:rejected':
+      console.error(`✗ [${event.movementId}] Rejected: ${event.result?.summary ?? 'Goal not achieved'}`);
+      break;
     case 'movement:progress':
       if (event.progressType === 'tool_execution_start') {
         console.error(renderToolLine(event.payload));

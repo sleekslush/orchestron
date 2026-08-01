@@ -213,7 +213,7 @@ export class Conductor implements IConductor {
 
         this.concert.history.push(failedRecord);
 
-        const transition = matchTransition(failedMovement, false);
+        const transition = matchTransition(failedMovement, 'failure');
         currentId = transition?.to ?? '__fail__';
       } else {
         currentId = '__fail__';
@@ -885,11 +885,87 @@ export class Conductor implements IConductor {
       record.goalEvaluation = evaluation;
       record.completedAt = new Date();
 
-      const achieved = evaluation.achieved && record.status === 'completed';
-      record.status = achieved ? 'completed' : 'failed';
+      // Goal rejection retries: the harness produced a valid output but the
+      // evaluator judged it did not achieve the movement's goal. This is
+      // distinct from a technical execution failure (harness/adapter error,
+      // timeout, crash), which is handled by `retryOnFailure` above.
+      if (
+        record.status === 'completed' &&
+        !evaluation.achieved &&
+        movement.retryOnRejection
+      ) {
+        const maxRetries = movement.budget?.maxRetries ?? 2;
+        // Accumulate spend/tokens across all retry attempts so budget
+        // enforcement counts every attempt. Spend stays `undefined` when no
+        // attempt reports a cost (unmeasured).
+        let totalSpend: number | undefined = record.usage.spend;
+        let totalTokens = record.usage.tokens ?? 0;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          const retryRecord = await this.executeMovement(movement, previousOutputs, signal);
+          totalSpend =
+            totalSpend !== undefined || retryRecord.usage.spend !== undefined
+              ? (totalSpend ?? 0) + (retryRecord.usage.spend ?? 0)
+              : undefined;
+          totalTokens += retryRecord.usage.tokens ?? 0;
+          Object.assign(record, retryRecord);
+          record.completedAt = new Date();
+          // A technical execution failure during a rejection retry aborts the
+          // retry loop: it must resolve to the `failure` outcome and not be
+          // re-attempted as a rejection (which would conflate the two outcomes
+          // and burn spend on a broken prompt/model combination).
+          if (retryRecord.status === 'failed') {
+            this.emit({
+              type: 'movement:rejected',
+              concertId: this.concert.id,
+              movementId: movement.id,
+              result: record,
+              retryCount: attempt,
+              timestamp: new Date(),
+            });
+            break;
+          }
+          const retryEvaluation = await this.evaluator.evaluate(
+            movement.goal,
+            retryRecord.output,
+            this.concert.context,
+            movement.id,
+          );
+          record.goalEvaluation = retryEvaluation;
+          this.emit({
+            type: 'movement:rejected',
+            concertId: this.concert.id,
+            movementId: movement.id,
+            result: record,
+            retryCount: attempt,
+            timestamp: new Date(),
+          });
+          if (retryEvaluation.achieved) {
+            break;
+          }
+        }
+        // Restore accumulated usage (Object.assign overwrote it).
+        record.usage.spend = totalSpend;
+        record.usage.tokens = totalTokens;
+      }
+
+      // Resolve the final movement status: completed on success; rejected when
+      // the harness succeeded but the goal was not achieved; failed on a
+      // technical execution error. These drive distinct transitions.
+      const transitionStatus: 'success' | 'failure' | 'rejection' =
+        record.status === 'completed'
+          ? record.goalEvaluation.achieved
+            ? 'success'
+            : 'rejection'
+          : 'failure';
+      record.status =
+        transitionStatus === 'success'
+          ? 'completed'
+          : transitionStatus === 'failure'
+            ? 'failed'
+            : 'rejected';
 
       await this.store.appendMovement(this.concert.id, record);
-      if (achieved) {
+      if (transitionStatus === 'success') {
         this.emit({
           type: 'movement:completed',
           concertId: this.concert.id,
@@ -897,12 +973,25 @@ export class Conductor implements IConductor {
           result: record,
           timestamp: new Date(),
         });
+      } else if (transitionStatus === 'rejection') {
+        this.emit({
+          type: 'movement:rejected',
+          concertId: this.concert.id,
+          movementId: movement.id,
+          result: record,
+          retryCount: 0,
+          timestamp: new Date(),
+        });
       } else {
+        // This branch fires only for true technical execution failures; a goal
+        // rejection is emitted separately as `movement:rejected`. The record
+        // normally carries a serialized error from executeMovement, so this
+        // is a defensive fallback only.
         this.emit({
           type: 'movement:failed',
           concertId: this.concert.id,
           movementId: movement.id,
-          error: record.error ?? { code: 'GOAL_FAILURE', message: 'Goal not achieved', retryable: false },
+          error: record.error ?? { code: 'EXECUTION_FAILED', message: 'Movement execution failed', retryable: false },
           retryCount: 0,
           timestamp: new Date(),
         });
@@ -930,7 +1019,7 @@ export class Conductor implements IConductor {
         usage: this.concert.usage,
       });
 
-      const transition = matchTransition(movement, achieved);
+      const transition = matchTransition(movement, transitionStatus);
       currentId = transition?.to ?? '__fail__';
     }
 

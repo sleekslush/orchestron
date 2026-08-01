@@ -1,9 +1,11 @@
 import type { Movement, Transition } from '../types/score.js';
 
+/** Outcome of a movement execution that drives transition resolution. */
+export type MovementOutcome = 'success' | 'failure' | 'rejection';
+
 export function matchTransition(
   movement: Movement,
-  achieved: boolean,
+  outcome: MovementOutcome,
 ): Transition | undefined {
-  const status: 'success' | 'failure' = achieved ? 'success' : 'failure';
-  return movement.transitions.find((t) => t.on === status || t.on === 'any');
+  return movement.transitions.find((t) => t.on === outcome || t.on === 'any');
 }

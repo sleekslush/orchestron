@@ -17,14 +17,20 @@ describe('matchTransition', () => {
   describe('wildcard (any)', () => {
     it('matches `any` when movement succeeds', () => {
       const movement = makeMovement([{ to: '__end__', on: 'any' }]);
-      const result = matchTransition(movement, true);
+      const result = matchTransition(movement, 'success');
       expect(result).toEqual({ to: '__end__', on: 'any' });
     });
 
     it('matches `any` when movement fails', () => {
       const movement = makeMovement([{ to: '__fail__', on: 'any' }]);
-      const result = matchTransition(movement, false);
+      const result = matchTransition(movement, 'failure');
       expect(result).toEqual({ to: '__fail__', on: 'any' });
+    });
+
+    it('matches `any` when movement is rejected', () => {
+      const movement = makeMovement([{ to: 'fallback', on: 'any' }]);
+      const result = matchTransition(movement, 'rejection');
+      expect(result).toEqual({ to: 'fallback', on: 'any' });
     });
   });
 
@@ -34,7 +40,7 @@ describe('matchTransition', () => {
         { to: 'on_success', on: 'success' },
         { to: 'fallback', on: 'any' },
       ]);
-      const result = matchTransition(movement, true);
+      const result = matchTransition(movement, 'success');
       expect(result).toEqual({ to: 'on_success', on: 'success' });
     });
 
@@ -43,8 +49,17 @@ describe('matchTransition', () => {
         { to: 'on_failure', on: 'failure' },
         { to: 'fallback', on: 'any' },
       ]);
-      const result = matchTransition(movement, false);
+      const result = matchTransition(movement, 'failure');
       expect(result).toEqual({ to: 'on_failure', on: 'failure' });
+    });
+
+    it('prefers exact `rejection` over `any`', () => {
+      const movement = makeMovement([
+        { to: 'on_rejection', on: 'rejection' },
+        { to: 'fallback', on: 'any' },
+      ]);
+      const result = matchTransition(movement, 'rejection');
+      expect(result).toEqual({ to: 'on_rejection', on: 'rejection' });
     });
 
     it('falls back to `any` when exact match is absent', () => {
@@ -52,8 +67,21 @@ describe('matchTransition', () => {
         { to: 'on_success', on: 'success' },
         { to: 'fallback', on: 'any' },
       ]);
-      const result = matchTransition(movement, false);
+      const result = matchTransition(movement, 'failure');
       expect(result).toEqual({ to: 'fallback', on: 'any' });
+    });
+
+    it('routes rejection to its own transition, not `failure`', () => {
+      const movement = makeMovement([
+        { to: 'on_failure', on: 'failure' },
+        { to: 'on_rejection', on: 'rejection' },
+      ]);
+      const result = matchTransition(movement, 'rejection');
+      expect(result).toEqual({ to: 'on_rejection', on: 'rejection' });
+      expect(matchTransition(movement, 'failure')).toEqual({
+        to: 'on_failure',
+        on: 'failure',
+      });
     });
   });
 
@@ -62,13 +90,13 @@ describe('matchTransition', () => {
       const movement = makeMovement([
         { to: '__end__', on: 'success' },
       ]);
-      const result = matchTransition(movement, false);
+      const result = matchTransition(movement, 'failure');
       expect(result).toBeUndefined();
     });
 
     it('returns undefined for empty transitions', () => {
       const movement = makeMovement([]);
-      const result = matchTransition(movement, true);
+      const result = matchTransition(movement, 'success');
       expect(result).toBeUndefined();
     });
   });
@@ -79,7 +107,7 @@ describe('matchTransition', () => {
         { to: 'first', on: 'any' },
         { to: 'second', on: 'any' },
       ]);
-      const result = matchTransition(movement, true);
+      const result = matchTransition(movement, 'success');
       expect(result).toEqual({ to: 'first', on: 'any' });
     });
   });

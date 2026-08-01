@@ -16,6 +16,7 @@ export type MovementStatus =
   | 'in_progress'
   | 'completed'
   | 'failed'
+  | 'rejected'
   | 'skipped';
 
 export interface ResourceUsage {
