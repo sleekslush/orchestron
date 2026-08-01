@@ -42,13 +42,13 @@ Model names differ between harnesses. When authoring scores:
 - **Use per-harness model config for cross-harness scores.** When a score may run on multiple harnesses, use the per-harness map form:
   ```yaml
   model:
-    pi: { provider: "anthropic", model: "claude-sonnet-4-5" }
-    opencode: { provider: "anthropic", model: "claude-opus-4-7" }
+    pi: { provider: "anthropic", model: "claude-sonnet-4.5" }
+    opencode: { provider: "opencode", model: "claude-opus-4-7" }
   ```
 - **Use flat strings for single-harness scores.** When the harness is fixed, a flat string is simpler:
   ```yaml
   harness: pi
-  model: "claude-sonnet-4-5"
+  model: "claude-sonnet-4.5"
   provider: "anthropic"
   ```
 - **Omit model/provider to use defaults.** If the user doesn't specify a model, leave it out — the harness adapter will use its configured default.
@@ -81,7 +81,7 @@ name: "My Score"
 version: "1.0.0"
 startMovement: plan
 models:                     # optional score-level defaults
-  pi: { provider: "anthropic", model: "claude-sonnet-4-5" }
+  pi: { provider: "anthropic", model: "claude-sonnet-4.5" }
 movements:
   - id: plan
     name: "Create Plan"

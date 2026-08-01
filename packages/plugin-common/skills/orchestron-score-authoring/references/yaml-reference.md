@@ -75,8 +75,8 @@ movements:
   - id: analyze
     harness: pi
     model:
-      pi: { provider: "anthropic", model: "claude-sonnet-4-5" }
-      opencode: { provider: "anthropic", model: "claude-opus-4-7" }
+      pi: { provider: "anthropic", model: "claude-sonnet-4.5" }
+      opencode: { provider: "opencode", model: "claude-opus-4-7" }
 ```
 
 When the movement runs, the conductor selects the entry matching the resolved harness. If the movement uses `harness: pi`, it gets the `pi` entry. If run with `--harness opencode`, it gets the `opencode` entry.
@@ -87,7 +87,7 @@ When the movement runs, the conductor selects the entry matching the resolved ha
 movements:
   - id: analyze
     harness: pi
-    model: "claude-sonnet-4-5"
+    model: "claude-sonnet-4.5"
     provider: "anthropic"
 ```
 
@@ -102,8 +102,8 @@ version: "1.0.0"
 startMovement: analyze
 
 models:
-  pi: { provider: "anthropic", model: "claude-sonnet-4-5" }
-  opencode: { provider: "anthropic", model: "claude-opus-4-7" }
+  pi: { provider: "anthropic", model: "claude-sonnet-4.5" }
+  opencode: { provider: "opencode", model: "claude-opus-4-7" }
 
 movements:
   - id: analyze
@@ -112,7 +112,7 @@ movements:
   - id: review
     harness: opencode
     model:
-      opencode: { provider: "openai", model: "gpt-5.6-sol" }
+      opencode: { provider: "opencode", model: "gpt-5.1-codex" }
     # overrides the opencode default for this movement only
 ```
 
@@ -125,7 +125,7 @@ movements:
 
 ### How to determine the right model per harness
 
-- **Pi**: Use `pi --list-models` to see available models. Provider IDs are Pi built-in names (`openai`, `anthropic`, `google`, `deepseek`, etc.). Model IDs are Pi built-in model names (`gpt-5.6-sol`, `claude-sonnet-4-5`, etc.).
+- **Pi**: Use `pi --list-models` to see available models. Provider IDs are Pi built-in names (`openai`, `anthropic`, `google`, `deepseek`, etc.). Model IDs are Pi built-in model names (`gpt-5`, `claude-sonnet-4.5`, etc.).
 - **Opencode**: Use `opencode models` to list available models (optionally filtered by provider: `opencode models <provider>`), or the TUI model picker. Provider and model IDs come from the Opencode server's registry.
 
 ## Prompt Templating
