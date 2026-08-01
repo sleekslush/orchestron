@@ -141,9 +141,10 @@ export class OpencodeAdapter implements HarnessAdapter {
     const provider = options?.provider ?? this.provider;
     const modelId = options?.model ?? this.modelId;
 
-    // Validate model before creating a session or spending tokens.
-    // If the server is unreachable the check is skipped; the prompt call
-    // will surface the real error.
+    // Validate model before creating a session or spending tokens. A
+    // down/unreachable server fails fast here with a clear message naming
+    // the requested model, rather than surfacing a bare connection error
+    // from the prompt call.
     if (provider && modelId) {
       await this.validateModel(provider, modelId);
     }
@@ -473,8 +474,9 @@ export class OpencodeAdapter implements HarnessAdapter {
    * Validate that the requested model exists on the Opencode server.
    *
    * Fetches the model catalog on first call and caches it.  When the
-   * server is unreachable the check is silently skipped — the subsequent
-   * prompt call will surface the real error.
+   * catalog cannot be fetched (e.g. the server is unreachable) a
+   * HARNESS_FAILURE is thrown naming the requested model so the failure
+   * surfaces immediately instead of as a bare client connection error.
    */
   private async validateModel(provider: string, modelId: string): Promise<void> {
     if (!this.client) return;
@@ -501,7 +503,11 @@ export class OpencodeAdapter implements HarnessAdapter {
       }
     } catch (err) {
       if (err instanceof HarnessError) throw err;
-      // Server unreachable or other transient error — skip validation.
+      throw new HarnessError(
+        `Cannot verify model '${modelId}' for provider '${provider}': ` +
+        `opencode server unreachable — ${(err as Error).message ?? String(err)}`,
+        'HARNESS_FAILURE',
+      );
     }
   }
 
