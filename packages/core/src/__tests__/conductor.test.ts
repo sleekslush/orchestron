@@ -1243,6 +1243,72 @@ describe('Dual prompt selection', () => {
     expect(state.usage.tokens).toBe(200);
   });
 
+  it('retryOnRejection stops retrying and resolves to failure when a retry fails technically', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'reject-retry-fail',
+      name: 'Reject Retry Fail',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a', name: 'A', section: 'x', harness: 'fake',
+          prompt: 'Do the thing',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          retryOnRejection: true,
+          budget: { maxRetries: 3 },
+          transitions: [
+            { to: '__end__', on: 'success' },
+            { to: 'fail_out', on: 'failure' },
+            { to: '__fail__', on: 'rejection' },
+          ],
+        },
+        {
+          id: 'fail_out', name: 'Fail Out', section: 'x', harness: 'fake',
+          prompt: 'Handle failure',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    });
+    // Initial attempt succeeds (then gets rejected by the evaluator); every
+    // subsequent attempt throws a technical error.
+    const stepACalls: number[] = [];
+    const adapter = new (class extends FakeHarnessAdapter {
+      async execute(prompt: string, context: any, options?: any) {
+        if (options?.movementId === 'step_a') {
+          stepACalls.push(stepACalls.length + 1);
+          if (stepACalls.length > 1) {
+            throw new Error('Fake technical failure');
+          }
+        }
+        return super.execute(prompt, context, options);
+      }
+    })({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({
+        defaultResult: { achieved: false, confidence: 0, summary: 'rejected', evidence: '' },
+        perMovement: { fail_out: { achieved: true, confidence: 1, summary: 'ok', evidence: '' } },
+      }),
+    });
+    const conductor = await hall.createConcert('reject-retry-fail');
+    await conductor.start();
+    // Only the initial attempt + one retry ran (the first retry threw); the
+    // loop must NOT keep re-invoking the harness for the remaining maxRetries.
+    expect(stepACalls.length).toBe(2);
+    const state = await conductor.getState();
+    // Resolved as a `failure` (not `rejected`) and routed to `fail_out`.
+    expect(state.history[0].status).toBe('failed');
+    expect(state.history[1].movementId).toBe('fail_out');
+    expect(state.history[1].status).toBe('completed');
+    expect(conductor.status).toBe('completed');
+  });
+
   it('program budget enforced with retryOnFailure', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();

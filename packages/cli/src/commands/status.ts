@@ -62,6 +62,9 @@ function printLiveEvent(event: ConcertEvent): void {
     case 'movement:failed':
       console.error(`✗ [${event.movementId}] Failed: ${event.error?.message ?? 'Unknown error'}`);
       break;
+    case 'movement:rejected':
+      console.error(`✗ [${event.movementId}] Rejected: ${event.result?.summary ?? 'Goal not achieved'}`);
+      break;
     case 'concert:completed':
       console.error('✓ Concert completed');
       break;

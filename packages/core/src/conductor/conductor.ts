@@ -901,14 +901,6 @@ export class Conductor implements IConductor {
         let totalSpend: number | undefined = record.usage.spend;
         let totalTokens = record.usage.tokens ?? 0;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          this.emit({
-            type: 'movement:rejected',
-            concertId: this.concert.id,
-            movementId: movement.id,
-            result: record,
-            retryCount: attempt,
-            timestamp: new Date(),
-          });
           const retryRecord = await this.executeMovement(movement, previousOutputs, signal);
           totalSpend =
             totalSpend !== undefined || retryRecord.usage.spend !== undefined
@@ -917,6 +909,21 @@ export class Conductor implements IConductor {
           totalTokens += retryRecord.usage.tokens ?? 0;
           Object.assign(record, retryRecord);
           record.completedAt = new Date();
+          // A technical execution failure during a rejection retry aborts the
+          // retry loop: it must resolve to the `failure` outcome and not be
+          // re-attempted as a rejection (which would conflate the two outcomes
+          // and burn spend on a broken prompt/model combination).
+          if (retryRecord.status === 'failed') {
+            this.emit({
+              type: 'movement:rejected',
+              concertId: this.concert.id,
+              movementId: movement.id,
+              result: record,
+              retryCount: attempt,
+              timestamp: new Date(),
+            });
+            break;
+          }
           const retryEvaluation = await this.evaluator.evaluate(
             movement.goal,
             retryRecord.output,
@@ -924,7 +931,15 @@ export class Conductor implements IConductor {
             movement.id,
           );
           record.goalEvaluation = retryEvaluation;
-          if (retryEvaluation.achieved && retryRecord.status === 'completed') {
+          this.emit({
+            type: 'movement:rejected',
+            concertId: this.concert.id,
+            movementId: movement.id,
+            result: record,
+            retryCount: attempt,
+            timestamp: new Date(),
+          });
+          if (retryEvaluation.achieved) {
             break;
           }
         }
@@ -968,11 +983,15 @@ export class Conductor implements IConductor {
           timestamp: new Date(),
         });
       } else {
+        // This branch fires only for true technical execution failures; a goal
+        // rejection is emitted separately as `movement:rejected`. The record
+        // normally carries a serialized error from executeMovement, so this
+        // is a defensive fallback only.
         this.emit({
           type: 'movement:failed',
           concertId: this.concert.id,
           movementId: movement.id,
-          error: record.error ?? { code: 'GOAL_FAILURE', message: 'Goal not achieved', retryable: false },
+          error: record.error ?? { code: 'EXECUTION_FAILED', message: 'Movement execution failed', retryable: false },
           retryCount: 0,
           timestamp: new Date(),
         });
