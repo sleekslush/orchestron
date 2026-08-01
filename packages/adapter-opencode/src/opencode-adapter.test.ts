@@ -299,6 +299,76 @@ describe('OpencodeAdapter', () => {
     expect(result.usage.tokens).toBe(5);
   });
 
+  it('aggregates usage across all assistant messages in a turn', async () => {
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: makeAssistantMessage({ cost: 0.0001, tokens: { input: 10, output: 5, total: 15 } }),
+          parts: [makeTextPart('intermediate')],
+        },
+        {
+          info: makeAssistantMessage({ cost: 0.0002, tokens: { input: 3, output: 2, total: 5 } }),
+          parts: [makeTextPart('final')],
+        },
+      ],
+    });
+    const adapter = new OpencodeAdapter();
+
+    const result = await adapter.execute('hi', { shared: {} });
+
+    expect(result.output).toBe('final');
+    // cost (0.0001 + 0.0002) * 1e6 = 300 micro; tokens summed across both steps.
+    expect(result.usage).toEqual({
+      spend: 300,
+      tokens: 20,
+      inputTokens: 13,
+      outputTokens: 7,
+    });
+  });
+
+  it('leaves spend undefined when the server omits cost', async () => {
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: {
+            ...makeAssistantMessage({ tokens: { input: 10, output: 5, total: 15 } }),
+            cost: undefined,
+          },
+          parts: [makeTextPart('final')],
+        },
+      ],
+    });
+    const adapter = new OpencodeAdapter();
+
+    const result = await adapter.execute('hi', { shared: {} });
+
+    expect(result.usage.spend).toBeUndefined();
+    expect(result.usage.tokens).toBe(15);
+  });
+
+  it('aggregates only the current turn when reusing a persistent session', async () => {
+    const prior = makeAssistantMessage({ cost: 0.01, tokens: { input: 100, output: 50, total: 150 } });
+    const current = makeAssistantMessage({ cost: 0.0001, tokens: { input: 5, output: 3, total: 8 } });
+
+    // First call (turn-boundary capture before the prompt) returns only the
+    // prior turn; subsequent polls include the new turn.
+    mockClient.session.messages
+      .mockResolvedValueOnce({ data: [{ info: prior, parts: [makeTextPart('old')] }] })
+      .mockResolvedValue({
+        data: [
+          { info: prior, parts: [makeTextPart('old')] },
+          { info: current, parts: [makeTextPart('new')] },
+        ],
+      });
+    const adapter = new OpencodeAdapter();
+
+    const result = await adapter.execute('second', { shared: {} }, { sessionId: 'c1:m1' });
+
+    expect(result.output).toBe('new');
+    // Only the current turn's message is counted, not the prior turn.
+    expect(result.usage).toEqual({ spend: 100, tokens: 8, inputTokens: 5, outputTokens: 3 });
+  });
+
   it('aborts the session when the signal is aborted', async () => {
     let rejectPrompt: ((err: Error) => void) | undefined;
     mockClient.session.promptAsync.mockImplementation(

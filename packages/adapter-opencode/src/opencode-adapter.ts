@@ -163,6 +163,22 @@ export class OpencodeAdapter implements HarnessAdapter {
 
       const opencodeSessionId = sessionData.opencodeSessionId;
 
+      // Determine the message boundary for this turn so per-turn usage (cost +
+      // tokens) can be aggregated across every assistant message in the turn
+      // without double-counting prior turns in a persistent (reused) session.
+      // A fresh/ephemeral session always starts at index 0.
+      let turnStartIndex = 0;
+      if (options?.sessionId) {
+        try {
+          const prior = await this.client.session.messages({
+            sessionID: opencodeSessionId,
+          });
+          turnStartIndex = prior.data?.length ?? 0;
+        } catch {
+          turnStartIndex = 0;
+        }
+      }
+
       const parameters: {
         sessionID: string;
         parts: Array<{ type: 'text'; text: string }>;
@@ -338,6 +354,7 @@ export class OpencodeAdapter implements HarnessAdapter {
           opencodeSessionId,
           options?.signal,
           options?.output?.mode === 'structured',
+          turnStartIndex,
         );
       }
 
@@ -346,6 +363,7 @@ export class OpencodeAdapter implements HarnessAdapter {
         opencodeSessionId,
         options?.signal,
         options?.output?.mode === 'structured',
+        turnStartIndex,
       );
     } finally {
       eventController.abort();
@@ -594,25 +612,55 @@ export class OpencodeAdapter implements HarnessAdapter {
     return collectTextParts(parts).join('');
   }
 
-  private toResourceUsage(
-    info: AssistantMessage | undefined,
+  /**
+   * Sum usage/cost across every assistant message produced since turnStartIndex
+   * (i.e. the current turn) rather than sampling only the final message. A
+   * turn that interleaves tool calls yields multiple assistant messages, each
+   * carrying its own cost/token usage; those per-step figures must be
+   * aggregated to report honest totals. When no assistant message in the turn
+   * reports a numeric cost, `spend` is left `undefined` (unmeasured) rather
+   * than coerced to zero.
+   */
+  private aggregateUsage(
+    messages: Array<{ info: Message; parts: Part[] }>,
+    turnStartIndex: number,
   ): {
     spend?: number;
     tokens?: number;
     inputTokens?: number;
     outputTokens?: number;
   } {
-    if (!info) return {};
+    let spendMicro: number | undefined;
+    let totalTokens = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let sawTokens = false;
 
-    const spend = info.cost;
-    const tokens = info.tokens;
-    const totalTokens = tokens?.total ?? (tokens?.input ?? 0) + (tokens?.output ?? 0);
+    const start = Math.max(0, turnStartIndex);
+    for (let i = start; i < messages.length; i++) {
+      const msg = messages[i];
+      if (!this.isAssistantMessage(msg)) continue;
+      const info = msg.info;
+
+      const cost = info.cost;
+      if (typeof cost === 'number') {
+        spendMicro = (spendMicro ?? 0) + dollarsToMicro(cost);
+      }
+
+      const tokens = info.tokens;
+      if (tokens) {
+        sawTokens = true;
+        inputTokens += tokens.input ?? 0;
+        outputTokens += tokens.output ?? 0;
+        totalTokens += tokens.total ?? ((tokens.input ?? 0) + (tokens.output ?? 0));
+      }
+    }
 
     return {
-      spend: typeof spend === 'number' ? dollarsToMicro(spend) : undefined,
-      tokens: totalTokens || undefined,
-      inputTokens: tokens?.input,
-      outputTokens: tokens?.output,
+      spend: spendMicro,
+      tokens: sawTokens ? totalTokens || undefined : undefined,
+      inputTokens: sawTokens ? inputTokens || undefined : undefined,
+      outputTokens: sawTokens ? outputTokens || undefined : undefined,
     };
   }
 
@@ -643,38 +691,44 @@ export class OpencodeAdapter implements HarnessAdapter {
   private responseFromMessages(
     messages: Array<{ info: Message; parts: Part[] }>,
     structuredOutput?: boolean,
+    turnStartIndex = 0,
   ): HarnessResponse | undefined {
+    let last: { info: AssistantMessage; parts: Part[] } | undefined;
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (!this.isAssistantMessage(msg)) continue;
-
-      const info = msg.info;
-      const parts = msg.parts;
-      const output = this.extractText(parts);
-      if (!output) continue;
-
-      let structured = tryParseStructured(info.structured);
-      if (!structured && structuredOutput) {
-        structured = tryParseStructuredFromText(output);
-      }
-
-      const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
-      return {
-        output,
-        structured,
-        summary,
-        usage: this.toResourceUsage(info),
-        model: info.modelID,
-        provider: info.providerID,
-      };
+      if (!this.extractText(msg.parts)) continue;
+      last = msg;
+      break;
     }
-    return undefined;
+    if (!last) return undefined;
+
+    const info = last.info;
+    const parts = last.parts;
+    const output = this.extractText(parts);
+
+    let structured = tryParseStructured(info.structured);
+    if (!structured && structuredOutput) {
+      structured = tryParseStructuredFromText(output);
+    }
+
+    const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
+    return {
+      output,
+      structured,
+      summary,
+      // Aggregate cost/tokens across the whole turn, not just the final message.
+      usage: this.aggregateUsage(messages, turnStartIndex),
+      model: info.modelID,
+      provider: info.providerID,
+    };
   }
 
   private async waitForFinalResponse(
     sessionId: string,
     signal?: AbortSignal,
     structuredOutput = false,
+    turnStartIndex = 0,
   ): Promise<HarnessResponse> {
     if (!this.client) {
       throw new HarnessError('Opencode client is not initialized', 'HARNESS_FAILURE');
@@ -692,6 +746,7 @@ export class OpencodeAdapter implements HarnessAdapter {
         const response = this.responseFromMessages(
           result.data as Array<{ info: Message; parts: Part[] }>,
           structuredOutput,
+          turnStartIndex,
         );
         if (response) return response;
       }
