@@ -53,7 +53,7 @@ describe('HarnessEvaluator', () => {
     expect(result.summary).toBe('No tests');
   });
 
-  it('throws GoalEvalError when the response cannot be parsed', async () => {
+  it('degrades to an achieved:false evaluation when the response cannot be parsed', async () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: {
         output: 'not valid json',
@@ -63,7 +63,100 @@ describe('HarnessEvaluator', () => {
     });
     const evaluator = new HarnessEvaluator({ adapter });
 
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(false);
+    expect(result.confidence).toBe(0);
+    expect(result.summary).toContain('Evaluator output unparseable');
+    // Raw advisor output is persisted for debugging.
+    expect(result.evidence).toBe('not valid json');
+  });
+
+  it('does not throw when the response is empty', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: '   ', summary: 'Evaluated', usage: {} },
+    });
+    const evaluator = new HarnessEvaluator({ adapter });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toContain('(empty)');
+  });
+
+  it('throws GoalEvalError when configured defaultOnParseFailure is retry', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'not valid json',
+        summary: 'Evaluated',
+        usage: { spend: 1, tokens: 10 },
+      },
+    });
+    const evaluator = new HarnessEvaluator({ adapter, defaultOnParseFailure: 'retry' });
+
     await expect(evaluator.evaluate(goal, 'output', context)).rejects.toBeInstanceOf(GoalEvalError);
+  });
+
+  it('degrades to achieved:true when configured defaultOnParseFailure is passed', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'not valid json',
+        summary: 'Evaluated',
+        usage: { spend: 1, tokens: 10 },
+      },
+    });
+    const evaluator = new HarnessEvaluator({ adapter, defaultOnParseFailure: 'passed' });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+    expect(result.achieved).toBe(true);
+    expect(result.confidence).toBe(0);
+  });
+
+  it('extracts lenient key: value lines with type coercion', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'achieved: true\nconfidence: 0.9\nsummary: \"Plan is fine\"',
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const evaluator = new HarnessEvaluator({ adapter });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+    expect(result.achieved).toBe(true);
+    expect(result.confidence).toBe(0.9);
+    expect(result.summary).toBe('Plan is fine');
+  });
+
+  it('extracts lenient markdown bullet lists', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: '- achieved: false\n- confidence: 0.2\n- summary: \"Missing tests\"',
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const evaluator = new HarnessEvaluator({ adapter });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+    expect(result.achieved).toBe(false);
+    expect(result.confidence).toBe(0.2);
+    expect(result.summary).toBe('Missing tests');
+  });
+
+  it('rejects lenient extraction when not all required fields are present', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'achieved: true\nconfidence: 0.9',
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const evaluator = new HarnessEvaluator({ adapter });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+    // Missing summary -> falls through to graceful degradation.
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toContain('Evaluator output unparseable');
   });
 
   it('extracts goal evaluation from a markdown JSON block', async () => {

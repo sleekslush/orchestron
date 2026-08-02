@@ -123,4 +123,12 @@ export interface EvaluatorConfig {
   model?: string;
   provider?: string;
   prompt?: string;
+  /**
+   * Behavior when the evaluator model returns output that cannot be parsed into
+   * a valid GoalEvaluation. `failed` (default) degrades to an `achieved: false`
+   * evaluation so the concert never crashes; `passed` opts into an `achieved:
+   * true` fallback (never a safe default); `retry` throws a retryable error for
+   * hosts that handle retryable evaluator failures.
+   */
+  defaultOnParseFailure?: 'failed' | 'passed' | 'retry';
 }
