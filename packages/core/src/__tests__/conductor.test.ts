@@ -299,7 +299,11 @@ it('sub-scores', async () => {
   const conductor = await hall.createConcert('parent', { initialContext: { input: 'hello' } });
   await conductor.start();
   expect(conductor.status).toBe('completed');
-  expect((await conductor.getState()).childConcertIds).toHaveLength(1);
+  const state = await conductor.getState();
+  expect(state.context.shared.concertId).toBe(state.id);
+  expect(state.context.shared.scoreId).toBe('parent');
+  expect(state.context.shared.input).toBe('hello');
+  expect(state.childConcertIds).toHaveLength(1);
 });
 
 it('sub-scores keep spend undefined when the child cost is unmeasured', async () => {

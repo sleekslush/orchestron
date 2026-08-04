@@ -213,7 +213,7 @@ export class ConcertHall implements ChildConcertFactory {
       startedAt: new Date(),
       currentMovement: null,
       history: [],
-      context: { shared: { ...startOptions?.initialContext } },
+      context: { shared: { ...startOptions?.initialContext, concertId, scoreId: score.id } },
       usage: {},
       triggeredBy: startOptions?.triggeredBy ?? 'cli',
       parentConcertId: startOptions?.parentConcertId,
