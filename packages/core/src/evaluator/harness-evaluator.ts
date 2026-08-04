@@ -68,6 +68,13 @@ export interface HarnessEvaluatorConfig {
    * when the judge's own output parses cleanly.
    */
   structurizer?: EvaluatorStructurizerConfig;
+  /**
+   * How many bounded self-repair attempts to make when the judge returns
+   * non-empty output that cannot be parsed. Each attempt re-prompts the judge
+   * to re-emit only JSON matching the schema. Default `1`; `0` disables the
+   * repair pass entirely.
+   */
+  maxRepairAttempts?: number;
 }
 
 export class HarnessEvaluator implements Evaluator {
@@ -90,16 +97,29 @@ export class HarnessEvaluator implements Evaluator {
       provider: this.config.provider,
     });
 
-    const parsed = this.tryParseEvaluation(response);
+    // 1. Direct parse of the judge's own output.
+    const parsed = this.tryParse(response);
     if (parsed) {
       return parsed;
     }
 
-    // Configurable structurizer / second-model pass (strategy 4 from #103):
-    // when the judge's own output is unparseable (common with flaky flash-tier
-    // judge models), route the repair pass to a separate extraction model that
-    // reliably emits JSON. Invoked only on the recovery path, so it has no cost
-    // on the happy path.
+    // 2. Bounded self-repair pass (strategy 3 from #103): re-prompt the SAME
+    //    judge to re-emit only JSON. Cheap — no second model, no extra config.
+    //    Only runs when the judge produced non-empty output.
+    const text = response.output.trim();
+    if (text) {
+      const repaired = await this.tryRepair(text, context, movementId);
+      if (repaired) {
+        return repaired;
+      }
+    }
+
+    // 3. Configurable structurizer / second-model pass (strategy 4 from #103):
+    //    when the judge's own output is still unparseable (common with flaky
+    //    flash-tier judge models), route the repair pass to a separate
+    //    extraction model that reliably emits JSON. Invoked only on the
+    //    recovery path after self-repair is exhausted, so it has no cost on the
+    //    happy path and is the deeper fallback for judges that cannot format.
     if (this.config.structurizer) {
       try {
         const structurized = await this.structurizeGoalEvaluation(
@@ -184,7 +204,7 @@ export class HarnessEvaluator implements Evaluator {
       provider: structurizer.provider,
       movementId,
     });
-    return this.tryParseEvaluation(response);
+    return this.tryParse(response);
   }
 
   private buildPrompt(
@@ -213,31 +233,6 @@ Return a JSON object with:
       .replaceAll('{{output}}', output)
       .replaceAll('{{movementId}}', movementId ?? '')
       .replaceAll('{{context}}', JSON.stringify(context.shared, null, 2));
-  }
-
-  /**
-   * Attempt to parse the judge's response into a valid
-   * {@link GoalEvaluation}. Returns `undefined` when it cannot — no degradation
-   * here so callers can route unparseable output to the structurizer (strategy
-   * 4) before falling through to {@link degrade}.
-   */
-  private tryParseEvaluation(
-    response: HarnessResponse,
-  ): GoalEvaluation | undefined {
-    const structured = response.structured;
-    if (this.isGoalEvaluation(structured)) {
-      return structured;
-    }
-
-    const text = response.output.trim();
-    if (text) {
-      const parsed = this.extractGoalEvaluation(text);
-      if (parsed) {
-        return parsed;
-      }
-    }
-
-    return undefined;
   }
 
   /**
@@ -361,6 +356,71 @@ Return a JSON object with:
     );
     const match = re.exec(text);
     return match ? match[1].trim() : undefined;
+  }
+
+  /** Parses a single response without triggering a repair pass. */
+  private tryParse(response: HarnessResponse): GoalEvaluation | undefined {
+    if (this.isGoalEvaluation(response.structured)) {
+      return response.structured;
+    }
+    const text = response.output.trim();
+    if (text) {
+      const parsed = this.extractGoalEvaluation(text);
+      if (parsed) {
+        return parsed;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Bounded self-repair pass: re-prompt the judge to re-emit only JSON
+   * matching the schema, at most `maxRepairAttempts` times. Each repair
+   * response is parsed strictly (no recursive repair) so the total number of
+   * extra model calls is bounded.
+   */
+  private async tryRepair(
+    rawOutput: string,
+    context: ConcertContext,
+    movementId?: string,
+  ): Promise<GoalEvaluation | undefined> {
+    const maxAttempts = this.config.maxRepairAttempts ?? 1;
+    if (maxAttempts <= 0) {
+      return undefined;
+    }
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const repairResponse = await this.config.adapter.execute(
+        this.buildRepairPrompt(rawOutput),
+        context,
+        {
+          output: {
+            mode: 'structured',
+            schema: goalEvaluationSchema as unknown as Record<string, unknown>,
+          },
+          model: this.config.model,
+          provider: this.config.provider,
+        },
+      );
+      const parsed = this.tryParse(repairResponse);
+      if (parsed) {
+        return parsed;
+      }
+    }
+    return undefined;
+  }
+
+  private buildRepairPrompt(rawOutput: string): string {
+    return `Your previous response was not valid JSON. Re-emit ONLY a JSON object matching this schema:
+{
+  "achieved": boolean,
+  "confidence": number between 0 and 1,
+  "summary": string,
+  "evidence": optional string
+}
+Do not include any prose, markdown, or explanation.
+
+Previous response:
+${rawOutput}`;
   }
 
   private truncate(text: string, max: number): string {

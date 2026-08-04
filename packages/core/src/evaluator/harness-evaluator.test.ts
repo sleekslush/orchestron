@@ -83,6 +83,64 @@ describe('HarnessEvaluator', () => {
     expect(result.summary).toContain('(empty)');
   });
 
+  it('recovers via a bounded self-repair pass when the judge returns unparseable output', async () => {
+    const adapter = new FakeHarnessAdapter({ defaultResponse: { output: 'bad', summary: 'E', usage: {} } });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    let call = 0;
+    executeSpy.mockImplementation(async (prompt) => {
+      call++;
+      if (call === 2) {
+        return {
+          output: '{"achieved":true,"confidence":0.9,"summary":"Repaired"}',
+          summary: 'E',
+          usage: {},
+        };
+      }
+      return { output: 'not valid json', summary: 'E', usage: {} };
+    });
+    const evaluator = new HarnessEvaluator({ adapter });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(true);
+    expect(result.confidence).toBe(0.9);
+    expect(result.summary).toBe('Repaired');
+    // Repair re-prompts once (initial call + 1 repair attempt) with the raw
+    // unparseable output inlined.
+    expect(executeSpy).toHaveBeenCalledTimes(2);
+    expect(executeSpy.mock.calls[1][0]).toContain('Re-emit ONLY');
+    expect(executeSpy.mock.calls[1][0]).toContain('not valid json');
+  });
+
+  it('does not issue a repair pass when maxRepairAttempts is 0', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'not valid json', summary: 'E', usage: {} },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const evaluator = new HarnessEvaluator({ adapter, maxRepairAttempts: 0 });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toContain('Evaluator output unparseable');
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls through to the deterministic default when repair attempts are exhausted', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'not valid json', summary: 'E', usage: {} },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const evaluator = new HarnessEvaluator({ adapter, maxRepairAttempts: 2 });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toContain('Evaluator output unparseable');
+    // 1 initial call + 2 bounded repair attempts.
+    expect(executeSpy).toHaveBeenCalledTimes(3);
+  });
+
   it('throws GoalEvalError when configured defaultOnParseFailure is retry', async () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: {
