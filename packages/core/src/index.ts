@@ -52,4 +52,4 @@ export { FakeEvaluator } from './evaluator/fake-evaluator.js';
 export type { Evaluator } from './evaluator/evaluator.js';
 export type { FakeEvaluatorConfig } from './evaluator/fake-evaluator.js';
 export { HarnessEvaluator } from './evaluator/harness-evaluator.js';
-export type { HarnessEvaluatorConfig } from './evaluator/harness-evaluator.js';
+export type { HarnessEvaluatorConfig, DefaultOnParseFailure } from './evaluator/harness-evaluator.js';

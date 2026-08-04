@@ -108,6 +108,7 @@ export class ConcertHall implements ChildConcertFactory {
         promptTemplate: score.evaluator?.prompt,
         model: score.evaluator?.model,
         provider: score.evaluator?.provider,
+        defaultOnParseFailure: score.evaluator?.defaultOnParseFailure,
       });
     }
     return this.evaluator;
