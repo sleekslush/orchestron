@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PiAdapter } from './pi-adapter.js';
 import type { HarnessResponse } from '@orchestron/core';
 
@@ -13,9 +16,6 @@ const createAgentSessionMock = vi.fn() as Mock<
   (options?: Record<string, unknown>) => Promise<{ session: typeof mockSession; extensionsResult: unknown }>
 >;
 createAgentSessionMock.mockImplementation(async () => ({ session: mockSession, extensionsResult: {} }));
-
-const loadSkillsFromDirMock = vi.fn();
-const formatSkillsForPromptMock = vi.fn();
 
 const modelRuntimeGetModelMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
 const modelRuntimeGetModelsMock = vi.fn() as Mock<() => unknown[]>;
@@ -32,8 +32,6 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
   ModelRuntime: { create: (...args: unknown[]) => modelRuntimeCreateMock(...args as Parameters<typeof modelRuntimeCreateMock>) },
   SessionManager: { inMemory: vi.fn(() => ({ id: 'manager' })) },
   createAgentSession: (...args: unknown[]) => createAgentSessionMock(...args as Parameters<typeof createAgentSessionMock>),
-  loadSkillsFromDir: (...args: unknown[]) => loadSkillsFromDirMock(...args),
-  formatSkillsForPrompt: (...args: unknown[]) => formatSkillsForPromptMock(...args),
 }));
 
 describe('PiAdapter', () => {
@@ -513,50 +511,62 @@ describe('PiAdapter skills', () => {
     vi.clearAllMocks();
     createAgentSessionMock.mockResolvedValue({ session: mockSession, extensionsResult: {} });
     modelRuntimeCreateMock.mockResolvedValue(mockModelRuntime);
-    loadSkillsFromDirMock.mockReset();
-    formatSkillsForPromptMock.mockReset();
   });
 
-  it('injects formatted skills into the movement prompt at session creation', async () => {
+  it('injects the resolved skills into the movement prompt at session creation', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-skills-'));
+    mkdirSync(join(dir, 'review-conventions'));
+    writeFileSync(
+      join(dir, 'review-conventions', 'SKILL.md'),
+      '---\nname: review-conventions\n---\n\nCheck correctness and edge cases.',
+    );
     mockSession.prompt.mockResolvedValue(undefined);
-    loadSkillsFromDirMock.mockReturnValue({
-      skills: [
-        { name: 'review-conventions', description: 'Review conventions', filePath: '/tmp/review/SKILL.md', baseDir: '/tmp/review' },
-      ],
-    });
-    formatSkillsForPromptMock.mockReturnValue('available review-conventions instructions');
 
     const adapter = new PiAdapter();
     await adapter.execute('do it', { shared: {} }, {
       skills: ['review-conventions'],
-      skillsDir: '/tmp/skills-dir',
+      skillsDir: dir,
     });
 
-    expect(loadSkillsFromDirMock).toHaveBeenCalledWith({ dir: '/tmp/skills-dir', source: 'score' });
     const prompt = (mockSession.prompt as Mock).mock.calls[0][0] as string;
     expect(prompt).toContain('do it');
-    expect(prompt).toContain('available review-conventions instructions');
+    expect(prompt).toContain('Check correctness and edge cases.');
+    expect(prompt).toContain('<skills>');
   });
 
   it('does not load skills when none are declared', async () => {
     mockSession.prompt.mockResolvedValue(undefined);
     const adapter = new PiAdapter();
     await adapter.execute('x', { shared: {} });
-    expect(loadSkillsFromDirMock).not.toHaveBeenCalled();
     expect(mockSession.prompt).toHaveBeenCalledWith('x');
   });
 
   it('fails loudly when a declared skill cannot be resolved', async () => {
-    loadSkillsFromDirMock.mockReturnValue({ skills: [] });
+    const dir = mkdtempSync(join(tmpdir(), 'pi-skills-'));
     const adapter = new PiAdapter();
 
     await expect(
-      adapter.execute('x', { shared: {} }, { skills: ['missing'], skillsDir: '/tmp/skills-dir' }),
+      adapter.execute('x', { shared: {} }, { skills: ['missing'], skillsDir: dir }),
     ).rejects.toMatchObject({
       code: 'HARNESS_FAILURE',
       message: expect.stringContaining('missing'),
     });
     // Must not run the session without the skill.
     expect(mockSession.prompt).not.toHaveBeenCalled();
+  });
+
+  it('injects skills once per persisted session across multiple turns', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-skills-'));
+    mkdirSync(join(dir, 'review-conventions'));
+    writeFileSync(join(dir, 'review-conventions', 'SKILL.md'), 'Do review.');
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter();
+    await adapter.execute('turn one', { shared: {} }, { sessionId: 'c1:m1', skills: ['review-conventions'], skillsDir: dir });
+    await adapter.execute('turn two', { shared: {} }, { sessionId: 'c1:m1', skills: ['review-conventions'], skillsDir: dir });
+
+    const prompts = (mockSession.prompt as Mock).mock.calls.map((c) => c[0] as string);
+    expect(prompts[0]).toContain('<skills>');
+    expect(prompts[1]).not.toContain('<skills>');
   });
 });

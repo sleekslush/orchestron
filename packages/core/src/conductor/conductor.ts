@@ -35,10 +35,7 @@ import { matchTransition } from './transition-resolver.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
 import { CONCERT_HEARTBEAT_INTERVAL_MS } from '../liveness.js';
-import {
-  DEFAULT_SKILLS_DIR_NAME,
-  resolveSkillsDir,
-} from '../skills.js';
+import { DEFAULT_SKILLS_DIR_NAME } from '../skills.js';
 
 export { StartOptions };
 
@@ -769,9 +766,11 @@ export class Conductor implements IConductor {
   /**
    * Resolve the skills directory for a movement.
    *
-   * Highest precedence is the score's `metadata.skillsDir`; then
-   * `ORCHESTRON_SKILLS_DIR` env; then the config-file `skillsDir`; finally the
-   * default `skills/` next to the score (concert working directory).
+   * Precedence: score `metadata.skillsDir` > `ORCHESTRON_SKILLS_DIR` env >
+   * config-file `skillsDir` > default `skills/` next to the score (concert
+   * working directory). The env and config-file layers are already folded into
+   * `configSkillsDir` once at config resolution, so the env var is read exactly
+   * once (no redundant read here).
    */
   private resolveMovementSkillsDir(movement: Movement): string | undefined {
     if (!movement.skills || movement.skills.length === 0) return undefined;
@@ -779,11 +778,7 @@ export class Conductor implements IConductor {
     const metadata = this.score.metadata as Record<string, unknown> | undefined;
     const override =
       metadata && typeof metadata.skillsDir === 'string' ? metadata.skillsDir : undefined;
-    return resolveSkillsDir({
-      override,
-      config: this.configSkillsDir,
-      defaultDir: join(baseDir, DEFAULT_SKILLS_DIR_NAME),
-    });
+    return override ?? this.configSkillsDir ?? join(baseDir, DEFAULT_SKILLS_DIR_NAME);
   }
 
   private resolveModelConfig(
