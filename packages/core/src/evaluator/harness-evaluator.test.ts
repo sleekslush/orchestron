@@ -380,4 +380,70 @@ describe('HarnessEvaluator', () => {
     // Structurizer was attempted before surfacing the retryable error.
     expect(executeSpy).toHaveBeenCalledTimes(2);
   });
+
+  it('logs a warning and degrades when the structurizer adapter errors (default failed)', async () => {
+    const adapter = new FakeHarnessAdapter({});
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    executeSpy
+      .mockResolvedValueOnce({ output: 'judge gibberish', summary: 's', usage: {} })
+      .mockRejectedValueOnce(new Error('structurizer outage'));
+
+    const evaluator = new HarnessEvaluator({
+      adapter,
+      structurizer: { model: 'struct-model' },
+    });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toContain('Evaluator output unparseable');
+    // Both the judge and the structurizer passes were attempted.
+    expect(executeSpy).toHaveBeenCalledTimes(2);
+    // The repair-pass failure is logged, not silently swallowed.
+    expect(warnSpy).toHaveBeenCalled();
+    expect(warnSpy.mock.calls[0][0]).toContain('structurizer');
+    expect(warnSpy.mock.calls[0][0]).toContain('structurizer outage');
+    warnSpy.mockRestore();
+  });
+
+  it('surfaces the structurizer infra error when retry is configured', async () => {
+    const adapter = new FakeHarnessAdapter({});
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    executeSpy
+      .mockResolvedValueOnce({ output: 'judge gibberish', summary: 's', usage: {} })
+      .mockRejectedValueOnce(new Error('structurizer outage'));
+
+    const evaluator = new HarnessEvaluator({
+      adapter,
+      defaultOnParseFailure: 'retry',
+      structurizer: { model: 'struct-model' },
+    });
+
+    const err = await evaluator.evaluate(goal, 'output', context).catch((e) => e);
+
+    expect(err).toBeInstanceOf(GoalEvalError);
+    // The structurizer's own infra error is surfaced, not a generic parse failure.
+    expect(err.message).toContain('Structurizer failed');
+    expect(err.message).toContain('structurizer outage');
+    expect(executeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips the structurizer and degrades when the judge output is empty', async () => {
+    const adapter = new FakeHarnessAdapter({});
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    executeSpy.mockResolvedValueOnce({ output: '   ', summary: 's', usage: {} });
+
+    const evaluator = new HarnessEvaluator({
+      adapter,
+      structurizer: { model: 'struct-model' },
+    });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toContain('(empty)');
+    // Empty judge output: the structurizer is never invoked.
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+  });
 });

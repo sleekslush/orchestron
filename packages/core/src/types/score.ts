@@ -140,6 +140,11 @@ export interface EvaluatorConfig {
    * emits JSON). Only invoked on the recovery path when the judge's output is
    * unparseable. If unset, unparseable output falls back to
    * `defaultOnParseFailure`.
+   *
+   * Note: the structurizer pass is biased toward `achieved: false` — its prompt
+   * instructs the structurizer to set `achieved` to `false` when the judge text
+   * is ambiguous, so an unclear judge routes the movement to its non-success
+   * transition rather than passing it.
    */
   structurizer?: { model: string; provider?: string };
 }
