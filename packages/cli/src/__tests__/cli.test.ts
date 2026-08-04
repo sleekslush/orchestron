@@ -12,6 +12,7 @@ import { listCommandHandler } from '../commands/list.js';
 import { scoresCommandHandler } from '../commands/scores.js';
 import { modelsCommandHandler } from '../commands/models.js';
 import { worktreeCommandHandler } from '../commands/worktree.js';
+import { finalizeStaleCommandHandler } from '../commands/finalize-stale.js';
 
 const simpleScore: Score = {
   id: 'cli-test',
@@ -875,6 +876,96 @@ describe('CLI commands', () => {
       expect(logs.some((l) => l.includes('wt-concert'))).toBe(true);
       expect(logs.some((l) => l.includes('orchestron/wt-x'))).toBe(true);
       expect(logs.some((l) => l.includes('/tmp/foo-wt'))).toBe(true);
+    } finally {
+      orchestron.store.close();
+    }
+  });
+
+  it('finalizes a specific stale concert as failed', async () => {
+    const { hostname } = await import('node:os');
+    const orchestron = await createTestOrchestron(dir);
+    const deadPid = 2_000_000_000;
+    try {
+      await orchestron.store.saveConcert({
+        id: 'zombie-1',
+        scoreId: 'cli-test',
+        status: 'running',
+        startedAt: new Date(),
+        currentMovement: null,
+        history: [],
+        context: { shared: {} },
+        usage: {},
+        triggeredBy: 'cli',
+        childConcertIds: [],
+        processId: deadPid,
+        hostname: hostname(),
+        lastHeartbeatAt: new Date(),
+      }, 'yaml');
+
+      const { logs, restore } = captureOutput();
+      try {
+        await finalizeStaleCommandHandler(orchestron, 'zombie-1', false);
+      } finally {
+        restore();
+      }
+
+      const stored = await orchestron.store.getConcert('zombie-1');
+      expect(stored!.status).toBe('failed');
+      expect(stored!.completedAt).toBeInstanceOf(Date);
+      const output = logs.join('\n');
+      expect(output).toContain('Finalized stale concert zombie-1');
+      expect(output).toContain('Status:  failed');
+    } finally {
+      orchestron.store.close();
+    }
+  });
+
+  it('finalizes all stale concerts and leaves live ones untouched', async () => {
+    const { hostname } = await import('node:os');
+    const orchestron = await createTestOrchestron(dir);
+    const deadPid = 2_000_000_000;
+    try {
+      await orchestron.store.saveConcert({
+        id: 'zombie-a',
+        scoreId: 'cli-test',
+        status: 'running',
+        startedAt: new Date(),
+        currentMovement: null,
+        history: [],
+        context: { shared: {} },
+        usage: {},
+        triggeredBy: 'cli',
+        childConcertIds: [],
+        processId: deadPid,
+        hostname: hostname(),
+        lastHeartbeatAt: new Date(),
+      }, 'yaml');
+      await orchestron.store.saveConcert({
+        id: 'healthy',
+        scoreId: 'cli-test',
+        status: 'running',
+        startedAt: new Date(),
+        currentMovement: null,
+        history: [],
+        context: { shared: {} },
+        usage: {},
+        triggeredBy: 'cli',
+        childConcertIds: [],
+        processId: process.pid,
+        hostname: hostname(),
+        lastHeartbeatAt: new Date(),
+      }, 'yaml');
+
+      const { logs, restore } = captureOutput();
+      try {
+        await finalizeStaleCommandHandler(orchestron, undefined, false);
+      } finally {
+        restore();
+      }
+
+      expect((await orchestron.store.getConcert('zombie-a'))!.status).toBe('failed');
+      expect((await orchestron.store.getConcert('healthy'))!.status).toBe('running');
+      expect(logs.join('\n')).toContain('zombie-a');
     } finally {
       orchestron.store.close();
     }

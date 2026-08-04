@@ -12,6 +12,7 @@ import { listCommandHandler } from './commands/list.js';
 import { scoresCommandHandler } from './commands/scores.js';
 import { modelsCommandHandler } from './commands/models.js';
 import { worktreeCommandHandler } from './commands/worktree.js';
+import { finalizeStaleCommandHandler } from './commands/finalize-stale.js';
 import { wantsJson } from './output.js';
 
 function safeAction<T extends unknown[]>(
@@ -150,6 +151,15 @@ program
   .action(safeAction(async (harness: string | undefined, _options: unknown, command: Command) => {
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
       modelsCommandHandler(orchestron, harness, wantsJson(command)),
+    );
+  }));
+
+program
+  .command('finalize-stale [concert-id]')
+  .description('Finalize stale (dead-process) concerts as failed. With no concert-id, finalizes all stale concerts.')
+  .action(safeAction(async (concertId: string | undefined, _options: unknown, command: Command) => {
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      finalizeStaleCommandHandler(orchestron, concertId, wantsJson(command)),
     );
   }));
 

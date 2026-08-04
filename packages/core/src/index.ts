@@ -27,6 +27,14 @@ export {
 } from './liveness.js';
 export type { LivenessInfo, LivenessReason } from './liveness.js';
 
+export {
+  finalizeStaleConcert,
+  finalizeAllStale,
+  isFinalizableStatus,
+  FINALIZE_STALE_REASON,
+} from './finalize-stale.js';
+export type { FinalizeStaleOptions, FinalizeStaleResult } from './finalize-stale.js';
+
 export { ScoreRegistry } from './registry/score-registry.js';
 export type { ScoreValidationResult } from './registry/score-registry.js';
 export { ensureDir, loadScoresFromDir } from './fs-utils.js';
