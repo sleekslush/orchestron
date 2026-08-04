@@ -46,6 +46,10 @@ function safeResourceUsage(value: unknown): ResourceUsage {
   if (typeof value.tokens === 'number') result.tokens = value.tokens;
   if (typeof value.inputTokens === 'number') result.inputTokens = value.inputTokens;
   if (typeof value.outputTokens === 'number') result.outputTokens = value.outputTokens;
+  if (value.spendSource === 'measured' || value.spendSource === 'estimated') {
+    result.spendSource = value.spendSource;
+  }
+  if (typeof value.estimatedSpend === 'number') result.estimatedSpend = value.estimatedSpend;
   return result;
 }
 

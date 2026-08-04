@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { PricingOverride } from './cost/table.js';
 
 export interface OrchestronConfig {
   storePath?: string;
@@ -24,6 +25,11 @@ export interface OrchestronConfig {
   evaluator?: {
     promptTemplate?: string;
   };
+  /**
+   * Static pricing overrides for providers/models without a public pricing
+   * source (e.g. direct OpenAI/Anthropic keys). Keyed by provider/model.
+   */
+  pricing?: PricingOverride[];
 }
 
 export interface ResolvedOrchestronConfig {
@@ -108,6 +114,21 @@ function normalizeConfig(raw: unknown): OrchestronConfig | undefined {
     const ev = input.evaluator as Record<string, unknown>;
     config.evaluator = {};
     if (typeof ev.promptTemplate === 'string') config.evaluator.promptTemplate = ev.promptTemplate;
+  }
+  if (Array.isArray(input.pricing)) {
+    config.pricing = input.pricing
+      .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object')
+      .map((p) => {
+        const override: PricingOverride = {};
+        if (typeof p.provider === 'string') override.provider = p.provider;
+        if (typeof p.model === 'string') override.model = p.model;
+        if (typeof p.inputPrice === 'number') override.inputPrice = p.inputPrice;
+        if (typeof p.outputPrice === 'number') override.outputPrice = p.outputPrice;
+        if (typeof p.free === 'boolean') override.free = p.free;
+        if (typeof p.effectiveFrom === 'string') override.effectiveFrom = p.effectiveFrom;
+        return override;
+      })
+      .filter((p) => p.free || typeof p.inputPrice === 'number' || typeof p.outputPrice === 'number');
   }
 
   return Object.keys(config).length > 0 ? config : undefined;

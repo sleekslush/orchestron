@@ -1,5 +1,7 @@
 export * from './types/index.js';
 
+export * from './cost/index.js';
+
 export { safeJsonParse, extractBalancedJson } from './json-utils.js';
 export {
   isObject,

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqliteLoge } from '../store/sqlite-loge.js';
 import type { Concert } from '../types/concert.js';
+import type { CostResolution } from '../cost/types.js';
 
 describe('SqliteLoge', () => {
   let store: SqliteLoge;
@@ -387,5 +388,189 @@ describe('SqliteLoge', () => {
     const updated = await store.getSessionTraceForMovement('test-concert-1', 'm1');
     expect(updated!.eventCount).toBe(7);
     expect(updated!.status).toBe('failed');
+  });
+
+  describe('backfillSpend', () => {
+    const estimate = async (input: {
+      model?: string;
+      provider?: string;
+      inputTokens?: number;
+      outputTokens?: number;
+    }): Promise<CostResolution | null> => {
+      if (input.model === 'deepseek/deepseek-v4-flash-0731' && input.provider === 'openrouter') {
+        return {
+          spend: Math.round(
+            (input.inputTokens ?? 0) * 9e-8 * 1e6 +
+              (input.outputTokens ?? 0) * 1.8e-7 * 1e6,
+          ),
+          source: 'estimated' as const,
+        };
+      }
+      if (input.model?.includes(':free')) return { spend: 0, source: 'estimated' as const };
+      return null;
+    };
+
+    it('computes spend for unmeasured movements and marks them estimated', async () => {
+      // Seed the concert with conductor-style pre-aggregated token total
+      // (the running sum of all movement tokens).
+      const concert = makeConcert({ id: 'c-spend-1', usage: { tokens: 9507 } });
+      await store.saveConcert(concert, dummyScoreYaml);
+      await store.appendMovement('c-spend-1', {
+        movementId: 'm1',
+        movementName: 'M1',
+        status: 'completed',
+        output: '',
+        summary: '',
+        goalEvaluation: { achieved: true, confidence: 1, summary: '', evidence: '' },
+        usage: { inputTokens: 7942, outputTokens: 1565, tokens: 9507 },
+        durationMs: 1000,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        model: 'deepseek/deepseek-v4-flash-0731',
+        provider: 'openrouter',
+      });
+
+      const result = await store.backfillSpend(estimate);
+      expect(result.updatedMovements).toBe(1);
+      expect(result.updatedConcerts).toBe(1);
+
+      const history = await store.getMovementHistory('c-spend-1');
+      expect(history[0].usage.spend).toBe(996);
+      expect(history[0].usage.spendSource).toBe('estimated');
+
+      const saved = await store.getConcert('c-spend-1');
+      expect(saved!.usage.spend).toBe(996);
+      expect(saved!.usage.spendSource).toBe('estimated');
+      expect(saved!.usage.estimatedSpend).toBe(996);
+      // Tokens are NOT folded again (they were already aggregated by the
+      // conductor), so the total stays 9507 rather than 9507 + 9507.
+      expect(saved!.usage.tokens).toBe(9507);
+    });
+
+    it('does not double-count tokens already aggregated by the conductor', async () => {
+      // Conductor pre-aggregates the running sum of ALL movement tokens and
+      // any measured spend into concert usage. Seed a mixed concert: 9507
+      // (unmeasured openrouter movement) + 200 (free movement) = 9707 tokens,
+      // with 1234 micro of already-measured spend.
+      const concert = makeConcert({
+        id: 'c-spend-5',
+        usage: { tokens: 9707, spend: 1234, spendSource: 'measured' },
+      });
+      await store.saveConcert(concert, dummyScoreYaml);
+      await store.appendMovement('c-spend-5', {
+        movementId: 'm1',
+        movementName: 'M1',
+        status: 'completed',
+        output: '',
+        summary: '',
+        goalEvaluation: { achieved: true, confidence: 1, summary: '', evidence: '' },
+        usage: { inputTokens: 7942, outputTokens: 1565, tokens: 9507 },
+        durationMs: 1000,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        model: 'deepseek/deepseek-v4-flash-0731',
+        provider: 'openrouter',
+      });
+      await store.appendMovement('c-spend-5', {
+        movementId: 'm2',
+        movementName: 'M2',
+        status: 'completed',
+        output: '',
+        summary: '',
+        goalEvaluation: { achieved: true, confidence: 1, summary: '', evidence: '' },
+        usage: { inputTokens: 100, outputTokens: 100, tokens: 200 },
+        durationMs: 1000,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        model: 'some/deepseek:free',
+        provider: 'openrouter',
+      });
+
+      await store.backfillSpend(estimate);
+
+      const saved = await store.getConcert('c-spend-5');
+      // Tokens must NOT double-count: still the conductor's 9707.
+      expect(saved!.usage.tokens).toBe(9707);
+      // measured 1234 + openrouter estimate 996 + free 0.
+      expect(saved!.usage.spend).toBe(1234 + 996);
+      // Marked estimated, but the precise estimated portion is tracked so the
+      // measured/estimated aggregate split stays honest.
+      expect(saved!.usage.spendSource).toBe('estimated');
+      expect(saved!.usage.estimatedSpend).toBe(996);
+    });
+
+    it('is idempotent — a second run touches nothing', async () => {
+      const concert = makeConcert({ id: 'c-spend-2', usage: {} });
+      await store.saveConcert(concert, dummyScoreYaml);
+      await store.appendMovement('c-spend-2', {
+        movementId: 'm1',
+        movementName: 'M1',
+        status: 'completed',
+        output: '',
+        summary: '',
+        goalEvaluation: { achieved: true, confidence: 1, summary: '', evidence: '' },
+        usage: { inputTokens: 100, outputTokens: 100, tokens: 200 },
+        durationMs: 1000,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        model: 'some/deepseek:free',
+        provider: 'openrouter',
+      });
+
+      const first = await store.backfillSpend(estimate);
+      expect(first.updatedMovements).toBe(1);
+      const second = await store.backfillSpend(estimate);
+      expect(second.updatedMovements).toBe(0);
+      expect(second.updatedConcerts).toBe(0);
+    });
+
+    it('leaves unresolvable movements untouched (unknown)', async () => {
+      const concert = makeConcert({ id: 'c-spend-3', usage: {} });
+      await store.saveConcert(concert, dummyScoreYaml);
+      await store.appendMovement('c-spend-3', {
+        movementId: 'm1',
+        movementName: 'M1',
+        status: 'completed',
+        output: '',
+        summary: '',
+        goalEvaluation: { achieved: true, confidence: 1, summary: '', evidence: '' },
+        usage: { inputTokens: 10, outputTokens: 10, tokens: 20 },
+        durationMs: 1000,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        model: 'mystery/model',
+        provider: 'unknown-provider',
+      });
+
+      const result = await store.backfillSpend(estimate);
+      expect(result.updatedMovements).toBe(0);
+      expect(result.updatedConcerts).toBe(0);
+      const history = await store.getMovementHistory('c-spend-3');
+      expect(history[0].usage.spend).toBeUndefined();
+    });
+
+    it('does not overwrite already-measured spend', async () => {
+      const concert = makeConcert({ id: 'c-spend-4', usage: {} });
+      await store.saveConcert(concert, dummyScoreYaml);
+      await store.appendMovement('c-spend-4', {
+        movementId: 'm1',
+        movementName: 'M1',
+        status: 'completed',
+        output: '',
+        summary: '',
+        goalEvaluation: { achieved: true, confidence: 1, summary: '', evidence: '' },
+        usage: { spend: 1234, inputTokens: 10, outputTokens: 10, tokens: 20 },
+        durationMs: 1000,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        model: 'deepseek/deepseek-v4-flash-0731',
+        provider: 'openrouter',
+      });
+
+      const result = await store.backfillSpend(estimate);
+      expect(result.updatedMovements).toBe(0);
+      const history = await store.getMovementHistory('c-spend-4');
+      expect(history[0].usage.spend).toBe(1234);
+    });
   });
 });

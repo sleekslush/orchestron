@@ -2,12 +2,14 @@ import type { ConcertFilter } from '@orchestron/core';
 import { computeLiveness } from '@orchestron/core';
 import type { Orchestron } from '../orchestron.js';
 import { printOutput, formatDate, formatUsage, formatLivenessHuman } from '../output.js';
+import { backfillSpend } from '../spend.js';
 
 export async function listCommandHandler(
   orchestron: Orchestron,
   filter: ConcertFilter,
   json: boolean,
 ): Promise<void> {
+  await backfillSpend(orchestron.store);
   const concerts = await orchestron.store.listConcerts(filter);
   const withLiveness = concerts.map((c) => ({ concert: c, liveness: computeLiveness(c) }));
 

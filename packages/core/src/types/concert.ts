@@ -1,4 +1,5 @@
 import type { ScoreID, MovementID } from './score.js';
+import type { SpendSource } from '../cost/types.js';
 export type { MovementID };
 
 export type ConcertID = string;
@@ -24,6 +25,17 @@ export interface ResourceUsage {
   tokens?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * Whether `spend` is harness-measured (`'measured'`) or derived from a
+   * pricing source (`'estimated'`). Absent when spend is unknown.
+   */
+  spendSource?: SpendSource;
+  /**
+   * Portion of `spend` (in microdollars) that is estimated, so a concert
+   * mixing measured + estimated movements keeps an honest split for
+   * aggregates even though `spendSource` is a single marker.
+   */
+  estimatedSpend?: number;
 }
 
 export interface ConcertContext {

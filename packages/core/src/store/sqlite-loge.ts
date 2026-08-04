@@ -6,6 +6,7 @@ import type {
   MovementRecord,
 } from '../types/concert.js';
 import type { ConcertEvent, EventFilter, SystemAggregates, SessionTrace } from '../types/index.js';
+import type { CostResolution, CostResolutionInput } from '../cost/types.js';
 import type { ConcertStore } from './concert-store.js';
 import { createSqliteDb } from './sqlite-driver.js';
 import {
@@ -425,6 +426,95 @@ export class SqliteLoge implements ConcertStore {
     return rows.map(rowToMovementRecord);
   }
 
+  async backfillSpend(
+    resolve: (input: CostResolutionInput) => Promise<CostResolution | null>,
+  ): Promise<{ updatedMovements: number; updatedConcerts: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT id, concert_id, movement_id, model, provider, usage
+         FROM movements
+         WHERE json_extract(usage, '$.spend') IS NULL
+           AND (model IS NOT NULL OR provider IS NOT NULL)`,
+      )
+      .all() as Array<{
+      id: number;
+      concert_id: string;
+      movement_id: string;
+      model: string | null;
+      provider: string | null;
+      usage: string;
+    }>;
+
+    // Per-concert accumulation of newly-estimated spend, so we can fold it
+    // into the concert-level usage aggregate without double counting.
+    const concertTotals = new Map<string, {
+      added: number;
+      estimatedAdded: number;
+    }>();
+    const updateStmt = this.db.prepare('UPDATE movements SET usage = ? WHERE id = ?');
+    let updatedMovements = 0;
+
+    for (const row of rows) {
+      const usage = jsonParse(row.usage, {}) as Record<string, unknown>;
+      const resolution = await resolve({
+        model: row.model ?? undefined,
+        provider: row.provider ?? undefined,
+        inputTokens: typeof usage.inputTokens === 'number' ? usage.inputTokens : undefined,
+        outputTokens: typeof usage.outputTokens === 'number' ? usage.outputTokens : undefined,
+      });
+      if (!resolution) continue;
+
+      usage.spend = resolution.spend;
+      usage.spendSource = resolution.source;
+      updateStmt.run(JSON.stringify(usage), row.id);
+      updatedMovements++;
+
+      const t = concertTotals.get(row.concert_id) ?? { added: 0, estimatedAdded: 0 };
+      t.added += resolution.spend;
+      if (resolution.source === 'estimated') t.estimatedAdded += resolution.spend;
+      concertTotals.set(row.concert_id, t);
+    }
+
+    let updatedConcerts = 0;
+    const concertStmt = this.db.prepare('SELECT usage FROM concerts WHERE id = ?');
+    const updateConcertStmt = this.db.prepare('UPDATE concerts SET usage = ? WHERE id = ?');
+    for (const [concertId, t] of concertTotals) {
+      const row = concertStmt.get(concertId) as { usage: string } | undefined;
+      if (!row) continue;
+      const usage = jsonParse(row.usage, {}) as Record<string, unknown>;
+      const priorSpend = typeof usage.spend === 'number' ? usage.spend : 0;
+      const priorEstimated = typeof usage.estimatedSpend === 'number' ? usage.estimatedSpend : 0;
+      const priorSource =
+        usage.spendSource === 'measured' || usage.spendSource === 'estimated'
+          ? usage.spendSource
+          : usage.spend !== undefined
+            ? 'measured'
+            : undefined;
+
+      usage.spend = priorSpend + t.added;
+      // NOTE: the concert `tokens` are NOT folded here. The Conductor already
+      // pre-aggregates the running sum of *all* movement tokens into concert
+      // usage (`constraintChecker` sums every movement), so adding them again
+      // would double-count tokens for no-spend movements. This backfill only
+      // fills in spend.
+      usage.estimatedSpend = priorEstimated + t.estimatedAdded;
+      // Mark estimated whenever any portion of the total is estimated (so
+      // readers render `~$`), but keep the precise measured/estimated split in
+      // `estimatedSpend` so SystemAggregates derives amounts, not a boolean.
+      const hasEstimated =
+        (typeof usage.estimatedSpend === 'number' && usage.estimatedSpend > 0) ||
+        t.estimatedAdded > 0;
+      usage.spendSource = hasEstimated
+        ? 'estimated'
+        : (priorSource ??
+          (typeof usage.spend === 'number' && usage.spend > 0 ? 'measured' : 'estimated'));
+      updateConcertStmt.run(JSON.stringify(usage), concertId);
+      updatedConcerts++;
+    }
+
+    return { updatedMovements, updatedConcerts };
+  }
+
   async pushEvent(event: ConcertEvent): Promise<void> {
     const { concertId, type, timestamp, ...rest } = event as ConcertEvent & { timestamp: Date };
     this.db
@@ -471,6 +561,7 @@ export class SqliteLoge implements ConcertStore {
           COUNT(*) as totalConcerts,
           SUM(CASE WHEN status IN ('running','paused') THEN 1 ELSE 0 END) as activeConcerts,
           SUM(CAST(json_extract(usage, '$.spend') AS REAL)) as totalSpend,
+          SUM(COALESCE(CAST(json_extract(usage, '$.estimatedSpend') AS REAL), 0)) as estimatedSpend,
           SUM(CAST(json_extract(usage, '$.tokens') AS REAL)) as totalTokens,
           AVG(
             CASE WHEN completed_at IS NOT NULL
@@ -484,6 +575,7 @@ export class SqliteLoge implements ConcertStore {
       totalConcerts: number;
       activeConcerts: number;
       totalSpend: number | null;
+      estimatedSpend: number | null;
       totalTokens: number | null;
       avgDurationMs: number | null;
     };
@@ -492,12 +584,22 @@ export class SqliteLoge implements ConcertStore {
       .prepare("SELECT COUNT(*) as cnt FROM concerts WHERE status = 'failed'")
       .get() as { cnt: number };
 
+    const totalSpend = row.totalSpend ?? undefined;
+    const estimatedSpend = row.estimatedSpend ?? undefined;
+
     return {
       totalConcerts: row.totalConcerts ?? 0,
       activeConcerts: row.activeConcerts ?? 0,
       // Keep unmeasured spend undefined (not 0) so the overview can render
       // "unknown" instead of implying the aggregate was genuinely free.
-      totalSpend: row.totalSpend ?? undefined,
+      totalSpend,
+      // Derived from amounts, not the boolean spendSource marker, so a concert
+      // mixing measured + estimated spend attributes each dollar correctly.
+      estimatedSpend,
+      measuredSpend:
+        totalSpend !== undefined && estimatedSpend !== undefined
+          ? totalSpend - estimatedSpend
+          : undefined,
       totalTokens: row.totalTokens ?? 0,
       avgDurationMs: row.avgDurationMs ?? 0,
       failureRate: row.totalConcerts > 0 ? failed.cnt / row.totalConcerts : 0,

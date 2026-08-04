@@ -8,9 +8,11 @@ import {
   formatDate,
   formatDuration,
   formatUsage,
+  formatDollars,
   formatLivenessHuman,
   movementToOutput,
 } from '../output.js';
+import { backfillSpend } from '../spend.js';
 
 function latestProgressEvent(
   events: ConcertEvent[],
@@ -192,7 +194,10 @@ export async function statusCommandHandler(
     return;
   }
 
-  const aggregates = await orchestron.store.getAggregates();
+  const aggregates = await (async () => {
+    await backfillSpend(orchestron.store);
+    return orchestron.store.getAggregates();
+  })();
   const recent = await orchestron.store.listConcerts({ limit: 10 });
 
   const output = {
@@ -214,6 +219,7 @@ function formatSystemHuman(
     totalConcerts: number;
     activeConcerts: number;
     totalSpend?: number;
+    estimatedSpend?: number;
     totalTokens: number;
     avgDurationMs: number;
     failureRate: number;
@@ -225,7 +231,16 @@ function formatSystemHuman(
   lines.push('');
   lines.push(`Total concerts: ${aggregates.totalConcerts}`);
   lines.push(`Active concerts: ${aggregates.activeConcerts}`);
-  lines.push(`Total spend: ${formatUsage({ spend: aggregates.totalSpend, tokens: aggregates.totalTokens })}`);
+  const spendLine =
+    aggregates.totalSpend === undefined
+      ? `Total spend: ${formatUsage({ tokens: aggregates.totalTokens })}`
+      : `Total spend: ${formatUsage({ spend: aggregates.totalSpend, tokens: aggregates.totalTokens })}`;
+  lines.push(spendLine);
+  if (aggregates.totalSpend !== undefined && (aggregates.estimatedSpend ?? 0) > 0) {
+    lines.push(
+      `  (measured $${formatDollars((aggregates.totalSpend ?? 0) - (aggregates.estimatedSpend ?? 0))}, estimated ~$${formatDollars(aggregates.estimatedSpend ?? 0)})`,
+    );
+  }
   lines.push(`Avg duration: ${formatDuration(aggregates.avgDurationMs)}`);
   lines.push(`Failure rate: ${(aggregates.failureRate * 100).toFixed(1)}%`);
   lines.push('');
