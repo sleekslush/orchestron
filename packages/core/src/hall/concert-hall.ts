@@ -110,6 +110,7 @@ export class ConcertHall implements ChildConcertFactory {
         provider: score.evaluator?.provider,
         defaultOnParseFailure: score.evaluator?.defaultOnParseFailure,
         structurizer: score.evaluator?.structurizer,
+        maxRepairAttempts: score.evaluator?.maxRepairAttempts,
       });
     }
     return this.evaluator;
