@@ -108,7 +108,7 @@ export class HarnessEvaluator implements Evaluator {
     //    Only runs when the judge produced non-empty output.
     const text = response.output.trim();
     if (text) {
-      const repaired = await this.tryRepair(text, context, movementId);
+      const repaired = await this.tryRepair(text, context);
       if (repaired) {
         return repaired;
       }

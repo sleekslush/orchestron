@@ -363,6 +363,7 @@ describe('HarnessEvaluator', () => {
       adapter,
       model: 'judge-flash',
       provider: 'gemini',
+      maxRepairAttempts: 0,
       structurizer: { model: 'struct-model', provider: 'openai' },
     });
 
@@ -416,6 +417,7 @@ describe('HarnessEvaluator', () => {
     const evaluator = new HarnessEvaluator({
       adapter,
       defaultOnParseFailure: 'failed',
+      maxRepairAttempts: 0,
       structurizer: { model: 'struct-model' },
     });
 
@@ -437,6 +439,7 @@ describe('HarnessEvaluator', () => {
     const evaluator = new HarnessEvaluator({
       adapter,
       defaultOnParseFailure: 'retry',
+      maxRepairAttempts: 0,
       structurizer: { model: 'struct-model' },
     });
 
@@ -455,6 +458,7 @@ describe('HarnessEvaluator', () => {
 
     const evaluator = new HarnessEvaluator({
       adapter,
+      maxRepairAttempts: 0,
       structurizer: { model: 'struct-model' },
     });
 
@@ -481,6 +485,7 @@ describe('HarnessEvaluator', () => {
     const evaluator = new HarnessEvaluator({
       adapter,
       defaultOnParseFailure: 'retry',
+      maxRepairAttempts: 0,
       structurizer: { model: 'struct-model' },
     });
 
