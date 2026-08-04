@@ -131,4 +131,20 @@ export interface EvaluatorConfig {
    * hosts that handle retryable evaluator failures.
    */
   defaultOnParseFailure?: 'failed' | 'passed' | 'retry';
+  /**
+   * Configurable structurizer / second-model pass (issue #133). When the judge
+   * model is known-flaky (e.g. small flash-tier models) and its output cannot
+   * be parsed into a valid GoalEvaluation, the raw judge output is routed to
+   * this separate extraction model to be converted into strict JSON. This
+   * decouples judgment (cheap model) from formatting (any model that reliably
+   * emits JSON). Only invoked on the recovery path when the judge's output is
+   * unparseable. If unset, unparseable output falls back to
+   * `defaultOnParseFailure`.
+   *
+   * Note: the structurizer pass is biased toward `achieved: false` — its prompt
+   * instructs the structurizer to set `achieved` to `false` when the judge text
+   * is ambiguous, so an unclear judge routes the movement to its non-success
+   * transition rather than passing it.
+   */
+  structurizer?: { model: string; provider?: string };
 }

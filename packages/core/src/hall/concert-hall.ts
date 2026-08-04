@@ -109,6 +109,7 @@ export class ConcertHall implements ChildConcertFactory {
         model: score.evaluator?.model,
         provider: score.evaluator?.provider,
         defaultOnParseFailure: score.evaluator?.defaultOnParseFailure,
+        structurizer: score.evaluator?.structurizer,
       });
     }
     return this.evaluator;
