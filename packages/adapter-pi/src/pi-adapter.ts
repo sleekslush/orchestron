@@ -6,6 +6,8 @@ import {
   createAgentSession,
   ModelRuntime,
   SessionManager,
+  loadSkillsFromDir,
+  formatSkillsForPrompt,
 } from '@earendil-works/pi-coding-agent';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage, Model, Usage, Api } from '@earendil-works/pi-ai';
@@ -68,6 +70,14 @@ export class PiAdapter implements HarnessAdapter {
         `\n\nYou MUST return your response as a JSON object conforming to this schema:\n` +
         `${JSON.stringify(options.output.schema, null, 2)}\n` +
         `Return only the JSON object, optionally wrapped in a markdown code block.`;
+    }
+
+    // Load movement-declared skills into the session before execution. Skills
+    // augment — never replace — whatever Pi auto-loads. An unresolvable skill
+    // fails loudly rather than silently running without it.
+    const skillsBlock = this.buildSkillsPrompt(options?.skills, options?.skillsDir);
+    if (skillsBlock) {
+      finalPrompt = finalPrompt + '\n\n' + skillsBlock;
     }
 
     // Use model/provider from options (per-movement) if provided, otherwise fall back to config
@@ -338,6 +348,37 @@ export class PiAdapter implements HarnessAdapter {
       );
     }
     this.model = resolved;
+  }
+
+  /**
+   * Resolve the movement-declared skills into an injected prompt block.
+   *
+   * Uses Pi's `loadSkillsFromDir` + `formatSkillsForPrompt` so the SDK's own
+   * discovery and escaping rules apply. Returns '' when no skills are declared.
+   * Throws HARNESS_FAILURE when a declared skill cannot be resolved (fail-fast).
+   */
+  private buildSkillsPrompt(
+    skills: string[] | undefined,
+    skillsDir: string | undefined,
+  ): string {
+    if (!skills || skills.length === 0 || !skillsDir) return '';
+
+    const { skills: available } = loadSkillsFromDir({
+      dir: skillsDir,
+      source: 'score',
+    });
+    const byName = new Map(available.map((s) => [s.name, s]));
+    const missing = skills.filter((n) => !byName.has(n));
+    if (missing.length > 0) {
+      throw new HarnessError(
+        `Skill(s) not found in skills directory '${skillsDir}': ${missing.join(', ')}. ` +
+          `Each skill must be a directory with a SKILL.md (or a <name>.skill.md file) under '${skillsDir}'.`,
+        'HARNESS_FAILURE',
+      );
+    }
+
+    const named = skills.map((n) => byName.get(n)!);
+    return formatSkillsForPrompt(named);
   }
 
   private extractThinkingLevel(value: unknown): ThinkingLevel | undefined {

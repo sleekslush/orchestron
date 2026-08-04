@@ -31,6 +31,15 @@ export { ScoreRegistry } from './registry/score-registry.js';
 export type { ScoreValidationResult } from './registry/score-registry.js';
 export { ensureDir, loadScoresFromDir } from './fs-utils.js';
 
+export {
+  DEFAULT_SKILLS_DIR_NAME,
+  resolveSkillsDir,
+  loadSkillsFromDir,
+  loadNamedSkills,
+  formatSkillsForPrompt,
+} from './skills.js';
+export type { LoadedSkill } from './skills.js';
+
 export { Conductor } from './conductor/conductor.js';
 export type { IConductor } from './conductor/conductor-interface.js';
 export type { ChildConcertFactory } from './conductor/child-concert-factory.js';

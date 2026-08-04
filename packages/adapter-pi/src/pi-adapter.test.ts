@@ -14,6 +14,9 @@ const createAgentSessionMock = vi.fn() as Mock<
 >;
 createAgentSessionMock.mockImplementation(async () => ({ session: mockSession, extensionsResult: {} }));
 
+const loadSkillsFromDirMock = vi.fn();
+const formatSkillsForPromptMock = vi.fn();
+
 const modelRuntimeGetModelMock = vi.fn() as Mock<(provider: string, modelId: string) => unknown>;
 const modelRuntimeGetModelsMock = vi.fn() as Mock<() => unknown[]>;
 
@@ -29,6 +32,8 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
   ModelRuntime: { create: (...args: unknown[]) => modelRuntimeCreateMock(...args as Parameters<typeof modelRuntimeCreateMock>) },
   SessionManager: { inMemory: vi.fn(() => ({ id: 'manager' })) },
   createAgentSession: (...args: unknown[]) => createAgentSessionMock(...args as Parameters<typeof createAgentSessionMock>),
+  loadSkillsFromDir: (...args: unknown[]) => loadSkillsFromDirMock(...args),
+  formatSkillsForPrompt: (...args: unknown[]) => formatSkillsForPromptMock(...args),
 }));
 
 describe('PiAdapter', () => {
@@ -500,5 +505,58 @@ describe('PiAdapter cwd', () => {
 
     const sessionOptions = (createAgentSessionMock as Mock).mock.calls[0][0] as Record<string, unknown>;
     expect(sessionOptions.cwd).toBeUndefined();
+  });
+});
+
+describe('PiAdapter skills', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createAgentSessionMock.mockResolvedValue({ session: mockSession, extensionsResult: {} });
+    modelRuntimeCreateMock.mockResolvedValue(mockModelRuntime);
+    loadSkillsFromDirMock.mockReset();
+    formatSkillsForPromptMock.mockReset();
+  });
+
+  it('injects formatted skills into the movement prompt at session creation', async () => {
+    mockSession.prompt.mockResolvedValue(undefined);
+    loadSkillsFromDirMock.mockReturnValue({
+      skills: [
+        { name: 'review-conventions', description: 'Review conventions', filePath: '/tmp/review/SKILL.md', baseDir: '/tmp/review' },
+      ],
+    });
+    formatSkillsForPromptMock.mockReturnValue('available review-conventions instructions');
+
+    const adapter = new PiAdapter();
+    await adapter.execute('do it', { shared: {} }, {
+      skills: ['review-conventions'],
+      skillsDir: '/tmp/skills-dir',
+    });
+
+    expect(loadSkillsFromDirMock).toHaveBeenCalledWith({ dir: '/tmp/skills-dir', source: 'score' });
+    const prompt = (mockSession.prompt as Mock).mock.calls[0][0] as string;
+    expect(prompt).toContain('do it');
+    expect(prompt).toContain('available review-conventions instructions');
+  });
+
+  it('does not load skills when none are declared', async () => {
+    mockSession.prompt.mockResolvedValue(undefined);
+    const adapter = new PiAdapter();
+    await adapter.execute('x', { shared: {} });
+    expect(loadSkillsFromDirMock).not.toHaveBeenCalled();
+    expect(mockSession.prompt).toHaveBeenCalledWith('x');
+  });
+
+  it('fails loudly when a declared skill cannot be resolved', async () => {
+    loadSkillsFromDirMock.mockReturnValue({ skills: [] });
+    const adapter = new PiAdapter();
+
+    await expect(
+      adapter.execute('x', { shared: {} }, { skills: ['missing'], skillsDir: '/tmp/skills-dir' }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining('missing'),
+    });
+    // Must not run the session without the skill.
+    expect(mockSession.prompt).not.toHaveBeenCalled();
   });
 });

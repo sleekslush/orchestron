@@ -25,6 +25,8 @@ export interface ConcertHallOptions {
   defaultHarness?: string;
   /** Optional custom worktree manager (primarily for tests). */
   worktreeManager?: WorktreeManager;
+  /** Global override for the directory movement skills load from (from config/env). */
+  skillsDir?: string;
 }
 
 export class ConcertHall implements ChildConcertFactory {
@@ -38,6 +40,7 @@ export class ConcertHall implements ChildConcertFactory {
   private liveEventLog?: LiveEventLog;
   private defaultHarness?: string;
   private worktreeManager: WorktreeManager;
+  private skillsDir?: string;
 
   constructor(options: ConcertHallOptions) {
     this.store = options.store;
@@ -51,6 +54,7 @@ export class ConcertHall implements ChildConcertFactory {
     this.liveEventLog = options.liveEventLog ?? (options.tracesDir ? new LiveEventLog(options.tracesDir) : undefined);
     this.defaultHarness = options.defaultHarness;
     this.worktreeManager = options.worktreeManager ?? new WorktreeManager();
+    this.skillsDir = options.skillsDir;
   }
 
   getLiveEventLog(): LiveEventLog | undefined {
@@ -77,6 +81,7 @@ export class ConcertHall implements ChildConcertFactory {
       this.liveEventLog,
       cwd,
       worktreeDisposer,
+      this.skillsDir,
     );
     return conductor;
   }

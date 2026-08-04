@@ -142,6 +142,7 @@ Paths starting with `~/` are expanded to your home directory.
 | `ORCHESTRON_STORE_PATH` | SQLite store location | `~/.orchestron/store.db` |
 | `ORCHESTRON_SCORES_DIRS` | Comma-separated score directories | `./.orchestron/scores`, `~/.orchestron/scores` |
 | `ORCHESTRON_DEFAULT_HARNESS` | Default harness for movements | `pi` |
+| `ORCHESTRON_SKILLS_DIR` | Directory movement skills load from (default: `skills/` next to the score) | `<cwd>/skills` |
 | `ORCHESTRON_OPENCODE_PROVIDER` | Opencode model provider | `opencode` |
 | `ORCHESTRON_OPENCODE_MODEL_ID` | Opencode model ID | `kimi-k2.5` |
 | `ORCHESTRON_PI_PROVIDER` | Pi model provider | — |

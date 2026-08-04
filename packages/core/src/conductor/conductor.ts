@@ -13,6 +13,7 @@ import type {
 } from '../types/score.js';
 import { EventEmitter } from 'node:events';
 import { hostname } from 'node:os';
+import { join } from 'node:path';
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
 import type { ConcertEvent } from '../types/events.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
@@ -34,6 +35,10 @@ import { matchTransition } from './transition-resolver.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
 import { CONCERT_HEARTBEAT_INTERVAL_MS } from '../liveness.js';
+import {
+  DEFAULT_SKILLS_DIR_NAME,
+  resolveSkillsDir,
+} from '../skills.js';
 
 export { StartOptions };
 
@@ -72,6 +77,7 @@ export class Conductor implements IConductor {
     liveEventLog?: LiveEventLog,
     private cwd?: string,
     private worktreeDisposer?: () => Promise<void>,
+    private configSkillsDir?: string,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
@@ -452,6 +458,8 @@ export class Conductor implements IConductor {
           options: modelConfig.options,
           onProgress,
           cwd: this.cwd,
+          skills: movement.skills,
+          skillsDir: this.resolveMovementSkillsDir(movement),
         });
 
         record.status = 'completed';
@@ -758,6 +766,26 @@ export class Conductor implements IConductor {
    * 3. Score-level \`models\` map — select entry matching harness type
    * 4. Nothing — adapter uses its own default
    */
+  /**
+   * Resolve the skills directory for a movement.
+   *
+   * Highest precedence is the score's `metadata.skillsDir`; then
+   * `ORCHESTRON_SKILLS_DIR` env; then the config-file `skillsDir`; finally the
+   * default `skills/` next to the score (concert working directory).
+   */
+  private resolveMovementSkillsDir(movement: Movement): string | undefined {
+    if (!movement.skills || movement.skills.length === 0) return undefined;
+    const baseDir = this.cwd ?? process.cwd();
+    const metadata = this.score.metadata as Record<string, unknown> | undefined;
+    const override =
+      metadata && typeof metadata.skillsDir === 'string' ? metadata.skillsDir : undefined;
+    return resolveSkillsDir({
+      override,
+      config: this.configSkillsDir,
+      defaultDir: join(baseDir, DEFAULT_SKILLS_DIR_NAME),
+    });
+  }
+
   private resolveModelConfig(
     movement: Movement,
     harnessType: string,

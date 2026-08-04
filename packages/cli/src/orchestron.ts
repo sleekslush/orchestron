@@ -58,7 +58,7 @@ export async function withOrchestron<T>(
 }
 
 export async function createOrchestron(options: OrchestronOptions = {}): Promise<Orchestron> {
-  const { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness } = resolveOrchestronConfig(
+  const { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness, skillsDir } = resolveOrchestronConfig(
     options,
     {
       storePath: DEFAULT_STORE_PATH,
@@ -168,6 +168,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     tracesDir,
     liveEventLog,
     defaultHarness,
+    skillsDir,
   });
 
   return { store, registry, hall, liveEventLog, tracesDir, listModels, dispose };

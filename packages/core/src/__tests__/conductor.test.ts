@@ -18,9 +18,15 @@ function createHall(options: Omit<ConcertHallOptions, 'tracesDir'>): ConcertHall
 }
 
 class CapturingFakeHarnessAdapter extends FakeHarnessAdapter {
-  prompts: { movementId?: string; prompt: string; options?: Record<string, unknown> }[] = [];
+  prompts: { movementId?: string; prompt: string; options?: Record<string, unknown>; skills?: string[]; skillsDir?: string }[] = [];
   async execute(prompt: string, context: any, options?: any) {
-    this.prompts.push({ movementId: options?.movementId, prompt, options: options?.options });
+    this.prompts.push({
+      movementId: options?.movementId,
+      prompt,
+      options: options?.options,
+      skills: options?.skills,
+      skillsDir: options?.skillsDir,
+    });
     return super.execute(prompt, context, options);
   }
 }
@@ -2707,4 +2713,100 @@ describe('model resolution', () => {
     expect(conductor.status).toBe('completed');
     expect(adapter.prompts[0].options).toBeUndefined();
   });
+});
+
+it('passes per-movement skills and the resolved skillsDir to the adapter', async () => {
+  const store = new SqliteLoge(':memory:');
+  const registry = new ScoreRegistry();
+  registry.register({
+    id: 'skills-test',
+    name: 'Skills Test',
+    description: '',
+    version: '1.0.0',
+    startMovement: 'a',
+    movements: [
+      {
+        id: 'a',
+        name: 'A',
+        section: 'x',
+        harness: 'fake',
+        prompt: 'A',
+        skills: ['review-conventions'],
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: '__end__', on: 'success' as const }],
+      },
+    ],
+    program: {},
+  });
+  const adapter = new CapturingFakeHarnessAdapter({
+    defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+  });
+  const hall = createHall({
+    store,
+    scoreRegistry: registry,
+    adapters: new Map([['fake', adapter]]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+  });
+  const conductor = await hall.createConcert('skills-test', { cwd: '/work' });
+  await conductor.start();
+
+  expect(conductor.status).toBe('completed');
+  expect(adapter.prompts[0].skills).toEqual(['review-conventions']);
+  // Default skills dir resolves to <cwd>/skills when nothing overrides.
+  expect(adapter.prompts[0].skillsDir).toBe(join('/work', 'skills'));
+});
+
+it('resolves the skillsDir from score metadata and passes no skills for movements without any', async () => {
+  const store = new SqliteLoge(':memory:');
+  const registry = new ScoreRegistry();
+  registry.register({
+    id: 'skills-metadata-test',
+    name: 'Skills Metadata Test',
+    description: '',
+    version: '1.0.0',
+    startMovement: 'plain',
+    movements: [
+      {
+        id: 'plain',
+        name: 'Plain',
+        section: 'x',
+        harness: 'fake',
+        prompt: 'Plain',
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: 'a', on: 'success' as const }],
+      },
+      {
+        id: 'a',
+        name: 'A',
+        section: 'x',
+        harness: 'fake',
+        prompt: 'A',
+        skills: ['issue-gating'],
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: '__end__', on: 'success' as const }],
+      },
+    ],
+    metadata: { skillsDir: 'examples/skills' },
+    program: {},
+  });
+  const adapter = new CapturingFakeHarnessAdapter({
+    defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+  });
+  const hall = createHall({
+    store,
+    scoreRegistry: registry,
+    adapters: new Map([['fake', adapter]]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+  });
+  const conductor = await hall.createConcert('skills-metadata-test', { cwd: '/work' });
+  await conductor.start();
+
+  // The movement without skills gets none; the skill-bearing movement uses the
+  // score metadata override rather than the default <cwd>/skills.
+  const plain = adapter.prompts.find((p) => p.movementId === 'plain');
+  const withSkill = adapter.prompts.find((p) => p.movementId === 'a');
+  expect(plain?.skills).toBeUndefined();
+  expect(plain?.skillsDir).toBeUndefined();
+  expect(withSkill?.skills).toEqual(['issue-gating']);
+  expect(withSkill?.skillsDir).toBe('examples/skills');
 });

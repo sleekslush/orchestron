@@ -72,6 +72,14 @@ export interface Movement {
   transitions: Transition[];
   budget?: MovementBudget;
   /**
+   * Optional names of skills (markdown + frontmatter instruction blocks) to
+   * load into this movement's session at creation time, before execution.
+   * Skills augment — never replace — whatever skills the harness auto-loads.
+   * Skill names resolve against the movement's skills directory (see
+   * `resolveSkillsDir`). An unresolvable name is a hard failure.
+   */
+  skills?: string[];
+  /**
    * Retry on a technical execution failure (harness/adapter error, timeout,
    * crash). Independent of `retryOnRejection`: a goal rejection is not a
    * technical failure and is only retried when `retryOnRejection` is set.

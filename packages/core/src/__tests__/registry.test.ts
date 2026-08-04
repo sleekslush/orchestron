@@ -79,6 +79,76 @@ describe('ScoreRegistry', () => {
     ).toThrow('not found in movements');
   });
 
+  it('should accept a movement with a skills array', () => {
+    const registry = new ScoreRegistry();
+    const score = validScore({
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'pi',
+          prompt: 'Do A',
+          skills: ['review-conventions', 'issue-gating'],
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      startMovement: 'step_a',
+    });
+    registry.register(score);
+    expect(registry.get('test-workflow').movements[0].skills).toEqual([
+      'review-conventions',
+      'issue-gating',
+    ]);
+  });
+
+  it('should reject a movement whose skills is not an array of non-empty strings', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              harness: 'pi',
+              prompt: 'Do A',
+              skills: 'review-conventions' as unknown as string[],
+              goal: { description: 'done', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow(/skills.*array of non-empty strings/);
+  });
+
+  it('should reject a movement with empty-string entries in skills', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              harness: 'pi',
+              prompt: 'Do A',
+              skills: ['  '],
+              goal: { description: 'done', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow(/skills.*array of non-empty strings/);
+  });
+
   it('should reject a score with dangling transition target', () => {
     const registry = new ScoreRegistry();
     expect(() =>
