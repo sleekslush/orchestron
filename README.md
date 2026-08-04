@@ -142,6 +142,7 @@ Paths starting with `~/` are expanded to your home directory.
 | `ORCHESTRON_STORE_PATH` | SQLite store location | `~/.orchestron/store.db` |
 | `ORCHESTRON_SCORES_DIRS` | Comma-separated score directories | `./.orchestron/scores`, `~/.orchestron/scores` |
 | `ORCHESTRON_DEFAULT_HARNESS` | Default harness for movements | `pi` |
+| `ORCHESTRON_SKILLS_DIR` | Directory movement skills load from (default: `skills/` next to the score) | `<cwd>/skills` |
 | `ORCHESTRON_OPENCODE_PROVIDER` | Opencode model provider | `opencode` |
 | `ORCHESTRON_OPENCODE_MODEL_ID` | Opencode model ID | `kimi-k2.5` |
 | `ORCHESTRON_PI_PROVIDER` | Pi model provider | — |
@@ -255,6 +256,40 @@ Movement prompts can reference:
 - `{{context.<key>}}` — shared context values.
 - `{{context.previousOutputs.<movementId>}}` — raw output from a previous
   movement.
+
+### Movement skills
+
+Movements can declare shared instruction blocks (markdown + frontmatter) that
+are loaded into the session at creation time, before execution:
+
+```yaml
+movements:
+  - id: review
+    harness: pi
+    skills:
+      - review-conventions
+      - issue-gating
+```
+
+Each named skill resolves against a **skills directory** using either convention:
+
+- `<skillsDir>/<name>/SKILL.md` — a skill root directory named after the skill
+- `<skillsDir>/<name>.skill.md` — a single-file skill
+
+The directory is resolved with the standard precedence (higher wins):
+
+1. **Score `metadata.skillsDir`** (per-score override)
+2. **`ORCHESTRON_SKILLS_DIR`** environment variable
+3. **Config-file `skillsDir`**
+4. **Default**: `skills/` next to the score (concert working directory)
+
+Skills augment — never replace — whatever the harness auto-loads. An
+unresolvable skill name fails loudly (never a silent no-op). The Pi and
+opencode adapters both route through the same `@orchestron/core` helpers, so a
+skills and directory produce identical model-facing content across harnesses.
+With opencode the movement's skills directory is additionally registered with
+the session as an opencode skill source, and execution is gated on the server
+reporting every declared skill as registered.
 
 ### Transitions
 

@@ -7,7 +7,10 @@ import {
   tryParseStructured,
   tryParseStructuredFromText,
   SessionPool,
+  loadNamedSkills,
+  formatSkillsForPrompt,
 } from '@orchestron/core';
+import type { LoadedSkill } from '@orchestron/core';
 import {
   createOpencode,
   createOpencodeClient,
@@ -109,6 +112,14 @@ export class OpencodeAdapter implements HarnessAdapter {
   private validatedModels: Array<{ providerID: string; modelID: string }> | undefined;
   /** Working directory per session id (from execute options). */
   private sessionCwds = new Map<string, string>();
+  /**
+   * Bookkeeping: the movement-declared skills (+ their source directory) per
+   * opencode session id. This is NOT the registration itself — registration is
+   * performed against the server (`config.skills.paths` + the `/skill` list
+   * endpoint); this map only records what was declared so `getRegisteredSkills`
+   * can read real server state and intersect it with the declarations.
+   */
+  private declaredSkillsBySession = new Map<string, { names: string[]; directory?: string }>();
 
   constructor(config: OpencodeAdapterConfig = {}) {
     this.config = config;
@@ -167,6 +178,19 @@ export class OpencodeAdapter implements HarnessAdapter {
 
       const opencodeSessionId = sessionData.opencodeSessionId;
 
+      // Register movement-declared skills with the opencode session (as a
+      // SkillV2Source directory) and inject their content at session creation,
+      // before execution. Skills augment — never replace — whatever opencode
+      // auto-loads. An unresolvable skill fails loudly rather than silently
+      // running without it.
+      const skillsBlock = await this.registerSessionSkills(
+        opencodeSessionId,
+        options?.cwd,
+        options?.skills,
+        options?.skillsDir,
+      );
+      const effectivePrompt = skillsBlock ? prompt + '\n\n' + skillsBlock : prompt;
+
       // Determine the message boundary for this turn so per-turn usage (cost +
       // tokens) can be aggregated across every assistant message in the turn
       // without double-counting prior turns in a persistent (reused) session.
@@ -192,7 +216,7 @@ export class OpencodeAdapter implements HarnessAdapter {
         variant?: string;
       } = {
         sessionID: opencodeSessionId,
-        parts: [{ type: 'text', text: prompt }],
+        parts: [{ type: 'text', text: effectivePrompt }],
       };
 
       if (provider && modelId) {
@@ -375,6 +399,7 @@ export class OpencodeAdapter implements HarnessAdapter {
         options.signal.removeEventListener('abort', abortListener);
       }
       if (ownSession && sessionData) {
+        this.declaredSkillsBySession.delete(sessionData.opencodeSessionId);
         await this.client?.session
           .delete({ sessionID: sessionData.opencodeSessionId })
           .catch(() => {});
@@ -384,6 +409,10 @@ export class OpencodeAdapter implements HarnessAdapter {
 
   async disposeSession(sessionId: string): Promise<void> {
     this.sessionCwds.delete(sessionId);
+    const data = this.sessionPool.get(sessionId);
+    if (data) {
+      this.declaredSkillsBySession.delete(data.opencodeSessionId);
+    }
     await this.sessionPool.disposeSession(sessionId);
   }
 
@@ -440,6 +469,7 @@ export class OpencodeAdapter implements HarnessAdapter {
 
   async dispose(): Promise<void> {
     await this.sessionPool.disposeAll();
+    this.declaredSkillsBySession.clear();
 
     if (this.ownsServer && this.server) {
       this.server.close();
@@ -582,6 +612,118 @@ export class OpencodeAdapter implements HarnessAdapter {
         `Failed to initialize opencode client: ${(err as Error).message ?? String(err)}`,
         'HARNESS_FAILURE',
       );
+    }
+  }
+
+  /**
+   * Register a session's movement-declared skills with opencode and return the
+   * formatted prompt block ('' when none are declared).
+   *
+   * Registration is REAL, not simulated:
+   *   1. Resolves each named skill from disk (fail-fast on any missing name).
+   *   2. Registers the movement's skills directory as a SkillV2Source
+   *      ("/directory") via `config.skills.paths` for the session's location, so
+   *      the opencode server genuinely loads those skills.
+   *   3. Verifies against the server's actual registered-skill list (the
+   *      `/api/skill` endpoint) that every declared skill is present — failing
+   *      loudly rather than executing without one.
+   *   4. Injects the skill content into the session prompt as inert data (the
+   *      only reliable way to guarantee the content reaches the model's
+   *      context). Injections are on top of whatever opencode auto-loads.
+   */
+  private async registerSessionSkills(
+    opencodeSessionId: string,
+    directory: string | undefined,
+    skills: string[] | undefined,
+    skillsDir: string | undefined,
+  ): Promise<string> {
+    if (!skills || skills.length === 0 || !skillsDir) {
+      this.declaredSkillsBySession.delete(opencodeSessionId);
+      return '';
+    }
+
+    let loaded: LoadedSkill[];
+    try {
+      loaded = loadNamedSkills(skillsDir, skills);
+    } catch (err) {
+      throw new HarnessError(
+        `Skill(s) not found in skills directory '${skillsDir}': ${(err as Error).message ?? String(err)}`,
+        'HARNESS_FAILURE',
+      );
+    }
+
+    this.declaredSkillsBySession.set(opencodeSessionId, { names: skills, directory });
+
+    if (this.client) {
+      try {
+        await this.client.config.update({
+          ...(directory ? { directory } : {}),
+          config: { skills: { paths: [skillsDir] } },
+        });
+      } catch (err) {
+        throw new HarnessError(
+          `Failed to register skill source '${skillsDir}' with opencode: ${(err as Error).message ?? String(err)}`,
+          'HARNESS_FAILURE',
+        );
+      }
+
+      // The registration is real only if the server reports the skills in its
+      // registered-skill list; verify against that, not our own bookkeeping.
+      const registeredNames = new Set(await this.listRegisteredSkillNames(directory));
+      const missing = skills.filter((n) => !registeredNames.has(n));
+      if (missing.length > 0) {
+        throw new HarnessError(
+          `Skill(s) not registered with opencode: ${missing.join(', ')}. Loaded from '${skillsDir}' ` +
+            `but not present in the session's registered skills.`,
+          'HARNESS_FAILURE',
+        );
+      }
+    }
+
+    return formatSkillsForPrompt(loaded);
+  }
+
+  /** Query the server's registered skill names for a location via `/api/skill`. */
+  private async listRegisteredSkillNames(directory?: string): Promise<string[]> {
+    if (!this.client) return [];
+    try {
+      const result = await this.client.v2.skill.list({
+        ...(directory ? { location: { directory } } : {}),
+      });
+      if (result.error) return [];
+      return (result.data?.data ?? []).map((s) => s.name);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Return the skills that are BOTH movement-declared for the session AND
+   * present in the server's actual registered-skill state (`/api/skill`). Reads
+   * real session state rather than an in-memory simulation. Primarily for tests
+   * / observability.
+   */
+  async getRegisteredSkills(sessionId: string): Promise<LoadedSkill[]> {
+    const data = this.sessionPool.get(sessionId);
+    const opencodeSessionId = data?.opencodeSessionId;
+    if (!opencodeSessionId || !this.client) return [];
+    const declared = this.declaredSkillsBySession.get(opencodeSessionId);
+    if (!declared) return [];
+
+    try {
+      const result = await this.client.v2.skill.list({
+        ...(declared.directory ? { location: { directory: declared.directory } } : {}),
+      });
+      if (result.error) return [];
+      const byName = new Map((result.data?.data ?? []).map((s) => [s.name, s]));
+      return declared.names
+        .map((n) => {
+          const info = byName.get(n);
+          return info ? { name: info.name, content: info.content } : undefined;
+        })
+        .filter((s): s is LoadedSkill => s !== undefined);
+    } catch {
+      return [];
     }
   }
 

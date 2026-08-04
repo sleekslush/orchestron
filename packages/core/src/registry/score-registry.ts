@@ -108,6 +108,20 @@ export class ScoreRegistry {
     }
 
     for (const m of score.movements) {
+      if (m.skills !== undefined) {
+        if (
+          !Array.isArray(m.skills) ||
+          m.skills.some((s) => typeof s !== 'string' || s.trim() === '')
+        ) {
+          errors.push(
+            new ScoreValidationError(
+              `Score '${score.id}': movement '${m.id}' 'skills' must be an array of non-empty strings`,
+              'INVALID_SCORE',
+            ),
+          );
+        }
+      }
+
       if (m.prompt && typeof m.prompt === 'object') {
         if (typeof m.prompt.initial !== 'string' || typeof m.prompt.subsequent !== 'string' || !m.prompt.initial || !m.prompt.subsequent) {
           errors.push(

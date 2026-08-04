@@ -11,6 +11,10 @@ program:
   maxSpendDollars: 5
   maxMovements: 20
 startMovement: clarify
+metadata:
+  # Directory movement skills resolve from (default: `skills/` next to the
+  # score; overridable via ORCHESTRON_SKILLS_DIR / config `skillsDir`).
+  skillsDir: "examples/skills"
 
 movements:
   - id: clarify
@@ -85,6 +89,7 @@ movements:
     name: "Code Review"
     section: review
     harness: pi
+    skills: [review-conventions, issue-gating]
     prompt: >
       Review this implementation for issues:
       

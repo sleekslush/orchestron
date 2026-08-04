@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { OpencodeAdapter } from './opencode-adapter.js';
 import type { HarnessResponse } from '@orchestron/core';
 
@@ -15,9 +18,15 @@ const mockClient = {
   event: {
     subscribe: vi.fn(),
   },
+  config: {
+    update: vi.fn(),
+  },
   v2: {
     model: {
       list: (...args: unknown[]) => mockModelList(...args),
+    },
+    skill: {
+      list: vi.fn(),
     },
   },
 };
@@ -776,3 +785,105 @@ describe('OpencodeAdapter', () => {
 
     expect(mockClient.session.create).toHaveBeenCalledWith({ title: 'ephemeral' });
   });
+
+describe('OpencodeAdapter skills', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createOpencodeClientMock.mockReturnValue(mockClient);
+    mockClient.session.create.mockResolvedValue({ data: { id: 'session-1', title: 'test' } });
+    mockClient.session.promptAsync.mockResolvedValue({ data: {} });
+    mockClient.session.messages.mockResolvedValue({
+      data: [
+        {
+          info: makeAssistantMessage({ cost: 0.00012, tokens: { input: 5, output: 3, total: 8 } }),
+          parts: [makeTextPart('hello')],
+        },
+      ],
+    });
+    mockClient.config.update.mockResolvedValue({ data: {} });
+    mockClient.v2.skill.list.mockResolvedValue({ data: { data: [] } });
+  });
+
+  it('registers declared skills with the session and injects their content', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-skills-'));
+    mkdirSync(join(dir, 'review-conventions'));
+    writeFileSync(
+      join(dir, 'review-conventions', 'SKILL.md'),
+      '---\nname: review-conventions\n---\n\nCheck correctness and edge cases.',
+    );
+    // The server reports the skill as registered once the source dir is added
+    // (modeling the SkillV2Source "directory" registration via config.skills.paths).
+    mockClient.v2.skill.list.mockResolvedValue({
+      data: {
+        data: [{ name: 'review-conventions', location: dir, content: 'Check correctness and edge cases.' }],
+      },
+    });
+
+    const adapter = new OpencodeAdapter();
+    await adapter.execute('review this', { shared: {} }, {
+      sessionId: 'c1:m1',
+      cwd: '/worktree/path',
+      skills: ['review-conventions'],
+      skillsDir: dir,
+    });
+
+    // The skills directory is registered with the server for the session's location.
+    expect(mockClient.config.update).toHaveBeenCalledWith({
+      directory: '/worktree/path',
+      config: { skills: { paths: [dir] } },
+    });
+
+    // getRegisteredSkills reads the server's real registered-skills state, not an
+    // in-memory map — it only reports skills the server actually has.
+    await expect(adapter.getRegisteredSkills('c1:m1')).resolves.toEqual([
+      { name: 'review-conventions', content: 'Check correctness and edge cases.' },
+    ]);
+
+    // Skill content is injected into the session's prompt at creation time.
+    const prompt = (mockClient.session.promptAsync as Mock).mock.calls[0][0];
+    const text = prompt.parts[0].text as string;
+    expect(text).toContain('review this');
+    expect(text).toContain('Check correctness and edge cases.');
+  });
+
+  it('does not register or inject skills when none are declared', async () => {
+    const adapter = new OpencodeAdapter();
+    await adapter.execute('x', { shared: {} }, { sessionId: 'c1:m1' });
+
+    expect(mockClient.config.update).not.toHaveBeenCalled();
+    await expect(adapter.getRegisteredSkills('c1:m1')).resolves.toEqual([]);
+    const prompt = (mockClient.session.promptAsync as Mock).mock.calls[0][0];
+    expect(prompt.parts[0].text).toBe('x');
+  });
+
+  it('fails loudly when a declared skill cannot be resolved from disk', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-skills-'));
+    const adapter = new OpencodeAdapter();
+
+    await expect(
+      adapter.execute('x', { shared: {} }, { sessionId: 'c1:m1', skills: ['missing-skill'], skillsDir: dir }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining('missing-skill'),
+    });
+    // Must not run the session without the skill.
+    expect(mockClient.session.promptAsync).not.toHaveBeenCalled();
+  });
+
+  it('fails loudly when the server does not report a declared skill as registered', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-skills-'));
+    mkdirSync(join(dir, 'review-conventions'));
+    writeFileSync(join(dir, 'review-conventions', 'SKILL.md'), 'Do review.');
+    // Server resolved the skill from disk but does NOT have it registered.
+    mockClient.v2.skill.list.mockResolvedValue({ data: { data: [] } });
+
+    const adapter = new OpencodeAdapter();
+    await expect(
+      adapter.execute('x', { shared: {} }, { sessionId: 'c1:m1', skills: ['review-conventions'], skillsDir: dir }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining('review-conventions'),
+    });
+    expect(mockClient.session.promptAsync).not.toHaveBeenCalled();
+  });
+});

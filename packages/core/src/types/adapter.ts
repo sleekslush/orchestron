@@ -24,6 +24,14 @@ export interface HarnessAdapterExecuteOptions {
   /** Working directory for the harness session (tool calls land here).
    *  Default: process.cwd(). */
   cwd?: string;
+  /**
+   * Optional per-movement skills (names) to load into the session at creation
+   * time, in addition to any skills the harness auto-loads. Names resolve
+   * against `skillsDir`. An unresolvable name must fail loudly.
+   */
+  skills?: string[];
+  /** Directory to resolve `skills` names from. Default: `<cwd>/skills`. */
+  skillsDir?: string;
 }
 
 export interface HarnessModelInfo {

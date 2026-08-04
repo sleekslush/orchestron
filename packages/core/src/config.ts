@@ -8,6 +8,8 @@ export interface OrchestronConfig {
   scoresDirs?: string[];
   tracesDir?: string;
   defaultHarness?: string;
+  /** Global override for the directory movement skills load from. */
+  skillsDir?: string;
   opencode?: {
     provider?: string;
     modelId?: string;
@@ -40,6 +42,8 @@ export interface ResolvedOrchestronConfig {
   piProvider?: string;
   piModelId?: string;
   defaultHarness: string;
+  /** Resolved global skills directory override (may be undefined → default `<cwd>/skills`). */
+  skillsDir?: string;
 }
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.orchestron');
@@ -87,6 +91,9 @@ function normalizeConfig(raw: unknown): OrchestronConfig | undefined {
   }
   if (typeof input.defaultHarness === 'string') {
     config.defaultHarness = input.defaultHarness;
+  }
+  if (typeof input.skillsDir === 'string') {
+    config.skillsDir = expandTilde(input.skillsDir);
   }
   if (input.opencode && typeof input.opencode === 'object') {
     const oc = input.opencode as Record<string, unknown>;
@@ -183,5 +190,9 @@ export function resolveOrchestronConfig(
     fileConfig.defaultHarness ??
     'pi';
 
-  return { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness };
+  const skillsDir =
+    e.ORCHESTRON_SKILLS_DIR ??
+    fileConfig.skillsDir;
+
+  return { storePath, scoresDirs, opencodeProvider, opencodeModelId, piProvider, piModelId, defaultHarness, skillsDir };
 }
