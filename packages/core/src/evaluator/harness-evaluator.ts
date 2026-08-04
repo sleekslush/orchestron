@@ -71,8 +71,8 @@ export interface HarnessEvaluatorConfig {
   /**
    * How many bounded self-repair attempts to make when the judge returns
    * non-empty output that cannot be parsed. Each attempt re-prompts the judge
-   * to re-emit only JSON matching the schema. Default `1`; `0` disables the
-   * repair pass entirely.
+   * to re-emit only JSON matching the schema, costing an extra model call on
+   * the failure path only. Default `1`; `0` disables the repair pass entirely.
    */
   maxRepairAttempts?: number;
 }
@@ -382,7 +382,6 @@ Return a JSON object with:
   private async tryRepair(
     rawOutput: string,
     context: ConcertContext,
-    movementId?: string,
   ): Promise<GoalEvaluation | undefined> {
     const maxAttempts = this.config.maxRepairAttempts ?? 1;
     if (maxAttempts <= 0) {
@@ -410,6 +409,11 @@ Return a JSON object with:
   }
 
   private buildRepairPrompt(rawOutput: string): string {
+    // The repair pass targets chatty/flaky judge models whose output can be
+    // long prose; truncate the inlined raw output to bound the extra prompt
+    // size/cost. The full raw output remains persisted on the movement via
+    // `evidence` for debugging.
+    const truncated = this.truncate(rawOutput.trim(), 500);
     return `Your previous response was not valid JSON. Re-emit ONLY a JSON object matching this schema:
 {
   "achieved": boolean,
@@ -419,8 +423,8 @@ Return a JSON object with:
 }
 Do not include any prose, markdown, or explanation.
 
-Previous response:
-${rawOutput}`;
+Previous response (truncated):
+${truncated}`;
   }
 
   private truncate(text: string, max: number): string {

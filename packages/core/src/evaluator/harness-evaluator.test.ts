@@ -149,9 +149,12 @@ describe('HarnessEvaluator', () => {
         usage: { spend: 1, tokens: 10 },
       },
     });
+    const executeSpy = vi.spyOn(adapter, 'execute');
     const evaluator = new HarnessEvaluator({ adapter, defaultOnParseFailure: 'retry' });
 
     await expect(evaluator.evaluate(goal, 'output', context)).rejects.toBeInstanceOf(GoalEvalError);
+    // One bounded repair attempt (default) happens before falling through to retry.
+    expect(executeSpy).toHaveBeenCalledTimes(2);
   });
 
   it('degrades to achieved:true when configured defaultOnParseFailure is passed', async () => {
@@ -162,11 +165,14 @@ describe('HarnessEvaluator', () => {
         usage: { spend: 1, tokens: 10 },
       },
     });
+    const executeSpy = vi.spyOn(adapter, 'execute');
     const evaluator = new HarnessEvaluator({ adapter, defaultOnParseFailure: 'passed' });
 
     const result = await evaluator.evaluate(goal, 'output', context);
     expect(result.achieved).toBe(true);
     expect(result.confidence).toBe(0);
+    // One bounded repair attempt (default) happens before falling through to the default.
+    expect(executeSpy).toHaveBeenCalledTimes(2);
   });
 
   it('extracts lenient key: value lines with type coercion', async () => {

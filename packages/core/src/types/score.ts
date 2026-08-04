@@ -147,4 +147,11 @@ export interface EvaluatorConfig {
    * transition rather than passing it.
    */
   structurizer?: { model: string; provider?: string };
+  /**
+   * How many bounded self-repair attempts to make when the evaluator returns
+   * non-empty output that cannot be parsed. Each attempt re-prompts the judge
+   * to re-emit only schema JSON (extra model call on the failure path).
+   * Default `1`; `0` disables the repair pass entirely.
+   */
+  maxRepairAttempts?: number;
 }
