@@ -33,6 +33,21 @@ const goalEvaluationSchema = {
  */
 export type DefaultOnParseFailure = 'failed' | 'passed' | 'retry';
 
+/**
+ * Configurable structurizer / second-model pass (issue #133, strategy 4 from
+ * #103). When the configured judge model is known-flaky (small flash-tier
+ * models being the usual offender) and its output cannot be parsed into a valid
+ * {@link GoalEvaluation}, a separate extraction model is invoked to convert the
+ * raw judge output into strict JSON. This decouples *judgment* (cheap model)
+ * from *formatting* (any model that reliably emits JSON).
+ */
+export interface EvaluatorStructurizerConfig {
+  /** Model to use for the repair/structuring pass. */
+  model: string;
+  /** Provider for the structurizer model. Defaults to the adapter's default. */
+  provider?: string;
+}
+
 export interface HarnessEvaluatorConfig {
   adapter: HarnessAdapter;
   promptTemplate?: string;
@@ -40,6 +55,13 @@ export interface HarnessEvaluatorConfig {
   provider?: string;
   /** How to react when the evaluator output cannot be parsed. Default `failed`. */
   defaultOnParseFailure?: DefaultOnParseFailure;
+  /**
+   * Optional second-model pass: when configured, unparseable judge output is
+   * re-routed to this extraction model to be converted into JSON before falling
+   * back to graceful degradation. Only invoked on the recovery path — no cost
+   * when the judge's own output parses cleanly.
+   */
+  structurizer?: EvaluatorStructurizerConfig;
 }
 
 export class HarnessEvaluator implements Evaluator {
@@ -62,7 +84,83 @@ export class HarnessEvaluator implements Evaluator {
       provider: this.config.provider,
     });
 
-    return this.parseEvaluation(response, goal, movementId);
+    const parsed = this.tryParseEvaluation(response);
+    if (parsed) {
+      return parsed;
+    }
+
+    // Configurable structurizer / second-model pass (strategy 4 from #103):
+    // when the judge's own output is unparseable (common with flaky flash-tier
+    // judge models), route the repair pass to a separate extraction model that
+    // reliably emits JSON. Invoked only on the recovery path, so it has no cost
+    // on the happy path.
+    if (this.config.structurizer) {
+      const structurized = await this.structurizeGoalEvaluation(
+        response,
+        goal,
+        context,
+        movementId,
+        this.config.structurizer,
+      );
+      if (structurized) {
+        return structurized;
+      }
+    }
+
+    return this.degrade(response, goal, movementId);
+  }
+
+  /**
+   * Invoke the structurizer model to convert raw judge text into a strict JSON
+   * {@link GoalEvaluation}. Best-effort: any failure (adapter error or
+   * unparseable result) yields `undefined` so the caller falls through to
+   * graceful degradation.
+   */
+  private async structurizeGoalEvaluation(
+    original: HarnessResponse,
+    goal: Goal,
+    context: ConcertContext,
+    movementId: string | undefined,
+    structurizer: EvaluatorStructurizerConfig,
+  ): Promise<GoalEvaluation | undefined> {
+    const raw = original.output.trim();
+    if (!raw) {
+      return undefined;
+    }
+
+    const prompt = [
+      'You are a JSON formatter. Convert the free-form text below from a judge/evaluator model into ONE strict JSON object.',
+      'Reply with ONLY the JSON object — no markdown fences, no commentary.',
+      'The object must have these fields:',
+      '  - "achieved": boolean',
+      '  - "confidence": number between 0 and 1',
+      '  - "summary": string (brief explanation of the judgment)',
+      '  - "evidence": string (optional supporting evidence)',
+      '',
+      'If the text does not clearly indicate whether the goal was achieved, set "achieved" to false.',
+      '',
+      `Goal being evaluated: ${goal.description}`,
+      `Movement ID: ${movementId ?? ''}`,
+      'Judge raw output:',
+      '```',
+      raw,
+      '```',
+    ].join('\n');
+
+    try {
+      const response = await this.config.adapter.execute(prompt, context, {
+        output: {
+          mode: 'structured',
+          schema: goalEvaluationSchema as unknown as Record<string, unknown>,
+        },
+        model: structurizer.model,
+        provider: structurizer.provider,
+        movementId,
+      });
+      return this.tryParseEvaluation(response);
+    } catch {
+      return undefined;
+    }
   }
 
   private buildPrompt(
@@ -93,11 +191,15 @@ Return a JSON object with:
       .replaceAll('{{context}}', JSON.stringify(context.shared, null, 2));
   }
 
-  private parseEvaluation(
+  /**
+   * Attempt to parse the judge's response into a valid
+   * {@link GoalEvaluation}. Returns `undefined` when it cannot — no degradation
+   * here so callers can route unparseable output to the structurizer (strategy
+   * 4) before falling through to {@link degrade}.
+   */
+  private tryParseEvaluation(
     response: HarnessResponse,
-    goal: Goal,
-    movementId?: string,
-  ): GoalEvaluation {
+  ): GoalEvaluation | undefined {
     const structured = response.structured;
     if (this.isGoalEvaluation(structured)) {
       return structured;
@@ -111,11 +213,23 @@ Return a JSON object with:
       }
     }
 
-    // Graceful degradation: never let an unparseable evaluation kill the
-    // concert. If the caller opted into `retry`, surface the infra failure as a
-    // retryable error; otherwise fall back to a deterministic default so the
-    // movement resolves through its normal (non-success) transition instead of
-    // crashing the whole concert.
+    return undefined;
+  }
+
+  /**
+   * Graceful degradation: never let an unparseable evaluation kill the
+   * concert. If the caller opted into `retry`, surface the infra failure as a
+   * retryable error; otherwise fall back to a deterministic default so the
+   * movement resolves through its normal (non-success) transition instead of
+   * crashing the whole concert.
+   */
+  private degrade(
+    response: HarnessResponse,
+    _goal: Goal,
+    movementId?: string,
+  ): GoalEvaluation {
+    const text = response.output.trim();
+
     const mode = this.config.defaultOnParseFailure ?? 'failed';
     if (mode === 'retry') {
       throw new GoalEvalError(

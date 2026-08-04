@@ -273,4 +273,111 @@ describe('HarnessEvaluator', () => {
     expect(options?.model).toBeUndefined();
     expect(options?.provider).toBeUndefined();
   });
+
+  it('routes unparseable judge output to the structurizer model', async () => {
+    const adapter = new FakeHarnessAdapter({});
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    // Judge call returns unparseable output; structurizer call returns valid JSON.
+    executeSpy
+      .mockResolvedValueOnce({
+        output: 'the movement achieved its goal, pretty confident',
+        summary: 'judged',
+        usage: {},
+      })
+      .mockResolvedValueOnce({
+        output: '{"achieved":true,"confidence":0.92,"summary":"Structured by second model"}',
+        structured: {
+          achieved: true,
+          confidence: 0.92,
+          summary: 'Structured by second model',
+        },
+        summary: 'structured',
+        usage: { spend: 2, tokens: 20 },
+      });
+
+    const evaluator = new HarnessEvaluator({
+      adapter,
+      model: 'judge-flash',
+      provider: 'gemini',
+      structurizer: { model: 'struct-model', provider: 'openai' },
+    });
+
+    const result = await evaluator.evaluate(goal, 'output', context, 'm1');
+
+    expect(result.achieved).toBe(true);
+    expect(result.summary).toBe('Structured by second model');
+    expect(executeSpy).toHaveBeenCalledTimes(2);
+
+    // Judge call uses the judge model/provider.
+    expect(executeSpy.mock.calls[0][2]?.model).toBe('judge-flash');
+    expect(executeSpy.mock.calls[0][2]?.provider).toBe('gemini');
+    // Structurizer call forwards its own model/provider and requests JSON.
+    expect(executeSpy.mock.calls[1][2]?.model).toBe('struct-model');
+    expect(executeSpy.mock.calls[1][2]?.provider).toBe('openai');
+    expect(executeSpy.mock.calls[1][2]?.output?.mode).toBe('structured');
+    // The structurizer prompt carries the raw judge output for conversion.
+    expect(executeSpy.mock.calls[1][0]).toContain('the movement achieved its goal');
+    expect(executeSpy.mock.calls[1][0]).toContain('The output is a valid plan');
+  });
+
+  it('does not invoke the structurizer when the judge output parses cleanly', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"OK"}',
+        structured: { achieved: true, confidence: 1, summary: 'OK' },
+        summary: 's',
+        usage: {},
+      },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const evaluator = new HarnessEvaluator({
+      adapter,
+      structurizer: { model: 'struct-model' },
+    });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(true);
+    // Only the judge pass runs on the happy path; no structurizer call.
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('degrades to achieved:false when the structurizer also cannot parse', async () => {
+    const adapter = new FakeHarnessAdapter({});
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    executeSpy
+      .mockResolvedValueOnce({ output: 'judge gibberish', summary: 's', usage: {} })
+      .mockResolvedValueOnce({ output: 'still gibberish', summary: 's', usage: {} });
+
+    const evaluator = new HarnessEvaluator({
+      adapter,
+      defaultOnParseFailure: 'failed',
+      structurizer: { model: 'struct-model' },
+    });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(false);
+    expect(result.summary).toContain('Evaluator output unparseable');
+    expect(result.evidence).toBe('judge gibberish');
+    expect(executeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws a retryable error after the structurizer fails when retry is configured', async () => {
+    const adapter = new FakeHarnessAdapter({});
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    executeSpy
+      .mockResolvedValueOnce({ output: 'judge gibberish', summary: 's', usage: {} })
+      .mockResolvedValueOnce({ output: 'still gibberish', summary: 's', usage: {} });
+
+    const evaluator = new HarnessEvaluator({
+      adapter,
+      defaultOnParseFailure: 'retry',
+      structurizer: { model: 'struct-model' },
+    });
+
+    await expect(evaluator.evaluate(goal, 'output', context)).rejects.toBeInstanceOf(GoalEvalError);
+    // Structurizer was attempted before surfacing the retryable error.
+    expect(executeSpy).toHaveBeenCalledTimes(2);
+  });
 });
