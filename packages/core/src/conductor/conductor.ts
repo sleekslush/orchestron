@@ -12,7 +12,6 @@ import type {
   SectionBudget,
 } from '../types/score.js';
 import { EventEmitter } from 'node:events';
-import { hostname } from 'node:os';
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
 import type { ConcertEvent } from '../types/events.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
@@ -33,7 +32,6 @@ import { ConstraintChecker } from './constraint-checker.js';
 import { matchTransition } from './transition-resolver.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
-import { CONCERT_HEARTBEAT_INTERVAL_MS } from '../liveness.js';
 
 export { StartOptions };
 
@@ -57,7 +55,6 @@ export class Conductor implements IConductor {
   private constraintChecker: ConstraintChecker;
   private sectionMovementCount = new Map<string, number>();
   private sectionSpend = new Map<string, number>();
-  private concertHeartbeatHandle?: ReturnType<typeof setInterval>;
 
   constructor(
     private concert: Concert,
@@ -118,17 +115,12 @@ export class Conductor implements IConductor {
     this.concert.status = 'running';
     this._status = 'running';
     this.startedAt = Date.now();
-    this.markHostingProcess();
     await this.store.updateConcert({
       id: this.concert.id,
       status: 'running',
       context: this.concert.context,
       nestingDepth: this.nestingDepth,
-      processId: this.concert.processId,
-      hostname: this.concert.hostname,
-      lastHeartbeatAt: this.concert.lastHeartbeatAt,
     });
-    this.startConcertHeartbeat();
     this.emit({
       type: 'concert:started',
       concertId: this.concert.id,
@@ -164,15 +156,7 @@ export class Conductor implements IConductor {
     this.startedAt = Date.now();
     this.nestingDepth = this.concert.nestingDepth ?? (this.concert.parentConcertId ? 1 : 0);
 
-    this.markHostingProcess();
-    await this.store.updateConcert({
-      id: this.concert.id,
-      status: 'running',
-      processId: this.concert.processId,
-      hostname: this.concert.hostname,
-      lastHeartbeatAt: this.concert.lastHeartbeatAt,
-    });
-    this.startConcertHeartbeat();
+    await this.store.updateConcert({ id: this.concert.id, status: 'running' });
     this.emit({
       type: 'concert:recovered',
       concertId: this.concert.id,
@@ -644,47 +628,6 @@ export class Conductor implements IConductor {
   }
 
   /**
-   * Record the hosting process's PID/hostname and stamp a first heartbeat so
-   * reader-side liveness checks have something to compare against even if the
-   * process dies before the first interval tick.
-   */
-  private markHostingProcess(): void {
-    this.concert.processId = process.pid;
-    this.concert.hostname = hostname();
-    this.concert.lastHeartbeatAt = new Date();
-  }
-
-  /**
-   * Concert-level heartbeat that fires even between movements, updating
-   * `lastHeartbeatAt` on the persisted row so readers can detect a killed
-   * process regardless of which movement (or gap) it was in.
-   */
-  private startConcertHeartbeat(): void {
-    this.stopConcertHeartbeat();
-    this.concertHeartbeatHandle = setInterval(() => {
-      this.concert.lastHeartbeatAt = new Date();
-      this.store
-        .updateConcert({ id: this.concert.id, lastHeartbeatAt: this.concert.lastHeartbeatAt })
-        .catch((err) => {
-          // Best-effort by design, but don't swallow failures silently: a
-          // concert that fails to persist heartbeats can be mis-flagged stale
-          // by reader-side liveness, so consecutive failures are a real signal.
-          console.error(
-            `Failed to persist heartbeat for concert '${this.concert.id}':`,
-            err,
-          );
-        });
-    }, CONCERT_HEARTBEAT_INTERVAL_MS);
-  }
-
-  private stopConcertHeartbeat(): void {
-    if (this.concertHeartbeatHandle) {
-      clearInterval(this.concertHeartbeatHandle);
-      this.concertHeartbeatHandle = undefined;
-    }
-  }
-
-  /**
    * Returns a ProgressUpdate callback that persists usage updates and
    * forwards progress events to the store.
    */
@@ -728,7 +671,7 @@ export class Conductor implements IConductor {
     };
   }
 
-  /** Serialize a caught error into a SerializedError for a MovementRecord. */
+  /** Serialize an caught error into a SerializedError for a MovementRecord. */
   private serializeMovementError(err: unknown, movementId: string): SerializedError {
     if (err instanceof OrchestronError) {
       return {
@@ -1124,7 +1067,6 @@ export class Conductor implements IConductor {
   }
 
   private async finalize(status: 'completed' | 'failed' | 'cancelled', reason?: string): Promise<void> {
-    this.stopConcertHeartbeat();
     this._status = status;
     this.concert.status = status;
     this.concert.completedAt = new Date();

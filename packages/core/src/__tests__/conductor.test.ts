@@ -91,45 +91,6 @@ it('persists state', async () => {
   expect(stored!.usage.spend).toBe(20);
 });
 
-it('persists hosting process identity and updates the heartbeat while running', async () => {
-  const store = new SqliteLoge(':memory:');
-  const registry = new ScoreRegistry();
-  registry.register(linearScore());
-  // Delay step_a long enough to observe the concert-level heartbeat refresh.
-  const adapter = new FakeHarnessAdapter({
-    perMovement: {
-      step_a: { output: 'a', summary: 'a', usage: { spend: 1, tokens: 10 }, delayMs: 7000 },
-    },
-    defaultResponse: { output: 'output', summary: 'summary', usage: { spend: 10, tokens: 100 } },
-  });
-  const hall = createHall({
-    store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
-    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-  });
-  const conductor = await hall.createConcert('linear-test');
-  const startPromise = conductor.start();
-
-  // Give the conductor a moment to start and stamp its hosting process.
-  await new Promise((r) => setTimeout(r, 250));
-  const stored = await store.getConcert(conductor.concertId);
-  expect(stored!.status).toBe('running');
-  expect(stored!.processId).toBe(process.pid);
-  expect(stored!.hostname).toBeTruthy();
-  expect(stored!.lastHeartbeatAt).toBeTruthy();
-  const firstBeat = stored!.lastHeartbeatAt!.getTime();
-
-  // Wait past one 5s heartbeat interval and confirm the heartbeat advances.
-  await new Promise((r) => setTimeout(r, 5300));
-  const after = await store.getConcert(conductor.concertId);
-  expect(after!.lastHeartbeatAt!.getTime()).toBeGreaterThan(firstBeat);
-
-  await startPromise;
-  expect(conductor.status).toBe('completed');
-  // Heartbeat stops at finalize, but the last report survives on the row.
-  const final = await store.getConcert(conductor.concertId);
-  expect(final!.processId).toBe(process.pid);
-}, 15000);
-
 it('constraint breach', async () => {
   const store = new SqliteLoge(':memory:');
   const registry = new ScoreRegistry();
