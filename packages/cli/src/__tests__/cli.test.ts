@@ -970,4 +970,53 @@ describe('CLI commands', () => {
       orchestron.store.close();
     }
   });
+
+  it('finalizes a pending concert that died before start, but not a fresh one', async () => {
+    const { hostname } = await import('node:os');
+    const { PENDING_STALE_AFTER_MS } = await import('@orchestron/core');
+    const orchestron = await createTestOrchestron(dir);
+    const deadPid = 2_000_000_000;
+    try {
+      await orchestron.store.saveConcert({
+        id: 'dead-pending',
+        scoreId: 'cli-test',
+        status: 'pending',
+        startedAt: new Date(Date.now() - PENDING_STALE_AFTER_MS - 60_000),
+        currentMovement: null,
+        history: [],
+        context: { shared: {} },
+        usage: {},
+        triggeredBy: 'cli',
+        childConcertIds: [],
+        processId: deadPid,
+        hostname: hostname(),
+      }, 'yaml');
+      await orchestron.store.saveConcert({
+        id: 'fresh-pending',
+        scoreId: 'cli-test',
+        status: 'pending',
+        startedAt: new Date(),
+        currentMovement: null,
+        history: [],
+        context: { shared: {} },
+        usage: {},
+        triggeredBy: 'cli',
+        childConcertIds: [],
+        processId: deadPid,
+        hostname: hostname(),
+      }, 'yaml');
+
+      const { logs, restore } = captureOutput();
+      try {
+        await finalizeStaleCommandHandler(orchestron, undefined, false);
+      } finally {
+        restore();
+      }
+
+      expect((await orchestron.store.getConcert('dead-pending'))!.status).toBe('failed');
+      expect((await orchestron.store.getConcert('fresh-pending'))!.status).toBe('pending');
+    } finally {
+      orchestron.store.close();
+    }
+  });
 });

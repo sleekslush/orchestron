@@ -1,7 +1,8 @@
-import { computeLiveness } from './liveness.js';
+import { computeLiveness, computePendingLiveness } from './liveness.js';
 import type { ConcertStore } from './store/concert-store.js';
 import type { Concert, ConcertID } from './types/concert.js';
 import type { ConcertEvent } from './types/events.js';
+import type { LivenessInfo } from './liveness.js';
 
 /**
  * Failure reason stamped on a concert that was auto-finalized because its
@@ -11,11 +12,30 @@ export const FINALIZE_STALE_REASON = 'process_died';
 
 /**
  * Statuses a dead process may leave behind and that external finalization may
- * clean up. Terminal concerts and `pending` concerts (whose process never
- * started / heartbeated) are never finalized here: `pending` is not a hosting
- * status and a stale pending row is not a zombie — it simply was never started.
+ * clean up. Terminal concerts are never finalized here. `pending` is handled
+ * separately (it is not a hosting status, but a stale pending row whose process
+ * died before its first heartbeat is still a dead, untracked row worth cleaning
+ * — see {@link computePendingLiveness} for the "never started" vs "died before
+ * start" boundary).
  */
 const FINALIZABLE_STATUSES = new Set(['running', 'paused']);
+
+/** True for the statuses {@link finalizeStaleConcert} may act on. */
+function isFinalizable(concert: Concert): boolean {
+  return isFinalizableStatus(concert.status) || concert.status === 'pending';
+}
+
+/**
+ * Staleness for whatever status a concert is in: `pending` rows use the
+ * creation-vs-start boundary ({@link computePendingLiveness}); the hosting
+ * statuses use heartbeat/PID liveness; terminal statuses are never stale.
+ */
+function computeStaleLiveness(concert: Concert): LivenessInfo {
+  if (concert.status === 'pending') {
+    return computePendingLiveness(concert);
+  }
+  return computeLiveness(concert);
+}
 
 export interface FinalizeStaleOptions {
   /**
@@ -58,19 +78,21 @@ export async function finalizeStaleConcert(
   const stored = await store.getConcert(concertId);
   if (!stored) return { concertId, finalized: false };
 
-  if (!FINALIZABLE_STATUSES.has(stored.status)) {
+  if (!isFinalizable(stored)) {
     return { concertId, finalized: false };
   }
 
-  const liveness = computeLiveness(stored);
+  const liveness = computeStaleLiveness(stored);
   if (!liveness.stale) {
     return { concertId, finalized: false };
   }
 
   // Second re-read immediately before the flip closes the race with a
-  // concurrently-completing conductor.
+  // concurrently-completing conductor. Applied to pending rows exactly as to
+  // running/paused ones, so a pending row that transitions between the two
+  // reads (e.g. a real conductor finally starts it) is never clobbered.
   const latest = await store.getConcert(concertId);
-  if (!latest || !FINALIZABLE_STATUSES.has(latest.status)) {
+  if (!latest || !isFinalizable(latest)) {
     return { concertId, finalized: false };
   }
 
@@ -115,9 +137,11 @@ export async function finalizeAllStale(
 }
 
 /**
- * Re-export for callers that want to decide which concerts are finalizable.
- * Kept as a function so the CLI/status surface can share the exact same notion
- * of "can this stale concert be finalized" without duplicating the status set.
+ * Whether a status is a hosting status a dead process may leave behind that
+ * external finalization may act on. Note this excludes `pending`: a `pending`
+ * row is never finalizable purely by status — its "died before start" staleness
+ * additionally depends on age/process liveness, so it is gated inside
+ * {@link finalizeStaleConcert} via {@link computePendingLiveness}.
  */
 export function isFinalizableStatus(status: Concert['status']): boolean {
   return FINALIZABLE_STATUSES.has(status);

@@ -9,7 +9,7 @@ import {
   isFinalizableStatus,
   FINALIZE_STALE_REASON,
 } from '../finalize-stale.js';
-import { CONCERT_STALE_AFTER_MS } from '../liveness.js';
+import { CONCERT_STALE_AFTER_MS, PENDING_STALE_AFTER_MS } from '../liveness.js';
 
 describe('finalizeStaleConcert', () => {
   let store: SqliteLoge;
@@ -130,8 +130,8 @@ describe('finalizeStaleConcert', () => {
     expect((await store.getConcert('c1'))!.status).toBe('failed');
   });
 
-  it('never touches terminal or pending concerts', async () => {
-    for (const status of ['failed', 'completed', 'cancelled', 'pending'] as const) {
+  it('never touches terminal concerts (even with a dead process)', async () => {
+    for (const status of ['failed', 'completed', 'cancelled'] as const) {
       const id = `c-${status}`;
       await store.saveConcert(
         makeConcert({
@@ -148,6 +148,109 @@ describe('finalizeStaleConcert', () => {
       expect(result.finalized).toBe(false);
       expect((await store.getConcert(id))!.status).toBe(status);
     }
+  });
+
+  it('finalizes a pending concert that died before start once it passes the floor', async () => {
+    // AC1: created long ago, dead PID, never heartbeated -> died before start.
+    await store.saveConcert(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(Date.now() - PENDING_STALE_AFTER_MS - 60_000),
+        processId: DEAD_PID,
+        hostname: hostname(),
+      }),
+      '',
+    );
+
+    const result = await finalizeStaleConcert(store, 'c1');
+    expect(result.finalized).toBe(true);
+    expect(result.reason).toBe('pid_dead');
+    expect((await store.getConcert('c1'))!.status).toBe('failed');
+  });
+
+  it('leaves a freshly-created pending concert untouched even with a dead PID', async () => {
+    // AC2: created moments ago (below the floor) must never be touched.
+    await store.saveConcert(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(),
+        processId: DEAD_PID,
+        hostname: hostname(),
+      }),
+      '',
+    );
+
+    const result = await finalizeStaleConcert(store, 'c1');
+    expect(result.finalized).toBe(false);
+    expect((await store.getConcert('c1'))!.status).toBe('pending');
+  });
+
+  it('does not finalize an old pending concert whose process is still alive', async () => {
+    await store.saveConcert(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(Date.now() - PENDING_STALE_AFTER_MS - 60_000),
+        processId: process.pid,
+        hostname: hostname(),
+      }),
+      '',
+    );
+
+    const result = await finalizeStaleConcert(store, 'c1');
+    expect(result.finalized).toBe(false);
+    expect((await store.getConcert('c1'))!.status).toBe('pending');
+  });
+
+  it('finalizes a cross-host old pending concert with no heartbeat since creation', async () => {
+    // Cross-host PID can't be probed, so heartbeat absence since the creation
+    // timestamp is the only signal — old -> died before start.
+    await store.saveConcert(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(Date.now() - PENDING_STALE_AFTER_MS - 60_000),
+        processId: 1,
+        hostname: 'remote-host',
+      }),
+      '',
+    );
+
+    const result = await finalizeStaleConcert(store, 'c1');
+    expect(result.finalized).toBe(true);
+    expect((await store.getConcert('c1'))!.status).toBe('failed');
+  });
+
+  it('re-checks pending status immediately before flipping (race guard)', async () => {
+    // AC4: race guard applies to pending rows too.
+    await store.saveConcert(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(Date.now() - PENDING_STALE_AFTER_MS - 60_000),
+        processId: DEAD_PID,
+        hostname: hostname(),
+      }),
+      '',
+    );
+
+    // A concurrently-completing conductor transitions the pending row between
+    // the two reads, so it must never be clobbered into `failed`.
+    const originalGet = store.getConcert.bind(store);
+    let calls = 0;
+    vi.spyOn(store, 'getConcert').mockImplementation(async (id) => {
+      calls++;
+      const row = await originalGet(id);
+      if (calls === 2 && row) {
+        return { ...row, status: 'completed' as const };
+      }
+      return row;
+    });
+    const updateSpy = vi.spyOn(store, 'updateConcert');
+
+    const result = await finalizeStaleConcert(store, 'c1');
+    expect(result.finalized).toBe(false);
+    expect(updateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'c1', status: 'failed' }),
+    );
+    expect((await store.getConcert('c1'))!.status).toBe('pending');
   });
 
   it('does not finalize a missing concert', async () => {
@@ -210,6 +313,8 @@ describe('finalizeStaleConcert', () => {
   it('isFinalizableStatus only admits liveness-relevant statuses', () => {
     expect(isFinalizableStatus('running')).toBe(true);
     expect(isFinalizableStatus('paused')).toBe(true);
+    // Pending is not finalizable purely by status; its "died before start"
+    // staleness additionally depends on age/process liveness.
     expect(isFinalizableStatus('pending')).toBe(false);
     expect(isFinalizableStatus('completed')).toBe(false);
     expect(isFinalizableStatus('failed')).toBe(false);

@@ -3,8 +3,10 @@ import { hostname } from 'node:os';
 import type { Concert } from '../types/concert.js';
 import {
   computeLiveness,
+  computePendingLiveness,
   isProcessAlive,
   CONCERT_STALE_AFTER_MS,
+  PENDING_STALE_AFTER_MS,
 } from '../liveness.js';
 
 function makeConcert(overrides: Partial<Concert> = {}): Concert {
@@ -73,13 +75,72 @@ describe('computeLiveness', () => {
   });
 
   it('never flags terminal concerts', () => {
-    for (const status of ['pending', 'completed', 'failed', 'cancelled'] as const) {
+    for (const status of ['completed', 'failed', 'cancelled'] as const) {
       const info = computeLiveness(
         makeConcert({
           status,
           lastHeartbeatAt: new Date(Date.now() - CONCERT_STALE_AFTER_MS - 10_000),
         }),
       );
+      expect(info.stale).toBe(false);
+    }
+  });
+});
+
+describe('computePendingLiveness', () => {
+  it('never flags a pending concert younger than the staleness floor', () => {
+    const info = computePendingLiveness(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(),
+        processId: 2_000_000_000,
+        hostname: hostname(),
+      }),
+    );
+    expect(info.stale).toBe(false);
+  });
+
+  it('flags an old pending concert whose same-host process is dead', () => {
+    const info = computePendingLiveness(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(Date.now() - PENDING_STALE_AFTER_MS - 60_000),
+        processId: 2_000_000_000,
+        hostname: hostname(),
+      }),
+    );
+    expect(info.stale).toBe(true);
+    expect(info.reason).toBe('pid_dead');
+  });
+
+  it('does not flag an old pending concert whose same-host process is alive', () => {
+    const info = computePendingLiveness(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(Date.now() - PENDING_STALE_AFTER_MS - 60_000),
+        processId: process.pid,
+        hostname: hostname(),
+      }),
+    );
+    expect(info.stale).toBe(false);
+  });
+
+  it('flags an old cross-host pending concert with no heartbeat since creation', () => {
+    const info = computePendingLiveness(
+      makeConcert({
+        status: 'pending',
+        startedAt: new Date(Date.now() - PENDING_STALE_AFTER_MS - 60_000),
+        processId: 1,
+        hostname: 'remote-host',
+      }),
+    );
+    expect(info.stale).toBe(true);
+    expect(info.reason).toBe('heartbeat_stale');
+  });
+
+  it('returns not stale for non-pending statuses', () => {
+    for (const status of ['running', 'paused', 'completed', 'failed', 'cancelled'] as const) {
+      const info = computePendingLiveness(makeConcert({ status }));
       expect(info.stale).toBe(false);
     }
   });

@@ -21,9 +21,12 @@ export { TraceService } from './store/trace-service.js';
 
 export {
   computeLiveness,
+  computePendingLiveness,
   isProcessAlive,
   CONCERT_HEARTBEAT_INTERVAL_MS,
   CONCERT_STALE_AFTER_MS,
+  PENDING_STALE_AFTER_MS,
+  PENDING_STALE_GRACE_MS,
 } from './liveness.js';
 export type { LivenessInfo, LivenessReason } from './liveness.js';
 
