@@ -2810,3 +2810,103 @@ it('resolves the skillsDir from score metadata and passes no skills for movement
   expect(withSkill?.skills).toEqual(['issue-gating']);
   expect(withSkill?.skillsDir).toBe('examples/skills');
 });
+
+it('inherits the score-level skills default for movements that declare none', async () => {
+  const store = new SqliteLoge(':memory:');
+  const registry = new ScoreRegistry();
+  registry.register({
+    id: 'score-skills-inherit',
+    name: 'Score Skills Inherit',
+    description: '',
+    version: '1.0.0',
+    startMovement: 'a',
+    movements: [
+      {
+        id: 'a',
+        name: 'A',
+        section: 'x',
+        harness: 'fake',
+        prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: '__end__', on: 'success' as const }],
+      },
+    ],
+    skills: ['review-conventions'],
+    program: {},
+  });
+  const adapter = new CapturingFakeHarnessAdapter({
+    defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+  });
+  const hall = createHall({
+    store,
+    scoreRegistry: registry,
+    adapters: new Map([['fake', adapter]]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+  });
+  const conductor = await hall.createConcert('score-skills-inherit', { cwd: '/work' });
+  await conductor.start();
+
+  expect(conductor.status).toBe('completed');
+  // A movement with no `skills` receives the score-level default.
+  expect(adapter.prompts[0].skills).toEqual(['review-conventions']);
+  // skillsDir resolves the same as a movement-declared skill.
+  expect(adapter.prompts[0].skillsDir).toBe(join('/work', 'skills'));
+});
+
+it('lets an explicit movement list override the score default and an empty list opt out', async () => {
+  const store = new SqliteLoge(':memory:');
+  const registry = new ScoreRegistry();
+  registry.register({
+    id: 'score-skills-override',
+    name: 'Score Skills Override',
+    description: '',
+    version: '1.0.0',
+    startMovement: 'override',
+    movements: [
+      {
+        id: 'override',
+        name: 'Override',
+        section: 'x',
+        harness: 'fake',
+        prompt: 'Override',
+        skills: ['issue-gating'],
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: 'none', on: 'success' as const }],
+      },
+      {
+        id: 'none',
+        name: 'None',
+        section: 'x',
+        harness: 'fake',
+        prompt: 'None',
+        skills: [],
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: '__end__', on: 'success' as const }],
+      },
+    ],
+    skills: ['review-conventions'],
+    metadata: { skillsDir: 'examples/skills' },
+    program: {},
+  });
+  const adapter = new CapturingFakeHarnessAdapter({
+    defaultResponse: { output: 'o', summary: 's', usage: { spend: 10, tokens: 100 } },
+  });
+  const hall = createHall({
+    store,
+    scoreRegistry: registry,
+    adapters: new Map([['fake', adapter]]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+  });
+  const conductor = await hall.createConcert('score-skills-override', { cwd: '/work' });
+  await conductor.start();
+
+  expect(conductor.status).toBe('completed');
+  const overridden = adapter.prompts.find((p) => p.movementId === 'override');
+  const optedOut = adapter.prompts.find((p) => p.movementId === 'none');
+  // Explicit list fully replaces the default (no merging).
+  expect(overridden?.skills).toEqual(['issue-gating']);
+  expect(overridden?.skillsDir).toBe('examples/skills');
+  // Explicit empty list opts out even though a non-empty default exists.
+  expect(optedOut?.skills).toEqual([]);
+  expect(optedOut?.skillsDir).toBeUndefined();
+});

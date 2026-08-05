@@ -443,6 +443,7 @@ export class Conductor implements IConductor {
         this.setupMovementExecution(movement, startedAt, signal);
 
       const onProgress = this.createProgressHandler(movement.id);
+      const skills = this.resolveMovementSkills(movement);
 
       try {
         const response = await harnessAdapter.execute(prompt, this.concert.context, {
@@ -455,8 +456,8 @@ export class Conductor implements IConductor {
           options: modelConfig.options,
           onProgress,
           cwd: this.cwd,
-          skills: movement.skills,
-          skillsDir: this.resolveMovementSkillsDir(movement),
+          skills: skills,
+          skillsDir: this.resolveMovementSkillsDir(skills),
         });
 
         record.status = 'completed';
@@ -764,16 +765,31 @@ export class Conductor implements IConductor {
    * 4. Nothing — adapter uses its own default
    */
   /**
-   * Resolve the skills directory for a movement.
+   * Resolve a movement's *effective* skills.
+   *
+   * A movement's list fully overrides the score-level default: the default is
+   * inherited only when the movement declares no `skills` at all (no merging).
+   * A movement that wants none — even when a score default exists — must set
+   * `skills: []` explicitly, which yields an empty list (not undefined).
+   */
+  private resolveMovementSkills(movement: Movement): string[] | undefined {
+    if (movement.skills !== undefined) return movement.skills;
+    return this.score.skills;
+  }
+
+  /**
+   * Resolve the skills directory for the movement's effective skills.
    *
    * Precedence: score `metadata.skillsDir` > `ORCHESTRON_SKILLS_DIR` env >
    * config-file `skillsDir` > default `skills/` next to the score (concert
    * working directory). The env and config-file layers are already folded into
    * `configSkillsDir` once at config resolution, so the env var is read exactly
-   * once (no redundant read here).
+   * once (no redundant read here). Skill names resolve against this directory
+   * exactly as for movement-level skills — inheritance does not change
+   * resolution.
    */
-  private resolveMovementSkillsDir(movement: Movement): string | undefined {
-    if (!movement.skills || movement.skills.length === 0) return undefined;
+  private resolveMovementSkillsDir(skills: string[] | undefined): string | undefined {
+    if (!skills || skills.length === 0) return undefined;
     const baseDir = this.cwd ?? process.cwd();
     const metadata = this.score.metadata as Record<string, unknown> | undefined;
     const override =

@@ -123,6 +123,18 @@ export interface Score {
    * Movements inherit these unless they specify their own \`model\`.
    */
   models?: Record<string, HarnessModelConfig>;
+  /**
+   * Optional score-level default skills (names) that every movement inherits.
+   *
+   * Each movement's *effective* skills resolve as
+   * \`movement.skills ?? score.skills\`: the default is inherited only when a
+   * movement declares no \`skills\` at all. An explicit movement-level list
+   * fully **replaces** the default (no merging). A movement that wants no
+   * skills — even when a default exists — must set \`skills: []\` explicitly.
+   * Skill names resolve against the movement's skills directory, exactly like
+   * movement-level skills (see \`resolveSkillsDir\`).
+   */
+  skills?: string[];
   metadata?: Record<string, unknown>;
 }
 
