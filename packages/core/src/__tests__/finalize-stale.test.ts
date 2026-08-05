@@ -227,6 +227,25 @@ describe('finalizeStaleConcert', () => {
     expect((await store.getConcert('cas-pending'))!.status).toBe('pending');
   });
 
+  it('updateConcertIfStatus throws on empty expectedStatuses instead of building invalid SQL', async () => {
+    await store.saveConcert(
+      makeConcert({ id: 'cas-running', status: 'running', processId: DEAD_PID, hostname: hostname() }),
+      '',
+    );
+
+    await expect(
+      store.updateConcertIfStatus('cas-running', { status: 'failed', completedAt: new Date() }, []),
+    ).rejects.toThrow('updateConcertIfStatus requires at least one expected status');
+    // Non-empty input is unaffected.
+    expect(
+      await store.updateConcertIfStatus(
+        'cas-running',
+        { status: 'failed', completedAt: new Date() },
+        ['running', 'paused'],
+      ),
+    ).toBe(1);
+  });
+
   it('isFinalizableStatus only admits liveness-relevant statuses', () => {
     expect(isFinalizableStatus('running')).toBe(true);
     expect(isFinalizableStatus('paused')).toBe(true);

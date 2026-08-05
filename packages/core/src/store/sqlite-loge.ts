@@ -256,6 +256,9 @@ export class SqliteLoge implements ConcertStore {
     updates: { status: Concert['status']; completedAt: Date },
     expectedStatuses: readonly Concert['status'][],
   ): Promise<number> {
+    if (expectedStatuses.length === 0) {
+      throw new Error('updateConcertIfStatus requires at least one expected status');
+    }
     const placeholders = expectedStatuses.map(() => '?').join(', ');
     const result = this.db
       .prepare(
