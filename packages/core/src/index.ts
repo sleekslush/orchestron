@@ -65,5 +65,4 @@ export { HarnessEvaluator } from './evaluator/harness-evaluator.js';
 export type {
   HarnessEvaluatorConfig,
   DefaultOnParseFailure,
-  EvaluatorStructurizerConfig,
 } from './evaluator/harness-evaluator.js';

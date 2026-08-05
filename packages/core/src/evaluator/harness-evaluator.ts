@@ -33,27 +33,6 @@ const goalEvaluationSchema = {
  */
 export type DefaultOnParseFailure = 'failed' | 'passed' | 'retry';
 
-/**
- * Configurable structurizer / second-model pass (issue #133, strategy 4 from
- * #103). When the configured judge model is known-flaky (small flash-tier
- * models being the usual offender) and its output cannot be parsed into a valid
- * {@link GoalEvaluation}, a separate extraction model is invoked to convert the
- * raw judge output into strict JSON. This decouples *judgment* (cheap model)
- * from *formatting* (any model that reliably emits JSON).
- *
- * Note the repair pass is intentionally lenient toward ambiguity: its prompt
- * instructs the structurizer to set `achieved` to `false` when the judge text
- * does not clearly indicate the goal was met. Operators configuring a
- * structurizer should treat an unclear judge as a hard `not achieved` — the
- * movement will route to its non-success transition — rather than as a pass.
- */
-export interface EvaluatorStructurizerConfig {
-  /** Model to use for the repair/structuring pass. */
-  model: string;
-  /** Provider for the structurizer model. Defaults to the adapter's default. */
-  provider?: string;
-}
-
 export interface HarnessEvaluatorConfig {
   adapter: HarnessAdapter;
   promptTemplate?: string;
@@ -61,13 +40,6 @@ export interface HarnessEvaluatorConfig {
   provider?: string;
   /** How to react when the evaluator output cannot be parsed. Default `failed`. */
   defaultOnParseFailure?: DefaultOnParseFailure;
-  /**
-   * Optional second-model pass: when configured, unparseable judge output is
-   * re-routed to this extraction model to be converted into JSON before falling
-   * back to graceful degradation. Only invoked on the recovery path — no cost
-   * when the judge's own output parses cleanly.
-   */
-  structurizer?: EvaluatorStructurizerConfig;
   /**
    * How many bounded self-repair attempts to make when the judge returns
    * non-empty output that cannot be parsed. Each attempt re-prompts the judge
@@ -114,97 +86,12 @@ export class HarnessEvaluator implements Evaluator {
       }
     }
 
-    // 3. Configurable structurizer / second-model pass (strategy 4 from #103):
-    //    when the judge's own output is still unparseable (common with flaky
-    //    flash-tier judge models), route the repair pass to a separate
-    //    extraction model that reliably emits JSON. Invoked only on the
-    //    recovery path after self-repair is exhausted, so it has no cost on the
-    //    happy path and is the deeper fallback for judges that cannot format.
-    if (this.config.structurizer) {
-      try {
-        const structurized = await this.structurizeGoalEvaluation(
-          response,
-          goal,
-          context,
-          movementId,
-          this.config.structurizer,
-        );
-        if (structurized) {
-          return structurized;
-        }
-      } catch (err) {
-        // The structurizer itself hit an infra/adapter failure. On `retry`,
-        // surface that error (instead of a generic parse failure) to the host;
-        // otherwise log a warning and continue to graceful degradation so the
-        // concert never crashes on a repair-pass outage.
-        const detail = err instanceof Error ? err.message : String(err);
-        if (this.config.defaultOnParseFailure === 'retry') {
-          throw new GoalEvalError(
-            `Structurizer failed for movement '${movementId ?? 'unknown'}': ${detail}`,
-            'EVALUATOR_FAILURE',
-            undefined,
-            movementId,
-          );
-        }
-        console.warn(
-          `[orchestron] structurizer (model=${this.config.structurizer?.model ?? 'unknown'}) ` +
-            `failed for movement '${movementId ?? 'unknown'}': ${detail}. Falling back to degradation.`,
-        );
-      }
-    }
-
+    // 3. Degrade per `defaultOnParseFailure`. Recovery is intentionally limited
+    //    to direct parse → bounded self-repair (same judge model) → degrade.
+    //    There is deliberately no second-model repair pass: if the judge still
+    //    cannot format after self-repair, that is a signal to change the
+    //    evaluator model, not to add a repair pass.
     return this.degrade(response, goal, movementId);
-  }
-
-  /**
-   * Invoke the structurizer model to convert raw judge text into a strict JSON
-   * {@link GoalEvaluation}. `undefined` is returned only when the structurizer
-   * produced unparseable output; an infra/adapter error from the structurizer
-   * itself is deliberately NOT caught here and propagates to the caller so the
-   * repair-pass failure is surfaced (logged, or thrown when
-   * `defaultOnParseFailure === 'retry'`) instead of being silently degraded.
-   */
-  private async structurizeGoalEvaluation(
-    original: HarnessResponse,
-    goal: Goal,
-    context: ConcertContext,
-    movementId: string | undefined,
-    structurizer: EvaluatorStructurizerConfig,
-  ): Promise<GoalEvaluation | undefined> {
-    const raw = original.output.trim();
-    if (!raw) {
-      return undefined;
-    }
-
-    const prompt = [
-      'You are a JSON formatter. Convert the free-form text below from a judge/evaluator model into ONE strict JSON object.',
-      'Reply with ONLY the JSON object — no markdown fences, no commentary.',
-      'The object must have these fields:',
-      '  - "achieved": boolean',
-      '  - "confidence": number between 0 and 1',
-      '  - "summary": string (brief explanation of the judgment)',
-      '  - "evidence": string (optional supporting evidence)',
-      '',
-      'If the text does not clearly indicate whether the goal was achieved, set "achieved" to false.',
-      '',
-      `Goal being evaluated: ${goal.description}`,
-      `Movement ID: ${movementId ?? ''}`,
-      'Judge raw output:',
-      '```',
-      raw,
-      '```',
-    ].join('\n');
-
-    const response = await this.config.adapter.execute(prompt, context, {
-      output: {
-        mode: 'structured',
-        schema: goalEvaluationSchema as unknown as Record<string, unknown>,
-      },
-      model: structurizer.model,
-      provider: structurizer.provider,
-      movementId,
-    });
-    return this.tryParse(response);
   }
 
   private buildPrompt(
