@@ -107,6 +107,20 @@ export class ScoreRegistry {
       );
     }
 
+    if (score.skills !== undefined) {
+      if (
+        !Array.isArray(score.skills) ||
+        score.skills.some((s) => typeof s !== 'string' || s.trim() === '')
+      ) {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${score.id}': 'skills' must be an array of non-empty strings`,
+            'INVALID_SCORE',
+          ),
+        );
+      }
+    }
+
     for (const m of score.movements) {
       if (m.skills !== undefined) {
         if (

@@ -276,6 +276,29 @@ Each named skill resolves against a **skills directory** using either convention
 - `<skillsDir>/<name>/SKILL.md` — a skill root directory named after the skill
 - `<skillsDir>/<name>.skill.md` — a single-file skill
 
+Scores can declare a **score-level default skills list** that every movement
+inherits, removing copy-paste for shared conventions:
+
+```yaml
+skills:            # score-level default
+  - review-conventions
+  - issue-gating
+movements:
+  - id: review     # inherits the score default
+    harness: pi
+  - id: plan       # overrides the default (no merging)
+    skills:
+      - planning
+  - id: bare       # explicitly opts out of skills
+    skills: []
+```
+
+Each movement's *effective* skills resolve as `movement.skills ?? score.skills`:
+the default is inherited only when a movement declares no `skills` at all. An
+explicit movement-level list fully **replaces** the default (no merging). A
+movement that wants no skills — even when a score default exists — must set
+`skills: []` explicitly.
+
 The directory is resolved with the standard precedence (higher wins):
 
 1. **Score `metadata.skillsDir`** (per-score override)

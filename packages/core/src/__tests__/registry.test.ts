@@ -149,6 +149,27 @@ describe('ScoreRegistry', () => {
     ).toThrow(/skills.*array of non-empty strings/);
   });
 
+  it('should accept a score with a score-level skills default', () => {
+    const registry = new ScoreRegistry();
+    const score = validScore({ skills: ['review-conventions'] });
+    registry.register(score);
+    expect(registry.get('test-workflow').skills).toEqual(['review-conventions']);
+  });
+
+  it('should reject a score whose skills is not an array of non-empty strings', () => {
+    const registry = new ScoreRegistry();
+    expect(() => registry.register(validScore({ skills: 'review' as unknown as string[] }))).toThrow(
+      /skills.*array of non-empty strings/,
+    );
+  });
+
+  it('should reject a score with empty-string entries in skills', () => {
+    const registry = new ScoreRegistry();
+    expect(() => registry.register(validScore({ skills: ['  '] }))).toThrow(
+      /skills.*array of non-empty strings/,
+    );
+  });
+
   it('should reject a score with dangling transition target', () => {
     const registry = new ScoreRegistry();
     expect(() =>
