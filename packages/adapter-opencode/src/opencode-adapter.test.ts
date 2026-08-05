@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpencodeAdapter } from './opencode-adapter.js';
@@ -885,5 +885,106 @@ describe('OpencodeAdapter skills', () => {
       message: expect.stringContaining('review-conventions'),
     });
     expect(mockClient.session.promptAsync).not.toHaveBeenCalled();
+  });
+
+  it('hot-reloads edited SKILL.md content into a reused session on the next turn', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-skills-'));
+    const skillFile = join(dir, 'review-conventions', 'SKILL.md');
+    mkdirSync(join(dir, 'review-conventions'));
+    writeFileSync(skillFile, 'Review v1: check correctness.');
+    mockClient.v2.skill.list.mockResolvedValue({
+      data: { data: [{ name: 'review-conventions', location: dir, content: 'Review v1: check correctness.' }] },
+    });
+
+    const adapter = new OpencodeAdapter();
+    await adapter.execute('turn one', { shared: {} }, {
+      sessionId: 'c1:m1',
+      cwd: '/worktree/path',
+      skills: ['review-conventions'],
+      skillsDir: dir,
+    });
+
+    // Live-edit the SKILL.md while the session is still open.
+    writeFileSync(skillFile, 'Review v2: also check edge cases.');
+    mockClient.v2.skill.list.mockResolvedValue({
+      data: { data: [{ name: 'review-conventions', location: dir, content: 'Review v2: also check edge cases.' }] },
+    });
+    await adapter.execute('turn two', { shared: {} }, {
+      sessionId: 'c1:m1',
+      cwd: '/worktree/path',
+      skills: ['review-conventions'],
+      skillsDir: dir,
+    });
+
+    const prompts = (mockClient.session.promptAsync as Mock).mock.calls.map((c) => c[0].parts[0].text as string);
+    expect(prompts[0]).toContain('Review v1: check correctness.');
+    // The very next turn re-reads the updated content off disk (prompt path).
+    expect(prompts[1]).toContain('Review v2: also check edge cases.');
+    expect(prompts[1]).not.toContain('Review v1: check correctness.');
+  });
+
+  it('does not re-register or re-inject unchanged skills on later turns', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-skills-'));
+    mkdirSync(join(dir, 'review-conventions'));
+    writeFileSync(join(dir, 'review-conventions', 'SKILL.md'), 'Do review.');
+    mockClient.v2.skill.list.mockResolvedValue({
+      data: { data: [{ name: 'review-conventions', location: dir, content: 'Do review.' }] },
+    });
+
+    const adapter = new OpencodeAdapter();
+    await adapter.execute('turn one', { shared: {} }, {
+      sessionId: 'c1:m1',
+      cwd: '/worktree/path',
+      skills: ['review-conventions'],
+      skillsDir: dir,
+    });
+    await adapter.execute('turn two', { shared: {} }, {
+      sessionId: 'c1:m1',
+      cwd: '/worktree/path',
+      skills: ['review-conventions'],
+      skillsDir: dir,
+    });
+
+    // Registered exactly once — unchanged content is left alone.
+    expect(mockClient.config.update).toHaveBeenCalledTimes(1);
+    const prompts = (mockClient.session.promptAsync as Mock).mock.calls.map((c) => c[0].parts[0].text as string);
+    expect(prompts[0]).toContain('<skills>');
+    // No duplicate skill block on the next turn.
+    expect(prompts[1]).not.toContain('<skills>');
+  });
+
+  it('fails loudly when a declared skill is deleted mid-concert', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-skills-'));
+    const skillDir = join(dir, 'review-conventions');
+    mkdirSync(skillDir);
+    writeFileSync(join(skillDir, 'SKILL.md'), 'Review conventions.');
+    mockClient.v2.skill.list.mockResolvedValue({
+      data: { data: [{ name: 'review-conventions', location: dir, content: 'Review conventions.' }] },
+    });
+
+    const adapter = new OpencodeAdapter();
+    await adapter.execute('turn one', { shared: {} }, {
+      sessionId: 'c1:m1',
+      cwd: '/worktree/path',
+      skills: ['review-conventions'],
+      skillsDir: dir,
+    });
+
+    // Delete the skill while the concert is running.
+    rmSync(skillDir, { recursive: true, force: true });
+
+    await expect(
+      adapter.execute('turn two', { shared: {} }, {
+        sessionId: 'c1:m1',
+        cwd: '/worktree/path',
+        skills: ['review-conventions'],
+        skillsDir: dir,
+      }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining('review-conventions'),
+    });
+    // Must not run the turn without the skill.
+    expect(mockClient.session.promptAsync).toHaveBeenCalledTimes(1);
   });
 });
