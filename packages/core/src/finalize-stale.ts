@@ -15,7 +15,7 @@ export const FINALIZE_STALE_REASON = 'process_died';
  * started / heartbeated) are never finalized here: `pending` is not a hosting
  * status and a stale pending row is not a zombie — it simply was never started.
  */
-const FINALIZABLE_STATUSES = new Set(['running', 'paused']);
+const FINALIZABLE_STATUSES = new Set<Concert['status']>(['running', 'paused']);
 
 export interface FinalizeStaleOptions {
   /**
@@ -44,9 +44,10 @@ export interface FinalizeStaleResult {
  *   2. Only transitions statuses that are still liveness-relevant
  *      (`running`/`paused`) and still flagged stale by {@link computeLiveness}
  *      (dead PID or heartbeat beyond the grace period).
- *   3. Re-reads the stored status once more immediately before the flip, so a
+ *   3. Performs the flip with a single atomic compare-and-swap update that
+ *      only succeeds while the row's status is still `running`/`paused`, so a
  *      concurrently-completing conductor that transitions the row between the
- *      checks is never overwritten.
+ *      liveness check and the flip is never overwritten.
  */
 export async function finalizeStaleConcert(
   store: ConcertStore,
@@ -67,32 +68,32 @@ export async function finalizeStaleConcert(
     return { concertId, finalized: false };
   }
 
-  // Second re-read immediately before the flip closes the race with a
-  // concurrently-completing conductor.
-  const latest = await store.getConcert(concertId);
-  if (!latest || !FINALIZABLE_STATUSES.has(latest.status)) {
-    return { concertId, finalized: false };
+  // Atomic compare-and-swap: only flip rows that are still in a
+  // liveness-relevant status. If a concurrently-completing conductor transitioned
+  // the row (e.g. to `completed`) in the window since the liveness check, this
+  // matches 0 rows and we leave it untouched.
+  const flipped = await store.updateConcertIfStatus(
+    stored.id,
+    { status: 'failed', completedAt: new Date() },
+    [...FINALIZABLE_STATUSES],
+  );
+  if (flipped !== 1) {
+    return { concertId: stored.id, finalized: false };
   }
-
-  await store.updateConcert({
-    id: latest.id,
-    status: 'failed',
-    completedAt: new Date(),
-  });
 
   await options.recordEvent?.({
     type: 'concert:failed',
-    concertId: latest.id,
+    concertId: stored.id,
     error: {
       code: FINALIZE_STALE_REASON,
-      message: `Concert ${latest.id} finalized as failed: hosting process died (${liveness.reason ?? 'unknown'})`,
+      message: `Concert ${stored.id} finalized as failed: hosting process died (${liveness.reason ?? 'unknown'})`,
       retryable: false,
-      concertId: latest.id,
+      concertId: stored.id,
     },
     timestamp: new Date(),
   });
 
-  return { concertId: latest.id, finalized: true, reason: liveness.reason };
+  return { concertId: stored.id, finalized: true, reason: liveness.reason };
 }
 
 /**

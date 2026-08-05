@@ -11,6 +11,19 @@ import type { CostResolution, CostResolutionInput } from '../cost/types.js';
 export interface ConcertStore {
   saveConcert(concert: Concert, scoreYaml: string): Promise<void>;
   updateConcert(concert: Partial<Concert> & { id: ConcertID }): Promise<void>;
+
+  /**
+   * Atomic compare-and-swap update: applies the `status` and `completedAt`
+   * fields only if the row's current status is one of `expectedStatuses`.
+   * Returns the number of affected rows (0 when the status no longer matches,
+   * e.g. a concurrently-completing conductor already transitioned the row).
+   */
+  updateConcertIfStatus(
+    id: ConcertID,
+    updates: { status: Concert['status']; completedAt: Date },
+    expectedStatuses: readonly Concert['status'][],
+  ): Promise<number>;
+
   getConcert(id: ConcertID): Promise<Concert | null>;
   deleteConcert(id: ConcertID): Promise<void>;
   listConcerts(filter?: ConcertFilter): Promise<Concert[]>;

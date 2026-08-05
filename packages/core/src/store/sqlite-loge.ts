@@ -251,6 +251,20 @@ export class SqliteLoge implements ConcertStore {
     stmt.run(...values);
   }
 
+  async updateConcertIfStatus(
+    id: ConcertID,
+    updates: { status: Concert['status']; completedAt: Date },
+    expectedStatuses: readonly Concert['status'][],
+  ): Promise<number> {
+    const placeholders = expectedStatuses.map(() => '?').join(', ');
+    const result = this.db
+      .prepare(
+        `UPDATE concerts SET status = ?, completed_at = ? WHERE id = ? AND status IN (${placeholders})`,
+      )
+      .run(updates.status, serializeDate(updates.completedAt), id, ...expectedStatuses);
+    return result.changes;
+  }
+
   async getConcert(id: ConcertID): Promise<Concert | null> {
     const row = this.db.prepare('SELECT * FROM concerts WHERE id = ?').get(id) as
       | ConcertRow

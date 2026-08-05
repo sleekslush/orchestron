@@ -177,34 +177,54 @@ describe('finalizeStaleConcert', () => {
     expect((await store.getConcert('live'))!.status).toBe('running');
   });
 
-  it('re-checks status immediately before flipping (race guard)', async () => {
+  it('atomically refuses to flip a row a concurrently-completing conductor just completed', async () => {
     await store.saveConcert(
       makeConcert({ status: 'running', processId: DEAD_PID, hostname: hostname() }),
       '',
     );
 
-    // Simulate a concurrently-completing conductor: after the first getConcert
-    // in finalizeStaleConcert, the row flips to 'completed' before the flip check.
-    const originalGet = store.getConcert.bind(store);
-    let calls = 0;
-    vi.spyOn(store, 'getConcert').mockImplementation(async (id) => {
-      calls++;
-      const row = await originalGet(id);
-      if (calls === 2 && row) {
-        return { ...row, status: 'completed' as const };
+    // Simulate a concurrently-completing conductor: the very first time the
+    // finalizer issues the atomic CAS flip, the persisted row has already been
+    // transitioned to 'completed', so the conditional UPDATE matches 0 rows and
+    // must NOT clobber it back to 'failed'.
+    const originalCas = store.updateConcertIfStatus.bind(store);
+    let casCalls = 0;
+    vi.spyOn(store, 'updateConcertIfStatus').mockImplementation(async (id, updates, expected) => {
+      casCalls++;
+      if (casCalls === 1) {
+        // Flip the persisted row to 'completed' before the atomic update runs.
+        await store.updateConcert({ id, status: 'completed', completedAt: new Date() });
       }
-      return row;
+      return originalCas(id, updates, expected);
     });
-    const updateSpy = vi.spyOn(store, 'updateConcert');
+    const events: ConcertEvent[] = [];
 
-    const result = await finalizeStaleConcert(store, 'c1');
+    const result = await finalizeStaleConcert(store, 'c1', {
+      recordEvent: (e) => void events.push(e),
+    });
+
     expect(result.finalized).toBe(false);
-    // The simulated concurrent transition was only in-memory, so the persisted
-    // row is untouched either way; what matters is we never flipped it to failed.
-    expect(updateSpy).not.toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'c1', status: 'failed' }),
-    );
-    expect((await store.getConcert('c1'))!.status).toBe('running');
+    expect(events).toHaveLength(0);
+    // The concurrent transition to 'completed' won the race; the stale finalizer
+    // must not have overwritten it.
+    expect((await store.getConcert('c1'))!.status).toBe('completed');
+  });
+
+  it('updateConcertIfStatus matches 0 rows against non-matching statuses and leaves them untouched', async () => {
+    for (const status of ['running', 'completed', 'failed', 'pending'] as const) {
+      const id = `cas-${status}`;
+      await store.saveConcert(makeConcert({ id, status, processId: DEAD_PID, hostname: hostname() }), '');
+    }
+
+    // A running row matches and is flipped.
+    expect(await store.updateConcertIfStatus('cas-running', { status: 'failed', completedAt: new Date() }, ['running', 'paused'])).toBe(1);
+    // Non-matching statuses match 0 rows and stay untouched.
+    expect(await store.updateConcertIfStatus('cas-completed', { status: 'failed', completedAt: new Date() }, ['running', 'paused'])).toBe(0);
+    expect(await store.updateConcertIfStatus('cas-failed', { status: 'failed', completedAt: new Date() }, ['running', 'paused'])).toBe(0);
+    expect(await store.updateConcertIfStatus('cas-pending', { status: 'failed', completedAt: new Date() }, ['running', 'paused'])).toBe(0);
+    expect((await store.getConcert('cas-completed'))!.status).toBe('completed');
+    expect((await store.getConcert('cas-failed'))!.status).toBe('failed');
+    expect((await store.getConcert('cas-pending'))!.status).toBe('pending');
   });
 
   it('isFinalizableStatus only admits liveness-relevant statuses', () => {
