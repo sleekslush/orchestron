@@ -291,6 +291,17 @@ With opencode the movement's skills directory is additionally registered with
 the session as an opencode skill source, and execution is gated on the server
 reporting every declared skill as registered.
 
+Skill content is **re-read from disk on every execution** (runtime hot-reload),
+so live-authored edits to a `SKILL.md` take effect on the very next turn of the
+affected movement — no new session required. A reused (persistent) session
+re-injects only when the content actually changed, replacing the stale block
+instead of accumulating duplicates; unchanged skills are left alone. A skill
+deleted mid-concert fails loudly on the next turn like any other unresolvable
+skill name. With opencode, `config.skills.paths` is global/best-effort — the
+SDK has no per-session skill registration endpoint — so updated content reaches
+the model via the injected prompt block, which re-reads from disk each turn; the
+server-side source registration cannot be refreshed per session.
+
 ### Transitions
 
 - `on: success` — when the movement completes and the evaluator says the goal is

@@ -120,6 +120,13 @@ export class OpencodeAdapter implements HarnessAdapter {
    * can read real server state and intersect it with the declarations.
    */
   private declaredSkillsBySession = new Map<string, { names: string[]; directory?: string }>();
+  /**
+   * Last injected skills block per opencode session id. Hot-reload: skill
+   * content is re-read from disk on every execution; a reused session
+   * re-registers/re-injects only when the freshly resolved block differs from
+   * what it already has in context (replace, never append duplicates).
+   */
+  private injectedSkillsBlocks = new Map<string, string>();
 
   constructor(config: OpencodeAdapterConfig = {}) {
     this.config = config;
@@ -400,6 +407,7 @@ export class OpencodeAdapter implements HarnessAdapter {
       }
       if (ownSession && sessionData) {
         this.declaredSkillsBySession.delete(sessionData.opencodeSessionId);
+        this.injectedSkillsBlocks.delete(sessionData.opencodeSessionId);
         await this.client?.session
           .delete({ sessionID: sessionData.opencodeSessionId })
           .catch(() => {});
@@ -412,6 +420,7 @@ export class OpencodeAdapter implements HarnessAdapter {
     const data = this.sessionPool.get(sessionId);
     if (data) {
       this.declaredSkillsBySession.delete(data.opencodeSessionId);
+      this.injectedSkillsBlocks.delete(data.opencodeSessionId);
     }
     await this.sessionPool.disposeSession(sessionId);
   }
@@ -470,6 +479,7 @@ export class OpencodeAdapter implements HarnessAdapter {
   async dispose(): Promise<void> {
     await this.sessionPool.disposeAll();
     this.declaredSkillsBySession.clear();
+    this.injectedSkillsBlocks.clear();
 
     if (this.ownsServer && this.server) {
       this.server.close();
@@ -619,6 +629,12 @@ export class OpencodeAdapter implements HarnessAdapter {
    * Register a session's movement-declared skills with opencode and return the
    * formatted prompt block ('' when none are declared).
    *
+   * Skill content is re-read from disk on every execution (runtime hot-reload),
+   * so live-authored SKILL.md edits reach the next turn of a reused session. A
+   * session whose resolved block is unchanged since its last injection is left
+   * alone (no duplicate blocks, no repeated server round-trips); only content
+   * changes re-register and re-inject.
+   *
    * Registration is REAL, not simulated:
    *   1. Resolves each named skill from disk (fail-fast on any missing name).
    *   2. Registers the movement's skills directory as a SkillV2Source
@@ -630,6 +646,13 @@ export class OpencodeAdapter implements HarnessAdapter {
    *   4. Injects the skill content into the session prompt as inert data (the
    *      only reliable way to guarantee the content reaches the model's
    *      context). Injections are on top of whatever opencode auto-loads.
+   *
+   * Constraint: `config.skills.paths` is global/best-effort — there is no
+   * per-session skill registration endpoint in @opencode-ai/sdk, so the
+   * server-side source registration cannot be refreshed per session. Updated
+   * content therefore reaches the model via the injected prompt block (step 4),
+   * which re-reads from disk each turn; whether the server also picks up the
+   * edit server-side depends on the server's own source reload.
    */
   private async registerSessionSkills(
     opencodeSessionId: string,
@@ -639,9 +662,13 @@ export class OpencodeAdapter implements HarnessAdapter {
   ): Promise<string> {
     if (!skills || skills.length === 0 || !skillsDir) {
       this.declaredSkillsBySession.delete(opencodeSessionId);
+      this.injectedSkillsBlocks.delete(opencodeSessionId);
       return '';
     }
 
+    // Re-read from disk on every execution (hot-reload). Must run even when the
+    // session already has a block injected: a skill deleted mid-concert must
+    // fail loudly here, not silently keep the stale block in context.
     let loaded: LoadedSkill[];
     try {
       loaded = loadNamedSkills(skillsDir, skills);
@@ -653,6 +680,11 @@ export class OpencodeAdapter implements HarnessAdapter {
     }
 
     this.declaredSkillsBySession.set(opencodeSessionId, { names: skills, directory });
+
+    const block = formatSkillsForPrompt(loaded);
+    // Reused session with identical content already in context: skip the
+    // server round-trip and the prompt re-injection (replace, never append).
+    if (this.injectedSkillsBlocks.get(opencodeSessionId) === block) return '';
 
     if (this.client) {
       try {
@@ -680,7 +712,8 @@ export class OpencodeAdapter implements HarnessAdapter {
       }
     }
 
-    return formatSkillsForPrompt(loaded);
+    this.injectedSkillsBlocks.set(opencodeSessionId, block);
+    return block;
   }
 
   /** Query the server's registered skill names for a location via `/api/skill`. */

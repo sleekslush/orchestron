@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PiAdapter } from './pi-adapter.js';
@@ -568,5 +568,74 @@ describe('PiAdapter skills', () => {
     const prompts = (mockSession.prompt as Mock).mock.calls.map((c) => c[0] as string);
     expect(prompts[0]).toContain('<skills>');
     expect(prompts[1]).not.toContain('<skills>');
+  });
+
+  it('hot-reloads edited SKILL.md content into a reused session on the next turn', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-skills-'));
+    const skillFile = join(dir, 'review-conventions', 'SKILL.md');
+    mkdirSync(join(dir, 'review-conventions'));
+    writeFileSync(skillFile, 'Review v1: check correctness.');
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter();
+    await adapter.execute('turn one', { shared: {} }, { sessionId: 'c1:m1', skills: ['review-conventions'], skillsDir: dir });
+
+    // Live-edit the SKILL.md while the session is still open.
+    writeFileSync(skillFile, 'Review v2: also check edge cases.');
+    await adapter.execute('turn two', { shared: {} }, { sessionId: 'c1:m1', skills: ['review-conventions'], skillsDir: dir });
+
+    const prompts = (mockSession.prompt as Mock).mock.calls.map((c) => c[0] as string);
+    expect(prompts[0]).toContain('Review v1: check correctness.');
+    // The very next turn uses the updated content — no new session required.
+    expect(prompts[1]).toContain('Review v2: also check edge cases.');
+    expect(prompts[1]).not.toContain('Review v1: check correctness.');
+  });
+
+  it('re-injects each edited version exactly once (replace, not append)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-skills-'));
+    const skillFile = join(dir, 'issue-gating', 'SKILL.md');
+    mkdirSync(join(dir, 'issue-gating'));
+    writeFileSync(skillFile, 'Gate v1.');
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter();
+    await adapter.execute('t1', { shared: {} }, { sessionId: 'c1:m1', skills: ['issue-gating'], skillsDir: dir });
+    await adapter.execute('t2', { shared: {} }, { sessionId: 'c1:m1', skills: ['issue-gating'], skillsDir: dir });
+    writeFileSync(skillFile, 'Gate v2.');
+    await adapter.execute('t3', { shared: {} }, { sessionId: 'c1:m1', skills: ['issue-gating'], skillsDir: dir });
+    await adapter.execute('t4', { shared: {} }, { sessionId: 'c1:m1', skills: ['issue-gating'], skillsDir: dir });
+
+    const prompts = (mockSession.prompt as Mock).mock.calls.map((c) => c[0] as string);
+    expect(prompts[0]).toContain('Gate v1.');
+    // Unchanged content is not re-injected.
+    expect(prompts[1]).not.toContain('<skills>');
+    // Changed content is injected exactly once on the next turn.
+    expect(prompts[2]).toContain('Gate v2.');
+    expect(prompts[2]).not.toContain('Gate v1.');
+    // And again left alone once stable.
+    expect(prompts[3]).not.toContain('<skills>');
+  });
+
+  it('fails loudly when a declared skill is deleted mid-concert', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-skills-'));
+    const skillDir = join(dir, 'review-conventions');
+    mkdirSync(skillDir);
+    writeFileSync(join(skillDir, 'SKILL.md'), 'Review conventions.');
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter();
+    await adapter.execute('turn one', { shared: {} }, { sessionId: 'c1:m1', skills: ['review-conventions'], skillsDir: dir });
+
+    // Delete the skill while the concert is running.
+    rmSync(skillDir, { recursive: true, force: true });
+
+    await expect(
+      adapter.execute('turn two', { shared: {} }, { sessionId: 'c1:m1', skills: ['review-conventions'], skillsDir: dir }),
+    ).rejects.toMatchObject({
+      code: 'HARNESS_FAILURE',
+      message: expect.stringContaining('review-conventions'),
+    });
+    // Must not run the turn without the skill.
+    expect(mockSession.prompt).toHaveBeenCalledTimes(1);
   });
 });

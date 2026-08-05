@@ -44,8 +44,13 @@ export class PiAdapter implements HarnessAdapter {
   private modelRuntime: ModelRuntime | undefined;
   /** Working directory per persistent session id (from execute options). */
   private sessionCwds = new Map<string, string>();
-  /** Persistent sessions that already had their movement skills injected. */
-  private injectedSkillsSessions = new Set<string>();
+  /**
+   * Last injected skills block per persistent session id. Hot-reload: skills
+   * are re-read from disk on every execution; a reused session re-injects only
+   * when the freshly resolved block differs from what it already has in
+   * context (replace, never append duplicates).
+   */
+  private injectedSkillsBlocks = new Map<string, string>();
 
   constructor(config: PiAdapterConfig = {}) {
     this.provider = config.provider;
@@ -74,9 +79,10 @@ export class PiAdapter implements HarnessAdapter {
 
     // Load movement-declared skills into the session before execution. Skills
     // augment — never replace — whatever Pi auto-loads. An unresolvable skill
-    // fails loudly rather than silently running without it. Injected once per
-    // session (first turn) so a reused persistent session does not accumulate
-    // duplicate blocks.
+    // fails loudly rather than silently running without it. Content is re-read
+    // from disk on every execution (runtime hot-reload) so live-authored edits
+    // take effect on the next turn; a reused persistent session re-injects only
+    // when the content changed, so it never accumulates duplicate blocks.
     const skillsBlock = this.buildSkillsPromptOnce(options?.skills, options?.skillsDir, options?.sessionId);
     if (skillsBlock) {
       finalPrompt = finalPrompt + '\n\n' + skillsBlock;
@@ -244,7 +250,7 @@ export class PiAdapter implements HarnessAdapter {
 
   async disposeSession(sessionId: string): Promise<void> {
     this.sessionCwds.delete(sessionId);
-    this.injectedSkillsSessions.delete(sessionId);
+    this.injectedSkillsBlocks.delete(sessionId);
     await this.sessionPool.disposeSession(sessionId);
   }
 
@@ -317,7 +323,7 @@ export class PiAdapter implements HarnessAdapter {
 
   /** Dispose every tracked session. Useful for graceful shutdown. */
   async dispose(): Promise<void> {
-    this.injectedSkillsSessions.clear();
+    this.injectedSkillsBlocks.clear();
     await this.sessionPool.disposeAll();
   }
 
@@ -355,13 +361,22 @@ export class PiAdapter implements HarnessAdapter {
   }
 
   /**
-   * Resolve the movement-declared skills into an injected prompt block, at most
-   * once per session.
+   * Resolve the movement-declared skills into an injected prompt block,
+   * re-reading the SKILL.md content off disk on every execution (runtime
+   * hot-reload) so live-authored skill edits take effect on the very next turn
+   * without creating a new session.
    *
    * Uses the shared @orchestron/core `loadNamedSkills` + `formatSkillsForPrompt`
    * so discovery, escaping, and fail-fast behaviour are identical across every
    * harness adapter (single source of truth). Returns '' when no skills are
    * declared. Throws HARNESS_FAILURE when a declared skill cannot be resolved.
+   *
+   * A reused (persistent) session injects only when the freshly resolved block
+   * differs from what it already has in context — replacing the stale block
+   * with the updated one instead of appending a duplicate. Unchanged content is
+   * not re-injected, so the skill block appears exactly once in the
+   * model-facing prompt no matter how many turns run. Ephemeral sessions are
+   * always a fresh single turn and inject every time.
    */
   private buildSkillsPromptOnce(
     skills: string[] | undefined,
@@ -369,11 +384,14 @@ export class PiAdapter implements HarnessAdapter {
     sessionId: string | undefined,
   ): string {
     if (!skills || skills.length === 0 || !skillsDir) return '';
-    // Persistent (reused) sessions inject on the first turn only; ephemeral
-    // sessions are always a fresh single turn and inject every time.
-    if (sessionId && this.injectedSkillsSessions.has(sessionId)) return '';
+    // Re-read from disk on every execution (hot-reload). Ephemeral sessions
+    // (no sessionId) are always a fresh single turn, so they always inject.
     const block = this.buildSkillsPrompt(skills, skillsDir);
-    if (block && sessionId) this.injectedSkillsSessions.add(sessionId);
+    if (!block) return '';
+    if (sessionId) {
+      if (this.injectedSkillsBlocks.get(sessionId) === block) return '';
+      this.injectedSkillsBlocks.set(sessionId, block);
+    }
     return block;
   }
 
