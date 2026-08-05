@@ -19,22 +19,6 @@ export { LiveEventLog } from './store/live-event-log.js';
 export type { ConcertStore } from './store/concert-store.js';
 export { TraceService } from './store/trace-service.js';
 
-export {
-  computeLiveness,
-  isProcessAlive,
-  CONCERT_HEARTBEAT_INTERVAL_MS,
-  CONCERT_STALE_AFTER_MS,
-} from './liveness.js';
-export type { LivenessInfo, LivenessReason } from './liveness.js';
-
-export {
-  finalizeStaleConcert,
-  finalizeAllStale,
-  isFinalizableStatus,
-  FINALIZE_STALE_REASON,
-} from './finalize-stale.js';
-export type { FinalizeStaleOptions, FinalizeStaleResult } from './finalize-stale.js';
-
 export { ScoreRegistry } from './registry/score-registry.js';
 export type { ScoreValidationResult } from './registry/score-registry.js';
 export { ensureDir, loadScoresFromDir } from './fs-utils.js';
