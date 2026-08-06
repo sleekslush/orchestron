@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
@@ -45,10 +46,12 @@ export class PiAdapter implements HarnessAdapter {
   /** Working directory per persistent session id (from execute options). */
   private sessionCwds = new Map<string, string>();
   /**
-   * Last injected skills block per persistent session id. Hot-reload: skills
-   * are re-read from disk on every execution; a reused session re-injects only
-   * when the freshly resolved block differs from what it already has in
-   * context (replace, never append duplicates).
+   * Content digest (SHA-256) of the last injected skills block per persistent
+   * session id. Hot-reload: skills are re-read from disk on every execution; a
+   * reused session re-injects only when the freshly resolved block differs
+   * from what it already has in context (replace, never append duplicates).
+   * Only the digest is retained rather than the full formatted block, so very
+   * large skill sets don't duplicate the block in memory per active session.
    */
   private injectedSkillsBlocks = new Map<string, string>();
 
@@ -389,8 +392,9 @@ export class PiAdapter implements HarnessAdapter {
     const block = this.buildSkillsPrompt(skills, skillsDir);
     if (!block) return '';
     if (sessionId) {
-      if (this.injectedSkillsBlocks.get(sessionId) === block) return '';
-      this.injectedSkillsBlocks.set(sessionId, block);
+      const digest = createHash('sha256').update(block).digest('hex');
+      if (this.injectedSkillsBlocks.get(sessionId) === digest) return '';
+      this.injectedSkillsBlocks.set(sessionId, digest);
     }
     return block;
   }

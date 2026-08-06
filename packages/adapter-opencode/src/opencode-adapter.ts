@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
@@ -121,10 +122,13 @@ export class OpencodeAdapter implements HarnessAdapter {
    */
   private declaredSkillsBySession = new Map<string, { names: string[]; directory?: string }>();
   /**
-   * Last injected skills block per opencode session id. Hot-reload: skill
-   * content is re-read from disk on every execution; a reused session
-   * re-registers/re-injects only when the freshly resolved block differs from
-   * what it already has in context (replace, never append duplicates).
+   * Content digest (SHA-256) of the last injected skills block per opencode
+   * session id. Hot-reload: skill content is re-read from disk on every
+   * execution; a reused session re-registers/re-injects only when the freshly
+   * resolved block differs from what it already has in context (replace, never
+   * append duplicates). Only the digest is retained rather than the full
+   * formatted block, so very large skill sets don't duplicate the block in
+   * memory per active session.
    */
   private injectedSkillsBlocks = new Map<string, string>();
 
@@ -684,7 +688,9 @@ export class OpencodeAdapter implements HarnessAdapter {
     const block = formatSkillsForPrompt(loaded);
     // Reused session with identical content already in context: skip the
     // server round-trip and the prompt re-injection (replace, never append).
-    if (this.injectedSkillsBlocks.get(opencodeSessionId) === block) return '';
+    // Compare the digest of the freshly resolved block against what is stored
+    // for this session.
+    if (this.injectedSkillsBlocks.get(opencodeSessionId) === createHash('sha256').update(block).digest('hex')) return '';
 
     if (this.client) {
       try {
@@ -712,7 +718,7 @@ export class OpencodeAdapter implements HarnessAdapter {
       }
     }
 
-    this.injectedSkillsBlocks.set(opencodeSessionId, block);
+    this.injectedSkillsBlocks.set(opencodeSessionId, createHash('sha256').update(block).digest('hex'));
     return block;
   }
 
