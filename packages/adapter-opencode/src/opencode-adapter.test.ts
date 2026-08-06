@@ -987,4 +987,30 @@ describe('OpencodeAdapter skills', () => {
     // Must not run the turn without the skill.
     expect(mockClient.session.promptAsync).toHaveBeenCalledTimes(1);
   });
+
+  it('stores only a bounded-size content digest per session, not the full block', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-skills-'));
+    const skillFile = join(dir, 'big-skill', 'SKILL.md');
+    mkdirSync(join(dir, 'big-skill'));
+    const body = 'y'.repeat(100_000);
+    writeFileSync(skillFile, body);
+    mockClient.v2.skill.list.mockResolvedValue({
+      data: { data: [{ name: 'big-skill', location: dir, content: body }] },
+    });
+
+    const adapter = new OpencodeAdapter();
+    await adapter.execute('turn one', { shared: {} }, {
+      sessionId: 'c1:m1',
+      cwd: '/worktree/path',
+      skills: ['big-skill'],
+      skillsDir: dir,
+    });
+
+    const stored = (adapter as unknown as { injectedSkillsBlocks: Map<string, string> }).injectedSkillsBlocks.get('session-1');
+    expect(stored).toBeDefined();
+    // SHA-256 hex digest is fixed at 64 chars regardless of block size.
+    expect(stored?.length).toBe(64);
+    expect(stored?.length).toBeLessThan(body.length);
+    expect(stored).not.toContain(body);
+  });
 });

@@ -638,4 +638,24 @@ describe('PiAdapter skills', () => {
     // Must not run the turn without the skill.
     expect(mockSession.prompt).toHaveBeenCalledTimes(1);
   });
+
+  it('stores only a bounded-size content digest per session, not the full block', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-skills-'));
+    const skillDir = join(dir, 'big-skill');
+    mkdirSync(skillDir);
+    // A large skill body, to demonstrate the memory win over storing the block.
+    const body = 'x'.repeat(100_000);
+    writeFileSync(join(skillDir, 'SKILL.md'), body);
+    mockSession.prompt.mockResolvedValue(undefined);
+
+    const adapter = new PiAdapter();
+    await adapter.execute('turn one', { shared: {} }, { sessionId: 'c1:m1', skills: ['big-skill'], skillsDir: dir });
+
+    const stored = (adapter as unknown as { injectedSkillsBlocks: Map<string, string> }).injectedSkillsBlocks.get('c1:m1');
+    expect(stored).toBeDefined();
+    // SHA-256 hex digest is fixed at 64 chars regardless of block size.
+    expect(stored?.length).toBe(64);
+    expect(stored?.length).toBeLessThan(body.length);
+    expect(stored).not.toContain(body);
+  });
 });
