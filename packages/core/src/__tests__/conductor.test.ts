@@ -10,11 +10,24 @@ import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
 import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
 import type { Score, MovementID } from '../types/score.js';
 import type { Concert, ConcertID } from '../types/concert.js';
+import type { ConcertEvent } from '../types/events.js';
 import type { ConcertHallOptions } from '../hall/concert-hall.js';
 
-function createHall(options: Omit<ConcertHallOptions, 'tracesDir'>): ConcertHall {
-  const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-events-'));
-  return new ConcertHall({ ...options, tracesDir });
+function createHall(options: Omit<ConcertHallOptions, 'concertsDir'>): ConcertHall {
+  const concertsDir = mkdtempSync(join(tmpdir(), 'orchestron-concerts-'));
+  return new ConcertHall({ ...options, concertsDir });
+}
+
+/** Run a conductor to completion while capturing every emitted event in order. */
+async function runConcert(hall: ConcertHall, scoreId: string): Promise<{
+  conductor: Conductor;
+  events: ConcertEvent[];
+}> {
+  const conductor = await hall.createConcert(scoreId);
+  const events: ConcertEvent[] = [];
+  conductor.onEvent((e) => events.push(e));
+  await conductor.start();
+  return { conductor, events };
 }
 
 class CapturingFakeHarnessAdapter extends FakeHarnessAdapter {
@@ -140,12 +153,11 @@ it('movement spend limit breach', async () => {
     store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
     evaluator: new FakeEvaluator({ alwaysSucceed: true }),
   });
-  const conductor = await hall.createConcert('movement-constrained');
-  await conductor.start();
+  const { conductor, events } = await runConcert(hall, 'movement-constrained');
   expect(conductor.status).toBe('failed');
-  const events = (await hall.getLiveEventLog()!.read(conductor.concertId)).filter(e => e.type === 'constraint:breached');
-  expect(events).toHaveLength(1);
-  const breachEvent = events[0] as Extract<typeof events[0], { type: 'constraint:breached' }>;
+  const breachEvents = events.filter(e => e.type === 'constraint:breached');
+  expect(breachEvents).toHaveLength(1);
+  const breachEvent = breachEvents[0] as Extract<ConcertEvent, { type: 'constraint:breached' }>;
   expect(breachEvent.constraint).toBe('maxSpendDollars');
   expect(breachEvent.limit).toBe(0.5);
   expect(breachEvent.actual).toBe(0.6);
@@ -460,10 +472,8 @@ describe('Conductor constraints', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const conductor = await hall.createConcert('duration-limit');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'duration-limit');
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -498,10 +508,8 @@ describe('Conductor constraints', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const conductor = await hall.createConcert('section-movement-limit');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'section-movement-limit');
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -536,10 +544,8 @@ describe('Conductor constraints', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const conductor = await hall.createConcert('section-spend-limit');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'section-spend-limit');
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -608,10 +614,8 @@ describe('Conductor constraints', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const conductor = await hall.createConcert('wildcard-unlisted');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'wildcard-unlisted');
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -648,11 +652,9 @@ describe('Conductor constraints', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const conductor = await hall.createConcert('merge-wildcard');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'merge-wildcard');
     // execution maxMovements = 1 (explicit override), maxSpendDollars = 0.5 (from wildcard)
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -689,12 +691,10 @@ describe('Conductor constraints', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const conductor = await hall.createConcert('inherit-spend');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'inherit-spend');
     // execution maxMovements = 5 (explicit), maxSpendDollars = 0.5 (from wildcard)
     // First movement costs $0.6, which exceeds $0.5
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -731,11 +731,9 @@ describe('Conductor constraints', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const conductor = await hall.createConcert('inherit-movements');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'inherit-movements');
     // execution maxMovements = 1 (from wildcard), maxSpendDollars = 5 (explicit)
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 });
@@ -773,10 +771,9 @@ describe('Conductor movement progress', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const conductor = await hall.createConcert('progress-test');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'progress-test');
     expect(conductor.status).toBe('completed');
-    const progressEvents = (await hall.getLiveEventLog()!.read(conductor.concertId)).filter(e => e.type === 'movement:progress');
+    const progressEvents = events.filter(e => e.type === 'movement:progress');
     expect(progressEvents.length).toBeGreaterThanOrEqual(2);
     expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_start')).toBe(true);
     expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_end')).toBe(true);
@@ -1134,15 +1131,13 @@ describe('Dual prompt selection', () => {
         defaultResult: { achieved: false, confidence: 0, summary: 'reject', evidence: '' },
       }),
     });
-    const conductor = await hall.createConcert('reject-movement');
-    await conductor.start();
+    const { conductor, events } = await runConcert(hall, 'reject-movement');
     // The concert itself fails (no success path out), but the
     // movement record is `rejected`, not `failed`.
     expect(conductor.status).toBe('failed');
     const state = await conductor.getState();
     expect(state.history[0].status).toBe('rejected');
     expect(state.history[0].goalEvaluation.achieved).toBe(false);
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
     expect(events.some((e) => e.type === 'movement:rejected')).toBe(true);
     expect(events.some((e) => e.type === 'movement:failed')).toBe(false);
   });

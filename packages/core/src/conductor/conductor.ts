@@ -14,10 +14,10 @@ import type {
 import { EventEmitter } from 'node:events';
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
 import type { ConcertEvent } from '../types/events.js';
+import { SESSION_FORMATS, type ConcertManifestMovement, type SessionFormat } from '../types/recording.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
 import type { ConcertStore } from '../store/concert-store.js';
-import { TraceService } from '../store/trace-service.js';
-import { LiveEventLog } from '../store/live-event-log.js';
+import { ConcertRecording } from '../store/concert-recording.js';
 import type { ChildConcertFactory } from './child-concert-factory.js';
 import type { IConductor } from './conductor-interface.js';
 import type { StartOptions } from './start-options.js';
@@ -47,8 +47,9 @@ export class Conductor implements IConductor {
   private activeSessions = new Map<string, HarnessAdapter>();
   private adapterResolver: { get(name: string, concertId?: string): Promise<HarnessAdapter> };
   private loopPromise?: Promise<void>;
-  private traceService?: TraceService;
-  private liveEventLog?: LiveEventLog;
+  private recording?: ConcertRecording;
+  private movementAttempts = new Map<MovementID, number>();
+  private recordingOrder = 0;
   private eventEmitter = new EventEmitter();
   private childConductors = new Map<ConcertID, IConductor>();
   private promptBuilder = new PromptBuilder();
@@ -63,20 +64,18 @@ export class Conductor implements IConductor {
     private childFactory: ChildConcertFactory,
     adapters: Map<string, HarnessAdapter> | { get(name: string): Promise<HarnessAdapter> },
     private evaluator: Evaluator,
-    tracesDir?: string,
+    concertsDir?: string,
     private defaultHarness?: string,
     private onFinalized?: (concertId: ConcertID) => void,
-    liveEventLog?: LiveEventLog,
     private cwd?: string,
     private worktreeDisposer?: () => Promise<void>,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
     this.constraintChecker = new ConstraintChecker(this.score.program);
-    if (tracesDir) {
-      this.traceService = new TraceService(tracesDir, store);
+    if (concertsDir) {
+      this.recording = new ConcertRecording(concertsDir);
     }
-    this.liveEventLog = liveEventLog ?? (tracesDir ? new LiveEventLog(tracesDir) : undefined);
     this.adapterResolver = createAdapterResolver(adapters);
   }
 
@@ -128,6 +127,8 @@ export class Conductor implements IConductor {
       timestamp: new Date(),
     });
 
+    await this.recording?.init(this.concert.id, this.score.id);
+
     const signal = this.abortController.signal;
     const previousOutputs = new Map<MovementID, MovementRecord>();
 
@@ -162,6 +163,8 @@ export class Conductor implements IConductor {
       concertId: this.concert.id,
       timestamp: new Date(),
     });
+
+    await this.recording?.init(this.concert.id, this.score.id);
 
     const signal = this.abortController.signal;
     let currentId: MovementID | '__end__' | '__fail__';
@@ -327,16 +330,17 @@ export class Conductor implements IConductor {
   private emit(event: ConcertEvent): void {
     // Fan out to the in-process event bus synchronously so listeners never block.
     this.eventEmitter.emit('event', event);
-    // Persist to the live event log fire-and-forget to keep the hot path
-    // non-blocking; surface write failures instead of silently swallowing them.
-    if (this.liveEventLog) {
-      this.liveEventLog.append(this.concert.id, event).catch((err) => {
-        console.error(
-          `Failed to append event to live log for concert '${this.concert.id}':`,
-          err,
-        );
-      });
-    }
+    // Persist to the store's events table fire-and-forget so status surfaces
+    // (CLI `status`, plugin `get-status`) can query movement:progress and
+    // lifecycle events. The events table replaces the old live.jsonl file log
+    // as the persisted event source; the per-movement export files remain the
+    // authoritative session record.
+    this.store.pushEvent(event).catch((err) => {
+      console.error(
+        `Failed to persist event to store for concert '${this.concert.id}':`,
+        err,
+      );
+    });
   }
 
   private buildPreviousOutputs(): Map<MovementID, MovementRecord> {
@@ -391,6 +395,10 @@ export class Conductor implements IConductor {
 
     let harnessAdapter: HarnessAdapter | undefined;
     let sessionId: string | undefined;
+    let attempt = 0;
+    let sessionDir: string | undefined;
+    let exportFile: string | undefined;
+    let nativeSessionId: string | undefined;
 
     try {
       if (movement.subscore) {
@@ -398,6 +406,8 @@ export class Conductor implements IConductor {
       }
 
       harnessAdapter = await this.resolveAdapter(movement);
+      attempt = (this.movementAttempts.get(movement.id) ?? 0) + 1;
+      this.movementAttempts.set(movement.id, attempt);
       const modelConfig = this.resolveModelConfig(movement, harnessAdapter.type);
       const prompt = this.promptBuilder.buildPrompt(
         movement,
@@ -410,6 +420,17 @@ export class Conductor implements IConductor {
 
       if (sessionId) {
         this.activeSessions.set(sessionId, harnessAdapter);
+      }
+
+      // Recording: one native session dir per movement (shared across attempts)
+      // and one 1:1 event-stream export per attempt, 0-padded so `cat exports/*`
+      // reproduces playback order straight off disk. Only Pi persists real
+      // session files; opencode sessions live in opencode's own store.
+      if (this.recording) {
+        if (sessionId && harnessAdapter.type === 'pi') {
+          sessionDir = this.recording.sessionDir(this.concert.id, movement.id);
+        }
+        exportFile = this.recording.exportFile(this.concert.id, movement.id, attempt);
       }
 
       this.emit({
@@ -436,6 +457,8 @@ export class Conductor implements IConductor {
           options: modelConfig.options,
           onProgress,
           cwd: this.cwd,
+          sessionDir,
+          exportJsonl: exportFile,
         });
 
         record.status = 'completed';
@@ -446,6 +469,7 @@ export class Conductor implements IConductor {
         if (record.usage.spend !== undefined) record.usage.spendSource = 'measured';
         if (response.model) record.model = response.model;
         if (response.provider) record.provider = response.provider;
+        nativeSessionId = response.sessionId;
         record.durationMs = Date.now() - startedAt.getTime();
       } finally {
         clearTimeout(timeoutHandle);
@@ -458,20 +482,37 @@ export class Conductor implements IConductor {
       record.error = this.serializeMovementError(err, movement.id);
     }
 
-    if (this.traceService && harnessAdapter && sessionId) {
-      const traceId = await this.traceService.recordFromAdapter(
-        harnessAdapter,
-        sessionId,
-        this.concert.id,
-        movement.id,
-        record.status,
-      );
-      if (traceId) {
-        record.traceId = traceId;
-      }
+    if (this.recording && harnessAdapter) {
+      this.recordingOrder++;
+      const sessionKey = nativeSessionId ?? sessionId ?? `${this.concert.id}:${movement.id}`;
+      await this.recording.registerMovement(this.concert.id, {
+        order: this.recordingOrder,
+        movementId: movement.id,
+        attempt,
+        status: record.status as ConcertManifestMovement['status'],
+        harness: harnessAdapter.type,
+        format: this.recordingFormatFor(harnessAdapter.type),
+        exportFile: exportFile ? this.recording.relative(this.concert.id, exportFile) : undefined,
+        session: {
+          id: sessionKey,
+          dir: sessionDir ? this.recording.relative(this.concert.id, sessionDir) : undefined,
+          reopenHint:
+            harnessAdapter.type === 'opencode'
+              ? `opencode session ${sessionKey}`
+              : undefined,
+        },
+        startedAt: record.startedAt.toISOString(),
+        completedAt: record.completedAt?.toISOString(),
+        durationMs: record.durationMs,
+      });
     }
 
     return record;
+  }
+
+  /** Map a harness adapter type to its export line-schema id. */
+  private recordingFormatFor(type: string): SessionFormat {
+    return type === 'opencode' ? SESSION_FORMATS.OPENCODE : SESSION_FORMATS.PI;
   }
 
   private async executeSubscore(
@@ -1118,7 +1159,7 @@ export class Conductor implements IConductor {
 
     this.childConductors.clear();
     this.onFinalized?.(this.concert.id);
-    await this.liveEventLog?.close(this.concert.id);
+    await this.recording?.finalize(this.concert.id, status);
     if (this.worktreeDisposer) {
       const disposer = this.worktreeDisposer;
       this.worktreeDisposer = undefined;

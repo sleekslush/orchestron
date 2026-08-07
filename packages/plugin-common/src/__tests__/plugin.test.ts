@@ -8,12 +8,10 @@ import {
   ScoreRegistry,
   SqliteLoge,
   ConcertHall,
-  LiveEventLog,
 } from '@orchestron/core';
 import type { Score } from '@orchestron/core';
 
-const tracesDir = mkdtempSync(join(realpathSync(tmpdir()), 'orchestron-test-trace-'));
-const liveEventLog = new LiveEventLog(tracesDir);
+const concertsDir = mkdtempSync(join(realpathSync(tmpdir()), 'orchestron-test-concert-'));
 import { createOrchestron, type Orchestron } from '../orchestron.js';
 import { startConcert } from '../tools/start-concert.js';
 import { getConcertStatus } from '../tools/get-status.js';
@@ -226,8 +224,7 @@ describe('plugin-common tool functions', () => {
       registry,
       hall,
       scoresDirs: [],
-      tracesDir,
-      liveEventLog,
+      concertsDir,
     };
 
     const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
@@ -263,8 +260,7 @@ describe('plugin-common tool functions', () => {
       registry,
       hall,
       scoresDirs: [],
-      tracesDir,
-      liveEventLog,
+      concertsDir,
     };
 
     const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
@@ -325,8 +321,7 @@ describe('plugin-common tool functions', () => {
     orchestron.hall = new ConcertHall({
       store: orchestron.store,
       scoreRegistry: orchestron.registry,
-      tracesDir: orchestron.tracesDir,
-      liveEventLog: orchestron.liveEventLog,
+      concertsDir: orchestron.concertsDir,
       adapters: new Map([
         [
           'fake',
@@ -458,8 +453,7 @@ describe('plugin-common tool functions', () => {
     orchestron.hall = new ConcertHall({
       store: orchestron.store,
       scoreRegistry: orchestron.registry,
-      tracesDir: orchestron.tracesDir,
-      liveEventLog: orchestron.liveEventLog,
+      concertsDir: orchestron.concertsDir,
       adapters: new Map([
         [
           'fake',

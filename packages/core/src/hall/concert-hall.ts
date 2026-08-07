@@ -4,7 +4,6 @@ import type { Concert, ConcertID, ConcertFilter, ConcertWorktree } from '../type
 import type { Score, ScoreID } from '../types/score.js';
 import type { HarnessAdapter, HarnessAdapterResolver } from '../types/adapter.js';
 import type { ConcertStore } from '../store/concert-store.js';
-import { LiveEventLog } from '../store/live-event-log.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { Conductor } from '../conductor/conductor.js';
 import type { IConductor } from '../conductor/conductor-interface.js';
@@ -20,8 +19,8 @@ export interface ConcertHallOptions {
   scoreRegistry: ScoreRegistry;
   adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
-  tracesDir?: string;
-  liveEventLog?: LiveEventLog;
+  /** Root directory for per-concert session recordings (manifest/exports/sessions). */
+  concertsDir?: string;
   defaultHarness?: string;
   /** Optional custom worktree manager (primarily for tests). */
   worktreeManager?: WorktreeManager;
@@ -34,8 +33,7 @@ export class ConcertHall implements ChildConcertFactory {
   private scoreRegistry: ScoreRegistry;
   private adapterResolver: AdapterResolver;
   private evaluator: Evaluator;
-  private tracesDir?: string;
-  private liveEventLog?: LiveEventLog;
+  private concertsDir?: string;
   private defaultHarness?: string;
   private worktreeManager: WorktreeManager;
 
@@ -47,14 +45,13 @@ export class ConcertHall implements ChildConcertFactory {
       throw new Error('ConcertHall requires an evaluator; pass one explicitly or use FakeEvaluator only in tests.');
     }
     this.evaluator = options.evaluator;
-    this.tracesDir = options.tracesDir;
-    this.liveEventLog = options.liveEventLog ?? (options.tracesDir ? new LiveEventLog(options.tracesDir) : undefined);
+    this.concertsDir = options.concertsDir;
     this.defaultHarness = options.defaultHarness;
     this.worktreeManager = options.worktreeManager ?? new WorktreeManager();
   }
 
-  getLiveEventLog(): LiveEventLog | undefined {
-    return this.liveEventLog;
+  getConcertRecordingRoot(): string | undefined {
+    return this.concertsDir;
   }
 
   private async buildConductor(
@@ -71,10 +68,9 @@ export class ConcertHall implements ChildConcertFactory {
       this,
       this.adapterResolver,
       await this.resolveEvaluator(score, explicitHarness),
-      this.tracesDir,
+      this.concertsDir,
       this.defaultHarness,
       (id) => this.cleanupConductor(id),
-      this.liveEventLog,
       cwd,
       worktreeDisposer,
     );

@@ -88,7 +88,6 @@ export async function waitForConcert(
   emitUsage(initial.usage, maxSpendDollars);
 
   const pollIntervalMs = 500;
-  let lastTimestamp = new Date(0);
   let lastMovement = initial.currentMovement;
   let lastUsage = initial.usage;
 
@@ -120,35 +119,6 @@ export async function waitForConcert(
     if (signal?.aborted) {
       onUpdate?.('Wait aborted by caller.');
       break;
-    }
-
-    const events = await orchestron.liveEventLog.read(input.concertId);
-    for (const event of events) {
-      if (event.type !== 'movement:progress') continue;
-      if (event.timestamp.getTime() <= lastTimestamp.getTime()) continue;
-      const payload = event.payload;
-      let text =
-        (payload.message as string | undefined) ??
-        `Progress: ${event.progressType}${payload.toolName ? ` (${payload.toolName as string})` : ''}`;
-      if (event.progressType === 'tool_execution_start' && payload.args) {
-        const args = payload.args as Record<string, unknown>;
-        const cmd =
-          (args.command as string | undefined) ??
-          (args.filePath as string | undefined) ??
-          (args.file as string | undefined) ??
-          (args.path as string | undefined);
-        if (cmd) {
-          text += ` → ${cmd}`;
-        }
-      }
-      if (event.progressType === 'tool_execution_end' && payload.isError) {
-        text += ` [error]`;
-      }
-      if (event.progressType === 'text_delta' && typeof payload.delta === 'string') {
-        text += ` ${payload.delta}`;
-      }
-      onUpdate?.(text);
-      lastTimestamp = event.timestamp;
     }
 
     const current = await orchestron.store.getConcert(input.concertId);

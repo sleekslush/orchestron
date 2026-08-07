@@ -8,7 +8,7 @@ import type {
   ResourceUsage,
   SerializedError,
 } from '../types/concert.js';
-import type { ConcertEvent, SessionTrace } from '../types/index.js';
+import type { ConcertEvent } from '../types/index.js';
 
 export function serializeDate(d: Date | undefined): string | null {
   return d ? d.toISOString() : null;
@@ -91,19 +91,6 @@ export interface MovementRow {
   provider: string | null;
 }
 
-export interface SessionTraceRow {
-  id: string;
-  concert_id: string;
-  movement_id: string;
-  session_id: string;
-  file_path: string;
-  started_at: string;
-  completed_at: string | null;
-  event_count: number;
-  status: string;
-  format: string;
-}
-
 export interface EventRow {
   concert_id: string;
   type: string;
@@ -154,21 +141,6 @@ export function rowToMovementRecord(row: MovementRow): MovementRecord {
     traceId: row.trace_id ?? undefined,
     model: row.model ?? undefined,
     provider: row.provider ?? undefined,
-  };
-}
-
-export function rowToSessionTrace(row: SessionTraceRow): SessionTrace {
-  return {
-    id: row.id,
-    concertId: row.concert_id,
-    movementId: row.movement_id,
-    sessionId: row.session_id,
-    filePath: row.file_path,
-    startedAt: deserializeDate(row.started_at)!,
-    completedAt: deserializeDate(row.completed_at),
-    eventCount: row.event_count,
-    status: row.status as SessionTrace['status'],
-    format: row.format as SessionTrace['format'],
   };
 }
 

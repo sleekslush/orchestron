@@ -15,9 +15,8 @@ export { loadConfigFile, resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_CO
 export type { OrchestronConfig, ResolvedOrchestronConfig } from './config.js';
 
 export { SqliteLoge } from './store/sqlite-loge.js';
-export { LiveEventLog } from './store/live-event-log.js';
+export { ConcertRecording } from './store/concert-recording.js';
 export type { ConcertStore } from './store/concert-store.js';
-export { TraceService } from './store/trace-service.js';
 
 export { ScoreRegistry } from './registry/score-registry.js';
 export type { ScoreValidationResult } from './registry/score-registry.js';

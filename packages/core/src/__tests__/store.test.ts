@@ -317,57 +317,6 @@ describe('SqliteLoge', () => {
     expect(history[0].traceId).toBe('trace-123');
   });
 
-  it('should create and retrieve session traces', async () => {
-    await store.saveConcert(makeConcert(), dummyScoreYaml);
-
-    const trace = {
-      id: 't1',
-      concertId: 'test-concert-1',
-      movementId: 'm1',
-      sessionId: 's1',
-      filePath: 'test-concert-1/t1.jsonl',
-      startedAt: new Date(),
-      completedAt: new Date(),
-      eventCount: 5,
-      status: 'completed' as const,
-      format: 'orchestron-trace' as const,
-    };
-
-    await store.createSessionTrace(trace);
-    const traces = await store.getSessionTracesForConcert('test-concert-1');
-    expect(traces).toHaveLength(1);
-    expect(traces[0].id).toBe('t1');
-    expect(traces[0].eventCount).toBe(5);
-
-    const single = await store.getSessionTraceForMovement('test-concert-1', 'm1');
-    expect(single).not.toBeNull();
-    expect(single!.id).toBe('t1');
-  });
-
-  it('should update session trace fields', async () => {
-    await store.saveConcert(makeConcert(), dummyScoreYaml);
-
-    const trace = {
-      id: 't1',
-      concertId: 'test-concert-1',
-      movementId: 'm1',
-      sessionId: 's1',
-      filePath: 'test-concert-1/t1.jsonl',
-      startedAt: new Date(),
-      completedAt: new Date(),
-      eventCount: 3,
-      status: 'completed' as const,
-      format: 'orchestron-trace' as const,
-    };
-
-    await store.createSessionTrace(trace);
-    await store.updateSessionTrace('t1', { eventCount: 7, status: 'failed' });
-
-    const updated = await store.getSessionTraceForMovement('test-concert-1', 'm1');
-    expect(updated!.eventCount).toBe(7);
-    expect(updated!.status).toBe('failed');
-  });
-
   describe('backfillSpend', () => {
     const estimate = async (input: {
       model?: string;
