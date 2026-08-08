@@ -16,6 +16,13 @@ export type { OrchestronConfig, ResolvedOrchestronConfig } from './config.js';
 
 export { SqliteLoge } from './store/sqlite-loge.js';
 export { ConcertRecording } from './store/concert-recording.js';
+export { concertLog } from './store/concert-log.js';
+export type {
+  ConcertLogLine,
+  ConcertLogOptions,
+  ConcertLogConcertLine,
+  ConcertLogMovementLine,
+} from './store/concert-log.js';
 export type { ConcertStore } from './store/concert-store.js';
 
 export { ScoreRegistry } from './registry/score-registry.js';

@@ -8,6 +8,7 @@ import { createOrchestron, withOrchestron } from '../orchestron.js';
 import { startCommandHandler } from '../commands/start.js';
 import { pauseCommandHandler, resumeCommandHandler } from '../commands/lifecycle.js';
 import { statusCommandHandler } from '../commands/status.js';
+import { logCommandHandler } from '../commands/logs.js';
 import { listCommandHandler } from '../commands/list.js';
 import { scoresCommandHandler } from '../commands/scores.js';
 import { modelsCommandHandler } from '../commands/models.js';
@@ -175,6 +176,78 @@ describe('CLI commands', () => {
     }
 
     expect(logs.some((l) => l.includes(`Concert: ${concertId}`))).toBe(true);
+  });
+
+  it('replays a concert log from its session recording', async () => {
+    const orchestron = await createTestOrchestron(dir);
+    const { restore: restoreStart } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'cli-test', {}, false);
+    } finally {
+      restoreStart();
+    }
+
+    const concerts = await orchestron.store.listConcerts();
+    const concertId = concerts[0].id;
+
+    // FakeHarnessAdapter writes no session export; add one the way Pi does.
+    writeFileSync(
+      join(orchestron.concertsDir, concertId, 'exports/0001.step1.jsonl'),
+      JSON.stringify({ type: 'agent_start' }) + '\n',
+    );
+
+    const { logs, restore } = captureOutput();
+    try {
+      await logCommandHandler(orchestron, concertId, false, false);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    expect(logs.some((l) => l.startsWith('concert ') && l.includes(concertId))).toBe(true);
+    expect(logs.some((l) => l.includes('movement 1 step1'))).toBe(true);
+    expect(logs.some((l) => l.includes('"agent_start"'))).toBe(true);
+  });
+
+  it('logs concert lines as JSON objects with --json', async () => {
+    const orchestron = await createTestOrchestron(dir);
+    const { restore: restoreStart } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'cli-test', {}, false);
+    } finally {
+      restoreStart();
+    }
+
+    const concerts = await orchestron.store.listConcerts();
+    const concertId = concerts[0].id;
+    writeFileSync(
+      join(orchestron.concertsDir, concertId, 'exports/0001.step1.jsonl'),
+      JSON.stringify({ type: 'agent_start' }) + '\n',
+    );
+
+    const { logs, restore } = captureOutput();
+    try {
+      await logCommandHandler(orchestron, concertId, false, true);
+    } finally {
+      restore();
+      orchestron.store.close();
+    }
+
+    const parsed = logs.map((l) => JSON.parse(l));
+    expect(parsed[0]).toMatchObject({ type: 'orchestron:concert', concertId });
+    expect(parsed.some((o) => o.type === 'orchestron:movement' && o.movementId === 'step1')).toBe(true);
+    expect(parsed.some((o) => o.type === 'agent_start')).toBe(true);
+  });
+
+  it('reports an error for a concert with no recording', async () => {
+    const orchestron = await createTestOrchestron(dir);
+    try {
+      await expect(logCommandHandler(orchestron, 'nope', false, false)).rejects.toThrow(
+        /No recording for concert 'nope'/,
+      );
+    } finally {
+      orchestron.store.close();
+    }
   });
 
   it('shows detailed movement information with --verbose', async () => {

@@ -87,6 +87,8 @@ pnpm orchestron list
 pnpm orchestron status <concert-id>   # reads concert/movement state from Loge
 pnpm orchestron status                # overview of all concerts
 pnpm orchestron status <concert-id> --watch   # poll for movement transitions
+pnpm orchestron logs <concert-id>              # replay the session recording as a stream
+pnpm orchestron logs <concert-id> --follow     # tail a running concert until it finishes
 
 Each concert gets a session recording tree under
 `~/.orchestron/concerts/<concertId>/` — an ordered `manifest.json` (the replay

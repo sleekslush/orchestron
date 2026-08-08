@@ -1,0 +1,125 @@
+id: hybrid-demo
+name: "Hybrid Harness Demo"
+description: |
+  A six-movement score alternating the pi and opencode harnesses to exercise
+  per-movement exports for both. The movements chain together: brainstorm,
+  pick, plan, risks, mitigations, wrapup.
+version: "1.0.0"
+models:
+  opencode:
+    provider: opencode
+    model: deepseek-v4-flash-free
+evaluator:
+  harness: opencode
+  model: deepseek-v4-flash-free
+  provider: opencode
+program:
+  maxMovements: 10
+  persistSession: true
+startMovement: brainstorm
+
+movements:
+  - id: brainstorm
+    name: "Brainstorm Ideas"
+    section: demo
+    harness: pi
+    prompt: >
+      Propose exactly 3 concrete ideas for a small weekend hobby project.
+      Put each idea on its own line.
+    goal:
+      description: "The output lists 3 distinct concrete project ideas, one per line."
+      strategy: llm_judge
+    transitions:
+      - to: pick
+        on: success
+      - to: __fail__
+        on: failure
+
+  - id: pick
+    name: "Pick Best Idea"
+    section: demo
+    harness: opencode
+    prompt: >
+      From the following brainstormed ideas, choose the single best one for a
+      beginner and explain in one sentence why it is the best fit:
+
+      {{context.previousOutputs.brainstorm}}
+    goal:
+      description: "The output names exactly one idea and gives one reason."
+      strategy: llm_judge
+    transitions:
+      - to: plan
+        on: success
+      - to: __fail__
+        on: failure
+
+  - id: plan
+    name: "Plan the Project"
+    section: demo
+    harness: pi
+    prompt: >
+      Write a 3-step plan to build the chosen project. Number the steps 1, 2, 3.
+
+      Chosen idea: {{context.previousOutputs.pick}}
+    goal:
+      description: "The output contains exactly 3 numbered build steps."
+      strategy: llm_judge
+    transitions:
+      - to: risks
+        on: success
+      - to: __fail__
+        on: failure
+
+  - id: risks
+    name: "List Risks"
+    section: demo
+    harness: opencode
+    prompt: >
+      Look at the following plan and list the top 2 risks, one per line,
+      each starting with 'RISK:'.
+
+      {{context.previousOutputs.plan}}
+    goal:
+      description: "The output lists exactly 2 risks, each on its own line."
+      strategy: llm_judge
+    transitions:
+      - to: mitigations
+        on: success
+      - to: __fail__
+        on: failure
+
+  - id: mitigations
+    name: "Mitigate Risks"
+    section: demo
+    harness: pi
+    prompt: >
+      For each of the following risks, propose a concrete mitigation.
+      Number the mitigations to match the risks.
+
+      {{context.previousOutputs.risks}}
+    goal:
+      description: "The output pairs each risk with a concrete mitigation."
+      strategy: llm_judge
+    transitions:
+      - to: wrapup
+        on: success
+      - to: __fail__
+        on: failure
+
+  - id: wrapup
+    name: "Final Summary"
+    section: demo
+    harness: opencode
+    prompt: >
+      Write a one-paragraph final summary of the project plan, including the
+      idea, the 3 steps, and the mitigations.
+
+      Plan: {{context.previousOutputs.mitigations}}
+    goal:
+      description: "The output is a coherent one-paragraph project summary."
+      strategy: llm_judge
+    transitions:
+      - to: __end__
+        on: success
+      - to: __fail__
+        on: failure

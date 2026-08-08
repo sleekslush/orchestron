@@ -8,6 +8,7 @@ import {
   cancelCommandHandler,
 } from './commands/lifecycle.js';
 import { statusCommandHandler } from './commands/status.js';
+import { logCommandHandler } from './commands/logs.js';
 import { listCommandHandler } from './commands/list.js';
 import { scoresCommandHandler } from './commands/scores.js';
 import { modelsCommandHandler } from './commands/models.js';
@@ -110,6 +111,17 @@ program
     const watch = opts.watch === true;
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
       statusCommandHandler(orchestron, concertId, wantsJson(command), verbose, watch),
+    );
+  }));
+
+program
+  .command('logs <concert-id>')
+  .description('Replay a concert session recording as a stream; --follow tails a running concert')
+  .option('--follow', 'Keep streaming new lines until the concert reaches a terminal status')
+  .action(safeAction(async (concertId: string, _options: unknown, command: Command) => {
+    const opts = command.opts();
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      logCommandHandler(orchestron, concertId, opts.follow === true, wantsJson(command)),
     );
   }));
 
