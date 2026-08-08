@@ -1,12 +1,21 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PiAdapter } from './pi-adapter.js';
 import type { HarnessResponse } from '@orchestron/core';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 
 const mockSession = {
-  subscribe: vi.fn(() => vi.fn()),
+  subscribe: vi.fn((_cb?: unknown) => vi.fn()),
   prompt: vi.fn(),
   dispose: vi.fn(),
   abort: vi.fn(),
+  sessionManager: {
+    getHeader: vi.fn(() => null),
+    getSessionId: vi.fn(() => 'pi-sess-123'),
+    getSessionFile: vi.fn(() => undefined),
+  },
 };
 
 const createAgentSessionMock = vi.fn() as Mock<
@@ -27,7 +36,10 @@ modelRuntimeCreateMock.mockResolvedValue(mockModelRuntime);
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   ModelRuntime: { create: (...args: unknown[]) => modelRuntimeCreateMock(...args as Parameters<typeof modelRuntimeCreateMock>) },
-  SessionManager: { inMemory: vi.fn(() => ({ id: 'manager' })) },
+  SessionManager: {
+    inMemory: vi.fn(() => ({ id: 'manager' })),
+    create: vi.fn(() => ({ id: 'manager' })),
+  },
   createAgentSession: (...args: unknown[]) => createAgentSessionMock(...args as Parameters<typeof createAgentSessionMock>),
 }));
 
@@ -70,6 +82,41 @@ describe('PiAdapter', () => {
     await adapter.execute('b', { shared: {} }, { sessionId: 'c1:m2' });
 
     expect(createAgentSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('writes a 1:1 event-stream export and reports the native session file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orchestron-pi-session-'));
+    const exportFile = join(dir, 'export.jsonl');
+    const header = { type: 'session', id: 'pi-sess-123', cwd: process.cwd() };
+    const events: AgentSessionEvent[] = [
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } },
+      { type: 'tool_execution_start', toolName: 'read', args: { path: 'a.ts' } },
+    ] as unknown as AgentSessionEvent[];
+
+    mockSession.sessionManager.getHeader.mockImplementation((() => header) as never);
+    mockSession.sessionManager.getSessionId.mockImplementation((() => 'pi-sess-123') as never);
+    mockSession.sessionManager.getSessionFile.mockImplementation((() => join(dir, 'session.jsonl')) as never);
+    mockSession.subscribe.mockImplementationOnce(((cb: (e: AgentSessionEvent) => void) => {
+      for (const event of events) cb(event);
+      return vi.fn();
+    }) as never);
+    mockSession.prompt.mockResolvedValue(undefined);
+    const adapter = new PiAdapter();
+
+    const result = await adapter.execute('hello', { shared: {} }, {
+      sessionId: 'c1:m1',
+      sessionDir: dir,
+      exportJsonl: exportFile,
+    });
+
+    // Flush completes before execute() resolves: header first, then one raw
+    // JSON event line per AgentSessionEvent, byte-identical to the source.
+    const parsed = readFileSync(exportFile, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(parsed).toEqual([header, ...events]);
+    // The manifest-facing response exposes the native session, not the pool key.
+    expect(result.sessionId).toBe('pi-sess-123');
+    expect(result.sessionFile).toBe(join(dir, 'session.jsonl'));
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('releases the session lock if creation fails', async () => {
@@ -285,6 +332,7 @@ describe('PiAdapter', () => {
       abort: vi.fn(() => {
         rejectPrompt?.(new Error('aborted'));
       }),
+      sessionManager: mockSession.sessionManager,
     };
     createAgentSessionMock.mockResolvedValueOnce({ session: abortableSession, extensionsResult: {} });
 

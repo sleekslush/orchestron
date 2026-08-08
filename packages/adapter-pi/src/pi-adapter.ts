@@ -1,6 +1,7 @@
+import { createWriteStream } from 'node:fs';
+import type { WriteStream } from 'node:fs';
 import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
-import type { SessionTraceEvent } from '@orchestron/core';
 import { HarnessError, dollarsToMicro, tryParseStructuredFromText, SessionPool } from '@orchestron/core';
 import {
   createAgentSession,
@@ -44,6 +45,8 @@ export class PiAdapter implements HarnessAdapter {
   private modelRuntime: ModelRuntime | undefined;
   /** Working directory per persistent session id (from execute options). */
   private sessionCwds = new Map<string, string>();
+  /** Native session persistence dir per persistent session id (from execute options). */
+  private sessionDirs = new Map<string, string>();
 
   constructor(config: PiAdapterConfig = {}) {
     this.provider = config.provider;
@@ -51,7 +54,12 @@ export class PiAdapter implements HarnessAdapter {
     this.tools = config.tools;
     this.excludeTools = config.excludeTools;
     this.sessionPool = new SessionPool(
-      (sessionId) => this.createPiSession(undefined, this.sessionCwds.get(sessionId)),
+      (sessionId) =>
+        this.createPiSession(
+          undefined,
+          this.sessionCwds.get(sessionId),
+          this.sessionDirs.get(sessionId),
+        ),
       (data) => Promise.resolve(data.session.dispose()),
     );
   }
@@ -84,6 +92,7 @@ export class PiAdapter implements HarnessAdapter {
     try {
       if (options?.sessionId) {
         if (options.cwd) this.sessionCwds.set(options.sessionId, options.cwd);
+        if (options.sessionDir) this.sessionDirs.set(options.sessionId, options.sessionDir);
         const existing = await this.sessionPool.getOrCreate(options.sessionId);
         session = existing.session;
         if (thinkingLevel) {
@@ -95,6 +104,24 @@ export class PiAdapter implements HarnessAdapter {
         session = fresh.session;
       }
 
+      // Per-attempt 1:1 event-stream export: session header line, then
+      // `JSON.stringify(event)` per AgentSessionEvent — byte-identical to
+      // `pi --mode json` output for the same session/prompt.
+      let exportStream: WriteStream | undefined;
+      if (options?.exportJsonl) {
+        exportStream = createWriteStream(options.exportJsonl, { flags: 'w' });
+        exportStream.on('error', (err) => {
+          console.error(
+            `Failed to write Pi session export '${options.exportJsonl}':`,
+            err,
+          );
+        });
+        const header = session.sessionManager.getHeader();
+        if (header) {
+          exportStream.write(JSON.stringify(header) + '\n');
+        }
+      }
+
       let output = '';
       let finalUsage: Usage | undefined;
       let model: string | undefined;
@@ -104,6 +131,9 @@ export class PiAdapter implements HarnessAdapter {
       let cumulativeOutput = 0;
 
       const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+        if (exportStream) {
+          exportStream.write(JSON.stringify(event) + '\n');
+        }
         if (event.type === 'message_update') {
           const ame = event.assistantMessageEvent;
           if (ame.type === 'text_delta') {
@@ -184,6 +214,11 @@ export class PiAdapter implements HarnessAdapter {
         );
       } finally {
         unsubscribe();
+        // Await flush so the export is fully on disk before execute() resolves
+        // and the conductor stamps the manifest entry.
+        if (exportStream) {
+          await new Promise<void>((resolve) => exportStream!.end(resolve));
+        }
         if (abortListener && options?.signal) {
           options.signal.removeEventListener('abort', abortListener);
         }
@@ -215,7 +250,21 @@ export class PiAdapter implements HarnessAdapter {
         : this.toResourceUsage(finalUsage);
       const summary = output.length > 200 ? output.slice(0, 200) + '...' : output;
 
-      return { output, structured, summary, usage, model, provider };
+      return {
+        output,
+        structured,
+        summary,
+        usage,
+        model,
+        provider,
+        // The real Pi session id (matches the export header and session file
+        // name) so the manifest records the native session, not the pool key.
+        sessionId: session.sessionManager.getSessionId(),
+        // Only persisted sessions have a reopenable session file on disk.
+        sessionFile: options?.sessionDir
+          ? session.sessionManager.getSessionFile()
+          : undefined,
+      };
     } finally {
       if (ownSession && session) {
         session.dispose();
@@ -232,74 +281,8 @@ export class PiAdapter implements HarnessAdapter {
 
   async disposeSession(sessionId: string): Promise<void> {
     this.sessionCwds.delete(sessionId);
+    this.sessionDirs.delete(sessionId);
     await this.sessionPool.disposeSession(sessionId);
-  }
-
-  getSessionTraceEvents(sessionId: string, _offset?: number): Promise<SessionTraceEvent[]> {
-    const data = this.sessionPool.get(sessionId);
-    if (!data) return Promise.resolve([]);
-
-    const messages = data.session.messages;
-    const events: SessionTraceEvent[] = [];
-
-    for (const msg of messages) {
-      if (!msg || typeof msg !== 'object') continue;
-      const ts = new Date(
-        'timestamp' in msg && typeof (msg as { timestamp?: number }).timestamp === 'number'
-          ? (msg as { timestamp: number }).timestamp
-          : Date.now(),
-      ).toISOString();
-
-      switch (msg.role) {
-        case 'user': {
-          const raw = 'content' in msg ? (msg as { content: unknown }).content : undefined;
-          const content = typeof raw === 'string' ? raw : (raw !== undefined ? JSON.stringify(raw) : '');
-          events.push({ type: 'prompt', content, timestamp: ts });
-          break;
-        }
-        case 'assistant': {
-          const maybeContent = 'content' in msg ? (msg as { content: unknown }).content : undefined;
-          if (!Array.isArray(maybeContent)) {
-            break;
-          }
-          const blocks = maybeContent as Array<Record<string, unknown>>;
-          for (const block of blocks) {
-            if (!block || typeof block !== 'object') continue;
-            if (block.type === 'text' && typeof block.text === 'string') {
-              events.push({ type: 'text_delta', delta: block.text, timestamp: ts });
-            } else if (block.type === 'toolCall') {
-              events.push({
-                type: 'tool_execution_start',
-                toolName: typeof block.name === 'string' ? block.name : 'unknown',
-                args: typeof block.arguments === 'object' ? (block.arguments as Record<string, unknown>) : undefined,
-                timestamp: ts,
-              });
-            }
-          }
-          break;
-        }
-        case 'toolResult': {
-          if (
-            !('toolName' in msg) ||
-            !('isError' in msg) ||
-            !('content' in msg)
-          ) {
-            break;
-          }
-          events.push({
-            type: 'tool_execution_end',
-            toolName: String((msg as { toolName: unknown }).toolName),
-            isError: Boolean((msg as { isError: unknown }).isError),
-            result: (msg as { content: unknown }).content,
-            error: 'error' in msg ? String((msg as { error: unknown }).error) : undefined,
-            timestamp: ts,
-          });
-          break;
-        }
-      }
-    }
-
-    return Promise.resolve(events);
   }
 
   /** Dispose every tracked session. Useful for graceful shutdown. */
@@ -351,12 +334,21 @@ export class PiAdapter implements HarnessAdapter {
     return value;
   }
 
-  private async createPiSession(thinkingLevel?: ThinkingLevel, cwd?: string): Promise<PiSessionData> {
+  private async createPiSession(
+    thinkingLevel?: ThinkingLevel,
+    cwd?: string,
+    sessionDir?: string,
+  ): Promise<PiSessionData> {
     const modelRuntime = await this.ensureModelRuntime();
 
     const sessionOptions: Parameters<typeof createAgentSession>[0] = {
       model: this.model as never,
-      sessionManager: SessionManager.inMemory(),
+      // A persisted session manager writes a real Pi session file (reopenable
+      // in the Pi CLI); in-memory keeps the old throwaway behavior for
+      // callers that don't pass a session dir.
+      sessionManager: sessionDir
+        ? SessionManager.create(cwd ?? process.cwd(), sessionDir)
+        : SessionManager.inMemory(),
       modelRuntime,
     };
 

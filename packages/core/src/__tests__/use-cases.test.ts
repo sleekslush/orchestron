@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteLoge } from '../store/sqlite-loge.js';
+import { ConcertRecording } from '../store/concert-recording.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { ConcertHall } from '../hall/concert-hall.js';
 import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
@@ -10,9 +11,9 @@ import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
 import type { Score } from '../types/score.js';
 import type { ConcertHallOptions } from '../hall/concert-hall.js';
 
-function createHall(options: Omit<ConcertHallOptions, 'tracesDir'>): ConcertHall {
-  const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-events-'));
-  return new ConcertHall({ ...options, tracesDir });
+function createHall(options: Omit<ConcertHallOptions, 'concertsDir'>): ConcertHall {
+  const concertsDir = mkdtempSync(join(tmpdir(), 'orchestron-concerts-'));
+  return new ConcertHall({ ...options, concertsDir });
 }
 
 // ─── Use Case 1: Linear Plan → Review → End ─────────────────
@@ -156,16 +157,15 @@ describe('Use Case: Plan → Review → End', () => {
     const conductor = await hall.createConcert('plan-review');
     await conductor.start();
 
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
-    const eventTypes = events.map(e => e.type);
-    expect(eventTypes).toEqual([
-      'concert:started',
-      'movement:started',
-      'movement:completed',
-      'movement:started',
-      'movement:completed',
-      'concert:completed',
-    ]);
+    // The manifest is the concert's progress record: entries in array order are
+    // the exact playback order, and it finalizes once the concert ends.
+    const recording = new ConcertRecording(hall.getConcertRecordingRoot()!);
+    const manifest = await recording.get(conductor.concertId);
+    expect(manifest?.status).toBe('completed');
+    expect(manifest?.movements.map((m) => m.movementId)).toEqual(['plan', 'review']);
+    expect(manifest?.movements.every((m) => m.status === 'completed')).toBe(true);
+    expect(manifest?.movements.every((m) => m.format === 'pi/session-event@1')).toBe(true);
+    expect(manifest?.movements.every((m) => m.exportFile)).toBe(true);
   });
 });
 

@@ -45,17 +45,14 @@ export async function getConcertStatus(
   }
 
   const history = await orchestron.store.getMovementHistory(input.concertId);
-  let events: ConcertEvent[] = [];
-  if (state.currentMovement) {
-    // Prefer the live event log; fall back to SQLite events (backward compat)
-    // when no live log exists for the concert yet.
-    const live = await orchestron.liveEventLog.read(input.concertId);
-    events = live.length > 0
-      ? live
-      : await orchestron.store.getEvents(input.concertId, {
-          types: ['movement:progress'],
-        });
-  }
+  // Live progress rows are persisted to the store events table by the
+  // conductor (fire-and-forget); the per-movement export files are the
+  // authoritative session record for replay.
+  const events: ConcertEvent[] = state.currentMovement
+    ? await orchestron.store.getEvents(input.concertId, {
+        types: ['movement:progress'],
+      })
+    : [];
   const latestProgress = events.length > 0
     ? [...events]
         .filter((e) => e.type === 'movement:progress')

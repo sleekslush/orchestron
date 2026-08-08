@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { OpencodeAdapter } from './opencode-adapter.js';
 import type { HarnessResponse } from '@orchestron/core';
 
@@ -485,32 +488,6 @@ describe('OpencodeAdapter', () => {
     expect(mockClient.session.delete).not.toHaveBeenCalled();
   });
 
-  it('getSessionTraceEvents ignores tool parts with null state', async () => {
-    mockClient.session.messages.mockResolvedValue({
-      data: [
-        {
-          info: { role: 'assistant', time: { created: Date.now() } },
-          parts: [
-            makeTextPart('hello'),
-            { type: 'tool', tool: 'git_status', state: null },
-            { type: 'tool', tool: 'read', state: { status: 'success', input: { path: 'a.ts' }, output: 'content' } },
-          ],
-        },
-      ],
-    });
-    const adapter = new OpencodeAdapter();
-
-    await adapter.execute('x', { shared: {} }, { sessionId: 'c1:m1' });
-    const events = await adapter.getSessionTraceEvents('c1:m1');
-
-    expect(events).toHaveLength(3); // text_delta + tool_execution_start + tool_execution_end
-    expect(events[0].type).toBe('text_delta');
-    expect(events[1].type).toBe('tool_execution_start');
-    expect((events[1] as any).toolName).toBe('read');
-    expect(events[2].type).toBe('tool_execution_end');
-    expect((events[2] as any).toolName).toBe('read');
-  });
-
   it('validates model before prompt when model and provider are specified', async () => {
     const adapter = new OpencodeAdapter();
 
@@ -727,6 +704,31 @@ describe('OpencodeAdapter', () => {
     // Only the step.ended for our session applies; the foreign text delta is dropped.
     expect(onProgress).not.toHaveBeenCalledWith({ type: 'text_delta', delta: 'ignored' });
     expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it('writes a 1:1 event-stream export filtered to the session', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orchestron-oc-export-'));
+    const exportFile = join(dir, 'export.jsonl');
+    const events = [
+      { type: 'session.next.text.delta', properties: { sessionID: 'session-1', delta: 'hi' } },
+      { type: 'session.next.text.delta', properties: { sessionID: 'other-session', delta: 'ignored' } },
+      { type: 'session.next.step.ended', properties: { sessionID: 'session-1' } },
+    ];
+    mockClient.event.subscribe.mockResolvedValue({
+      stream: (async function* () {
+        for (const e of events) yield e;
+      })(),
+    });
+    const adapter = new OpencodeAdapter();
+
+    await adapter.execute('x', { shared: {} }, { exportJsonl: exportFile });
+
+    // Flush completes before execute() resolves: every line is a raw event JSON
+    // object, exactly as the SSE stream produced it, and foreign-session events
+    // are excluded.
+    const parsed = readFileSync(exportFile, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(parsed).toEqual([events[0], events[2]]);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('fails when the event subscription reports a failed step', async () => {

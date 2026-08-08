@@ -136,14 +136,14 @@ describe('WorktreeManager + ConcertHall integration', () => {
     const adapter = new RecordingAdapter({
       defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 1, tokens: 1 } },
     });
-    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-wt-test-'));
+    const concertsDir = mkdtempSync(join(tmpdir(), 'orchestron-wt-test-'));
     try {
       const hall = new ConcertHall({
         store,
         scoreRegistry: registry,
         adapters: new Map([['fake', adapter]]),
         evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-        tracesDir,
+        concertsDir,
         worktreeManager: new WorktreeManager(git),
       });
 
@@ -165,7 +165,7 @@ describe('WorktreeManager + ConcertHall integration', () => {
       // The removed path matches the created path.
       expect(removeCall!.args[3]).toBe(addCall!.args[5]);
     } finally {
-      rmSync(tracesDir, { recursive: true, force: true });
+      rmSync(concertsDir, { recursive: true, force: true });
     }
   });
 
@@ -185,14 +185,14 @@ describe('WorktreeManager + ConcertHall integration', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 1, tokens: 1 } },
     });
-    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-wt-test-'));
+    const concertsDir = mkdtempSync(join(tmpdir(), 'orchestron-wt-test-'));
     try {
       const hall = new ConcertHall({
         store,
         scoreRegistry: registry,
         adapters: new Map([['fake', adapter]]),
         evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-        tracesDir,
+        concertsDir,
         worktreeManager: new WorktreeManager(git),
       });
 
@@ -205,7 +205,7 @@ describe('WorktreeManager + ConcertHall integration', () => {
       expect(gitCalls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'add')).toBe(true);
       expect(gitCalls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'remove')).toBe(false);
     } finally {
-      rmSync(tracesDir, { recursive: true, force: true });
+      rmSync(concertsDir, { recursive: true, force: true });
     }
   });
 
@@ -233,14 +233,14 @@ describe('WorktreeManager + ConcertHall integration', () => {
     const adapter = new FakeHarnessAdapter({
       defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 1, tokens: 1 } },
     });
-    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-wt-test-'));
+    const concertsDir = mkdtempSync(join(tmpdir(), 'orchestron-wt-test-'));
     try {
       const hall = new ConcertHall({
         store,
         scoreRegistry: registry,
         adapters: new Map([['fake', adapter]]),
         evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-        tracesDir,
+        concertsDir,
         worktreeManager: new WorktreeManager(git),
       });
 
@@ -253,7 +253,7 @@ describe('WorktreeManager + ConcertHall integration', () => {
       expect(gitCalls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'add')).toBe(true);
       expect(gitCalls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'remove')).toBe(true);
     } finally {
-      rmSync(tracesDir, { recursive: true, force: true });
+      rmSync(concertsDir, { recursive: true, force: true });
     }
   });
 
@@ -281,14 +281,14 @@ describe('WorktreeManager + ConcertHall integration', () => {
     const adapter = new RecordingAdapter({
       defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 1, tokens: 1 } },
     });
-    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-wt-test-'));
+    const concertsDir = mkdtempSync(join(tmpdir(), 'orchestron-wt-test-'));
     try {
       const hall = new ConcertHall({
         store,
         scoreRegistry: registry,
         adapters: new Map([['fake', adapter]]),
         evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-        tracesDir,
+        concertsDir,
         worktreeManager: new WorktreeManager(git),
       });
 
@@ -302,7 +302,7 @@ describe('WorktreeManager + ConcertHall integration', () => {
         scoreRegistry: registry,
         adapters: new Map([['fake', adapter]]),
         evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-        tracesDir,
+        concertsDir,
         worktreeManager: new WorktreeManager(git),
       });
       const rehydrated = await hall2.loadConcert(original.concertId);
@@ -318,7 +318,7 @@ describe('WorktreeManager + ConcertHall integration', () => {
       // The restored disposer removed the worktree on terminal state.
       expect(gitCalls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'remove')).toBe(true);
     } finally {
-      rmSync(tracesDir, { recursive: true, force: true });
+      rmSync(concertsDir, { recursive: true, force: true });
     }
   });
 });

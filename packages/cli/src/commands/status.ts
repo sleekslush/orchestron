@@ -53,42 +53,6 @@ function currentCommandFromProgress(progress: ReturnType<typeof latestProgressEv
   return progress.message;
 }
 
-function printLiveEvent(event: ConcertEvent): void {
-  switch (event.type) {
-    case 'movement:started':
-      console.error(`→ [${event.movementId}] Running...`);
-      break;
-    case 'movement:completed':
-      console.error(`✓ [${event.movementId}] Completed`);
-      break;
-    case 'movement:failed':
-      console.error(`✗ [${event.movementId}] Failed: ${event.error?.message ?? 'Unknown error'}`);
-      break;
-    case 'movement:rejected':
-      console.error(`✗ [${event.movementId}] Rejected: ${event.result?.summary ?? 'Goal not achieved'}`);
-      break;
-    case 'concert:completed':
-      console.error('✓ Concert completed');
-      break;
-    case 'concert:failed':
-      console.error(`✗ Concert failed: ${event.error?.message ?? 'Unknown error'}`);
-      break;
-    case 'concert:cancelled':
-      console.error('✗ Concert cancelled');
-      break;
-    case 'movement:progress':
-      if (event.progressType === 'tool_execution_start' && typeof event.payload?.toolName === 'string') {
-        console.error(`  ↳ ${event.payload.toolName}...`);
-      } else if (event.progressType === 'tool_execution_end' && typeof event.payload?.toolName === 'string') {
-        const error = event.payload?.isError ? ` [error: ${event.payload.error ?? 'unknown'}]` : '';
-        console.error(`  ↳ ${event.payload.toolName}${error}`);
-      } else if (event.progressType === 'text_delta' && typeof event.payload?.delta === 'string') {
-        process.stderr.write(event.payload.delta);
-      }
-      break;
-  }
-}
-
 async function renderStatus(
   orchestron: Orchestron,
   concertId: string,
@@ -101,8 +65,9 @@ async function renderStatus(
   }
 
   const history = await orchestron.store.getMovementHistory(concertId);
-  const events = await orchestron.liveEventLog.read(concertId);
-  const fallbackEvents = events.length === 0 ? await orchestron.store.getEvents(concertId) : events;
+  // Events are persisted to the store by the conductor (fire-and-forget);
+  // per-movement export files hold the authoritative session record.
+  const fallbackEvents = await orchestron.store.getEvents(concertId);
   const failure = extractFailure(fallbackEvents);
   const progress = latestProgressEvent(fallbackEvents);
   const started = latestStartedEvent(fallbackEvents);
@@ -148,30 +113,29 @@ async function watchStatus(
   const isTerminal = (status: string) =>
     status !== 'running' && status !== 'pending';
 
-  const checkTerminal = async () => {
-    const current = await orchestron.store.getConcert(concertId);
-    if (current && isTerminal(current.status)) {
-      controller.abort();
-      return current.status;
-    }
-    return undefined;
-  };
-
+  // Live tool-level detail now streams to the per-movement export files;
+  // watch mode polls the store for movement transitions and terminal state.
+  let lastMovement = state.currentMovement;
   try {
-    for await (const batch of orchestron.liveEventLog.watch(concertId, {
-      signal: controller.signal,
-    })) {
-      for (const event of batch) {
-        printLiveEvent(event);
+    while (!controller.signal.aborted) {
+      const current = await orchestron.store.getConcert(concertId);
+      if (!current) break;
+      if (current.currentMovement !== lastMovement) {
+        console.error(`→ [${current.currentMovement}] Running...`);
+        lastMovement = current.currentMovement;
       }
-      const terminal = await checkTerminal();
-      if (terminal) break;
+      if (isTerminal(current.status)) break;
+      await sleep(500);
     }
   } catch {
     // Aborted by terminal status or user; render final status below.
   }
 
   await renderStatus(orchestron, concertId, json, verbose);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function statusCommandHandler(

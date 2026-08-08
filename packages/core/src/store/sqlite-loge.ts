@@ -5,7 +5,7 @@ import type {
   MovementID,
   MovementRecord,
 } from '../types/concert.js';
-import type { ConcertEvent, EventFilter, SystemAggregates, SessionTrace } from '../types/index.js';
+import type { ConcertEvent, EventFilter, SystemAggregates } from '../types/index.js';
 import type { CostResolution, CostResolutionInput } from '../cost/types.js';
 import type { ConcertStore } from './concert-store.js';
 import { createSqliteDb } from './sqlite-driver.js';
@@ -14,13 +14,11 @@ import {
   jsonParse,
   rowToConcert,
   rowToMovementRecord,
-  rowToSessionTrace,
   rowToEvent,
 } from './row-mappers.js';
 import type {
   ConcertRow,
   MovementRow,
-  SessionTraceRow,
   EventRow,
 } from './row-mappers.js';
 
@@ -489,6 +487,21 @@ export class SqliteLoge implements ConcertStore {
 
   async pushEvent(event: ConcertEvent): Promise<void> {
     const { concertId, type, timestamp, ...rest } = event as ConcertEvent & { timestamp: Date };
+    // Movement-scoped rows are replaced per (concert, movement) so the events
+    // table holds only the most recent progress / started row — the only ones
+    // the status surfaces read.
+    if (type === 'movement:started' || type === 'movement:progress') {
+      const movementId = (event as { movementId?: string }).movementId;
+      if (movementId) {
+        this.db
+          .prepare(
+            `DELETE FROM events
+             WHERE concert_id = ? AND type = ?
+               AND json_extract(data, '$.movementId') = ?`,
+          )
+          .run(concertId, type, movementId);
+      }
+    }
     this.db
       .prepare(
         `INSERT INTO events (concert_id, type, data, timestamp) VALUES (?, ?, ?, ?)`,
@@ -576,80 +589,6 @@ export class SqliteLoge implements ConcertStore {
       avgDurationMs: row.avgDurationMs ?? 0,
       failureRate: row.totalConcerts > 0 ? failed.cnt / row.totalConcerts : 0,
     };
-  }
-
-  async createSessionTrace(trace: SessionTrace): Promise<void> {
-    this.db
-      .prepare(
-        `INSERT INTO session_traces
-          (id, concert_id, movement_id, session_id, file_path, started_at, completed_at, event_count, status, format)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        trace.id,
-        trace.concertId,
-        trace.movementId,
-        trace.sessionId,
-        trace.filePath,
-        serializeDate(trace.startedAt),
-        serializeDate(trace.completedAt),
-        trace.eventCount,
-        trace.status,
-        trace.format,
-      );
-  }
-
-  async updateSessionTrace(id: string, update: Partial<SessionTrace>): Promise<void> {
-    const fields: string[] = [];
-    const values: unknown[] = [];
-
-    if (update.completedAt !== undefined) {
-      fields.push('completed_at = ?');
-      values.push(serializeDate(update.completedAt));
-    }
-    if (update.eventCount !== undefined) {
-      fields.push('event_count = ?');
-      values.push(update.eventCount);
-    }
-    if (update.filePath !== undefined) {
-      fields.push('file_path = ?');
-      values.push(update.filePath);
-    }
-
-    const supported = new Set(['completedAt', 'eventCount', 'status', 'filePath']);
-    const keysWithValues = Object.entries(update)
-      .filter(([, v]) => v !== undefined)
-      .map(([k]) => k);
-    const unsupported = keysWithValues.filter((k) => !supported.has(k));
-    if (unsupported.length > 0) {
-      throw new Error(
-        `updateSessionTrace does not support updating fields: ${unsupported.join(', ')}`,
-      );
-    }
-    if (update.status !== undefined) {
-      fields.push('status = ?');
-      values.push(update.status);
-    }
-
-    if (fields.length === 0) return;
-
-    values.push(id);
-    this.db.prepare(`UPDATE session_traces SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-  }
-
-  async getSessionTracesForConcert(concertId: ConcertID): Promise<SessionTrace[]> {
-    const rows = this.db
-      .prepare('SELECT * FROM session_traces WHERE concert_id = ? ORDER BY started_at ASC, id ASC')
-      .all(concertId) as SessionTraceRow[];
-    return rows.map(rowToSessionTrace);
-  }
-
-  async getSessionTraceForMovement(concertId: ConcertID, movementId: MovementID): Promise<SessionTrace | null> {
-    const row = this.db
-      .prepare('SELECT * FROM session_traces WHERE concert_id = ? AND movement_id = ? ORDER BY started_at DESC LIMIT 1')
-      .get(concertId, movementId) as SessionTraceRow | undefined;
-    if (!row) return null;
-    return rowToSessionTrace(row);
   }
 }
 
