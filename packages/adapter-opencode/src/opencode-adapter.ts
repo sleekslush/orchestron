@@ -146,6 +146,12 @@ export class OpencodeAdapter implements HarnessAdapter {
       // per GlobalEvent/V2Event observed for this session during the attempt.
       if (options?.exportJsonl) {
         exportStream = createWriteStream(options.exportJsonl, { flags: 'w' });
+        exportStream.on('error', (err) => {
+          console.error(
+            `Failed to write opencode session export '${options.exportJsonl}':`,
+            err,
+          );
+        });
       }
 
       // Determine the message boundary for this turn so per-turn usage (cost +
@@ -355,7 +361,11 @@ export class OpencodeAdapter implements HarnessAdapter {
       );
     } finally {
       eventController.abort();
-      exportStream?.end();
+      // Await flush so the export is fully on disk before execute() resolves
+      // and the conductor stamps the manifest entry.
+      if (exportStream) {
+        await new Promise<void>((resolve) => exportStream!.end(resolve));
+      }
       if (abortListener && options?.signal) {
         options.signal.removeEventListener('abort', abortListener);
       }

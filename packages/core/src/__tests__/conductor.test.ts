@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteLoge } from '../store/sqlite-loge.js';
+import { ConcertRecording } from '../store/concert-recording.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { ConcertHall } from '../hall/concert-hall.js';
 import { Conductor } from '../conductor/conductor.js';
@@ -277,6 +278,64 @@ it('sub-scores', async () => {
   expect(state.context.shared.scoreId).toBe('parent');
   expect(state.context.shared.input).toBe('hello');
   expect(state.childConcertIds).toHaveLength(1);
+});
+
+it('records sub-score movements with a childConcertId link in the manifest', async () => {
+  const store = new SqliteLoge(':memory:');
+  const registry = new ScoreRegistry();
+  registry.register({
+    id: 'parent-link', name: 'Parent Link', description: 'x', version: '1.0.0',
+    startMovement: 'p1',
+    movements: [{
+      id: 'p1', name: 'P1', section: 'x', description: 'x',
+      subscore: { scoreId: 'child-link', contextMapping: { input: 'shared.input' } },
+      goal: { description: 'done', strategy: 'llm_judge' },
+      transitions: [{ to: '__end__', on: 'success' }],
+    }],
+    program: {},
+  });
+  registry.register({
+    id: 'child-link', name: 'Child Link', description: 'x', version: '1.0.0',
+    startMovement: 'c1',
+    movements: [{
+      id: 'c1', name: 'C1', section: 'x', description: 'x',
+      harness: 'fake', prompt: 'Child {{context.input}}',
+      goal: { description: 'done', strategy: 'llm_judge' },
+      transitions: [{ to: '__end__', on: 'success' }],
+    }],
+    program: {},
+  });
+  const adapter = new FakeHarnessAdapter({
+    defaultResponse: { output: 'child out', summary: 'done', usage: { spend: 5, tokens: 50 } },
+  });
+  const hall = createHall({
+    store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+    evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+  });
+
+  const conductor = await hall.createConcert('parent-link', { initialContext: { input: 'hi' } });
+  await conductor.start();
+  expect(conductor.status).toBe('completed');
+  const state = await conductor.getState();
+
+  const recording = new ConcertRecording(hall.getConcertRecordingRoot()!);
+  const manifest = await recording.get(conductor.concertId);
+  expect(manifest?.movements).toHaveLength(1);
+  const entry = manifest!.movements[0];
+  expect(entry.movementId).toBe('p1');
+  expect(entry.order).toBe(1);
+  expect(entry.attempt).toBe(1);
+  expect(entry.status).toBe('completed');
+  expect(entry.childConcertId).toBe(state.childConcertIds[0]);
+  // No harness ran the movement itself: no adapter stamp, export, or session.
+  expect(entry.harness).toBeUndefined();
+  expect(entry.format).toBeUndefined();
+  expect(entry.exportFile).toBeUndefined();
+
+  // The child concert is its own recording: replay walks into its manifest.
+  const childManifest = await recording.get(entry.childConcertId!);
+  expect(childManifest?.movements.map((m) => m.movementId)).toEqual(['c1']);
+  expect(childManifest?.movements[0].exportFile).toBeTruthy();
 });
 
 it('sub-scores keep spend undefined when the child cost is unmeasured', async () => {
@@ -777,6 +836,54 @@ describe('Conductor movement progress', () => {
     expect(progressEvents.length).toBeGreaterThanOrEqual(2);
     expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_start')).toBe(true);
     expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_end')).toBe(true);
+  });
+
+  it('persists only the latest progress row and status-facing events', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'progress-persist', name: 'Progress Persist', version: '1.0.0',
+      startMovement: 'a',
+      movements: [{
+        id: 'a', name: 'A', section: 'x', harness: 'fake', prompt: 'A',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: 'o',
+        summary: 's',
+        usage: { spend: 10, tokens: 100 },
+        delayMs: 100,
+        progressUpdates: [
+          { atMs: 25, update: { type: 'text_delta', delta: 'hi' } },
+          { atMs: 50, update: { type: 'tool_execution_start', toolName: 'read', args: { file: 'a.ts' } } },
+          { atMs: 75, update: { type: 'tool_execution_end', toolName: 'read', isError: false } },
+        ],
+      },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const { conductor } = await runConcert(hall, 'progress-persist');
+    expect(conductor.status).toBe('completed');
+
+    const persisted = await store.getEvents(conductor.concertId, { types: ['movement:progress'] });
+    const progressTypes = persisted.map((e) => (e as any).progressType as string);
+    expect(progressTypes).toEqual(['tool_execution_end']);
+    expect(progressTypes).not.toContain('text_delta');
+
+    const terminal = await store.getEvents(conductor.concertId, {
+      types: ['movement:completed', 'movement:failed', 'movement:rejected'],
+    });
+    expect(terminal).toHaveLength(0);
+
+    const started = await store.getEvents(conductor.concertId, { types: ['movement:started'] });
+    expect(started).toHaveLength(1);
   });
 
   it('aborts a movement that exceeds its timeout', async () => {
@@ -1927,6 +2034,100 @@ describe('Conductor.recover()', () => {
     expect(state.history[0].status).toBe('completed');
     expect(state.history[1].movementId).toBe('step_b');
     expect(state.history[1].status).toBe('completed');
+  });
+
+  it('continues the manifest order sequence across recovery and records the crashed attempt', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score = recoveryScore();
+    registry.register(score);
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 10, tokens: 100 } },
+    });
+    const evaluator = new FakeEvaluator({ alwaysSucceed: true });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]), evaluator,
+    });
+
+    // Crash mid-'step_a': store row is running with currentMovement set and an
+    // empty history, and (since the crash predates any registration) the
+    // manifest is either absent or empty.
+    await hall.createConcert('recovery-test');
+    const concertId = await simulateCrash(store, 'step_a');
+    const concertsDir = hall.getConcertRecordingRoot()!;
+    const recovered = await store.getConcert(concertId).then((stored) => {
+      return new Conductor(stored!, score, store, hall,
+        new Map([['fake', adapter]]), evaluator, concertsDir);
+    });
+
+    await recovered.recover();
+
+    expect(recovered.status).toBe('completed');
+    const recording = new ConcertRecording(concertsDir);
+    const manifest = await recording.get(concertId);
+    expect(manifest?.status).toBe('completed');
+    // Order sequence restarts cleanly at 1 for the crashed attempt, then the
+    // failure transition continues at order 2 — no duplicate orders.
+    expect(manifest?.movements.map((m) => [m.movementId, m.order, m.attempt, m.status])).toEqual([
+      ['step_a', 1, 1, 'failed'],
+      ['step_b', 2, 1, 'completed'],
+    ]);
+    expect(manifest?.movements[0].harness).toBeUndefined();
+    expect(manifest?.movements[0].exportFile).toBeUndefined();
+  });
+
+  it('seeds attempt counters from the surviving manifest on recovery', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const score = recoveryScore();
+    registry.register(score);
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'out', summary: 'sum', usage: { spend: 10, tokens: 100 } },
+    });
+    const evaluator = new FakeEvaluator({ alwaysSucceed: true });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]), evaluator,
+    });
+    const concertsDir = hall.getConcertRecordingRoot()!;
+
+    // Simulate a crash that happened after 'step_a' had fully completed and
+    // been recorded, while 'step_b' was in flight: the store has the completed
+    // record and the manifest has order 1 for 'step_a'.
+    await hall.createConcert('recovery-test');
+    const concertId = await simulateCrash(store, 'step_b');
+    const recording = new ConcertRecording(concertsDir);
+    await recording.init(concertId, score.id);
+    await recording.registerMovement(concertId, {
+      order: 1,
+      movementId: 'step_a',
+      attempt: 1,
+      status: 'completed',
+      harness: 'fake',
+      format: 'pi/session-event@1',
+      exportFile: 'exports/0001.step_a.jsonl',
+      session: { id: 's1' },
+    });
+    await store.appendMovement(concertId, {
+      movementId: 'step_a', movementName: 'A', status: 'completed', output: 'o',
+      summary: 's', goalEvaluation: { achieved: true, confidence: 1, summary: 'ok' },
+      usage: {}, durationMs: 1, startedAt: new Date(), completedAt: new Date(),
+    });
+
+    const recovered = await store.getConcert(concertId).then((stored) => {
+      return new Conductor(stored!, score, store, hall,
+        new Map([['fake', adapter]]), evaluator, concertsDir);
+    });
+    await recovered.recover();
+
+    // The crashed 'step_b' attempt slots in at order 2 (continuing the
+    // sequence) with its own attempt counter, and 'step_b' has no failure
+    // transition so the concert fails.
+    expect(recovered.status).toBe('failed');
+    const manifest = await recording.get(concertId);
+    expect(manifest?.movements.map((m) => [m.movementId, m.order, m.attempt, m.status])).toEqual([
+      ['step_a', 1, 1, 'completed'],
+      ['step_b', 2, 1, 'failed'],
+    ]);
   });
 
   it('throws when concert status is not running or paused', async () => {

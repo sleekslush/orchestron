@@ -14,11 +14,13 @@ import {
  *   <concertsDir>/<concertId>/
  *     manifest.json                 # ordered playback contract
  *     sessions/<movementId>/        # native harness session files
- *     exports/<movementId>.<NNN>.jsonl   # per-attempt 1:1 event streams
+ *     exports/<order>.<movementId>.jsonl   # per-attempt 1:1 event streams
  *
  * The manifest is the authoritative replay contract: `movements[]` in array
  * order is the exact order the concert ran, with one entry per movement
- * attempt. Writes are atomic (tmp file + rename) so a crash never leaves a
+ * attempt. Export files are named by the attempt's global playback order
+ * (zero-padded) so `cat exports/*` reproduces playback order straight off
+ * disk. Writes are atomic (tmp file + rename) so a crash never leaves a
  * half-written manifest.
  */
 export class ConcertRecording {
@@ -34,10 +36,14 @@ export class ConcertRecording {
     return join(this.concertDir(concertId), 'sessions', movementId);
   }
 
-  /** Absolute path for a movement attempt's event-stream export file. */
-  exportFile(concertId: ConcertID, movementId: string, attempt: number): string {
-    const padded = String(attempt).padStart(3, '0');
-    return join(this.concertDir(concertId), 'exports', `${movementId}.${padded}.jsonl`);
+  /**
+   * Absolute path for a movement attempt's event-stream export file. Named
+   * by the attempt's global playback order (zero-padded) so `cat exports/*`
+   * reproduces playback order straight off disk.
+   */
+  exportFile(concertId: ConcertID, movementId: string, order: number): string {
+    const padded = String(order).padStart(4, '0');
+    return join(this.concertDir(concertId), 'exports', `${padded}.${movementId}.jsonl`);
   }
 
   /** Path of an absolute file/dir relative to the concert dir (for manifest entries). */
@@ -89,7 +95,11 @@ export class ConcertRecording {
     try {
       const content = await readFile(filePath, 'utf-8');
       return JSON.parse(content) as ConcertManifest;
-    } catch {
+    } catch (err) {
+      console.warn(
+        `Unreadable manifest for concert '${concertId}' at '${filePath}':`,
+        (err as Error).message,
+      );
       return null;
     }
   }

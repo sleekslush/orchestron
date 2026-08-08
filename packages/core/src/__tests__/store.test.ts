@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqliteLoge } from '../store/sqlite-loge.js';
 import type { Concert } from '../types/concert.js';
+import type { ConcertEvent } from '../types/events.js';
 import type { CostResolution } from '../cost/types.js';
 
 describe('SqliteLoge', () => {
@@ -112,6 +113,36 @@ describe('SqliteLoge', () => {
     expect(events).toHaveLength(2);
     expect(events[0].type).toBe('concert:started');
     expect(events[1].type).toBe('movement:started');
+  });
+
+  it('should replace movement-scoped events per movement', async () => {
+    await store.saveConcert(makeConcert(), dummyScoreYaml);
+
+    const pushProgress = (movementId: string, toolName: string) =>
+      store.pushEvent({
+        type: 'movement:progress',
+        concertId: 'test-concert-1',
+        movementId,
+        progressType: 'tool_execution_start',
+        payload: { type: 'tool_execution_start', toolName },
+        timestamp: new Date(),
+      });
+
+    await pushProgress('a', 'read');
+    await pushProgress('a', 'edit');
+    await pushProgress('b', 'read');
+
+    const progress = await store.getEvents('test-concert-1', {
+      types: ['movement:progress'],
+    });
+    expect(progress).toHaveLength(2);
+    const byMovement = new Map(
+      progress.map((e) => [(e as { movementId: string }).movementId, e]),
+    );
+    const toolNameOf = (e: ConcertEvent | undefined) =>
+      e?.type === 'movement:progress' ? (e.payload.toolName as string) : undefined;
+    expect(toolNameOf(byMovement.get('a'))).toBe('edit');
+    expect(toolNameOf(byMovement.get('b'))).toBe('read');
   });
 
   it('should compute aggregates', async () => {

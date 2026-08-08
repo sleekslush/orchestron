@@ -110,6 +110,12 @@ export class PiAdapter implements HarnessAdapter {
       let exportStream: WriteStream | undefined;
       if (options?.exportJsonl) {
         exportStream = createWriteStream(options.exportJsonl, { flags: 'w' });
+        exportStream.on('error', (err) => {
+          console.error(
+            `Failed to write Pi session export '${options.exportJsonl}':`,
+            err,
+          );
+        });
         const header = session.sessionManager.getHeader();
         if (header) {
           exportStream.write(JSON.stringify(header) + '\n');
@@ -208,7 +214,11 @@ export class PiAdapter implements HarnessAdapter {
         );
       } finally {
         unsubscribe();
-        exportStream?.end();
+        // Await flush so the export is fully on disk before execute() resolves
+        // and the conductor stamps the manifest entry.
+        if (exportStream) {
+          await new Promise<void>((resolve) => exportStream!.end(resolve));
+        }
         if (abortListener && options?.signal) {
           options.signal.removeEventListener('abort', abortListener);
         }
@@ -247,7 +257,13 @@ export class PiAdapter implements HarnessAdapter {
         usage,
         model,
         provider,
-        sessionId: options?.sessionId,
+        // The real Pi session id (matches the export header and session file
+        // name) so the manifest records the native session, not the pool key.
+        sessionId: session.sessionManager.getSessionId(),
+        // Only persisted sessions have a reopenable session file on disk.
+        sessionFile: options?.sessionDir
+          ? session.sessionManager.getSessionFile()
+          : undefined,
       };
     } finally {
       if (ownSession && session) {

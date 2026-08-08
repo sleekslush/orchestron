@@ -2,11 +2,13 @@
  * Concert session recording types.
  *
  * Every movement attempt is recorded as its own 1:1 harness event stream
- * (`exports/<movementId>.<NNN>.jsonl`), the harness's native session is
+ * (`exports/<order>.<movementId>.jsonl`), the harness's native session is
  * persisted under `sessions/<movementId>/` (Pi) or referenced by id
  * (opencode), and `manifest.json` records the exact playback order of every
  * attempt. Replaying a concert = walking `movements[]` in array order and
  * parsing each `exportFile` with the parser registered for its `format`.
+ * Sub-score movements carry `childConcertId` so replay can walk into the
+ * child concert's own manifest.
  */
 
 /** Line-schema identifiers for the per-attempt export files. */
@@ -24,7 +26,7 @@ export const MANIFEST_SCHEMA = 'orchestron/concert-manifest@1';
 
 /** Reference to the harness's native session for one movement attempt. */
 export interface ConcertManifestSession {
-  /** Session key: Pi uses `concertId:movementId`, opencode uses its sessionID. */
+  /** Session key: Pi uses its native session id, opencode uses its sessionID. */
   id: string;
   /**
    * Filesystem location of the native session, relative to the concert dir.
@@ -32,6 +34,8 @@ export interface ConcertManifestSession {
    * the session lives inside the harness's own store (opencode).
    */
   dir?: string;
+  /** The native session file, relative to the concert dir (Pi only). */
+  file?: string;
   /** Human/CLI instruction for reopening this session in the harness. */
   reopenHint?: string;
 }
@@ -44,13 +48,19 @@ export interface ConcertManifestMovement {
   /** 1-based attempt number for this movement (retries bump it). */
   attempt: number;
   status: 'completed' | 'failed' | 'rejected';
-  /** Adapter type that ran the attempt (`pi` | `opencode`). */
-  harness: string;
+  /**
+   * Adapter type that ran the attempt (`pi` | `opencode`). Omitted for
+   * sub-score movements (executed by a child concert) and for attempts
+   * interrupted by a crash during recovery.
+   */
+  harness?: string;
   /** Line-schema id for `exportFile` (see SESSION_FORMATS). */
-  format: SessionFormat;
+  format?: SessionFormat;
   /** Path of the per-attempt event stream, relative to the concert dir. */
   exportFile?: string;
-  session: ConcertManifestSession;
+  /** For sub-score movements: the child concert that ran this movement. */
+  childConcertId?: string;
+  session?: ConcertManifestSession;
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;

@@ -6,7 +6,6 @@ import type { PricingOverride } from './cost/table.js';
 export interface OrchestronConfig {
   storePath?: string;
   scoresDirs?: string[];
-  tracesDir?: string;
   defaultHarness?: string;
   opencode?: {
     provider?: string;
@@ -81,9 +80,6 @@ function normalizeConfig(raw: unknown): OrchestronConfig | undefined {
     config.scoresDirs = input.scoresDirs.map((d) =>
       typeof d === 'string' ? expandTilde(d) : String(d),
     );
-  }
-  if (typeof input.tracesDir === 'string') {
-    config.tracesDir = expandTilde(input.tracesDir);
   }
   if (typeof input.defaultHarness === 'string') {
     config.defaultHarness = input.defaultHarness;

@@ -487,6 +487,21 @@ export class SqliteLoge implements ConcertStore {
 
   async pushEvent(event: ConcertEvent): Promise<void> {
     const { concertId, type, timestamp, ...rest } = event as ConcertEvent & { timestamp: Date };
+    // Movement-scoped rows are replaced per (concert, movement) so the events
+    // table holds only the most recent progress / started row — the only ones
+    // the status surfaces read.
+    if (type === 'movement:started' || type === 'movement:progress') {
+      const movementId = (event as { movementId?: string }).movementId;
+      if (movementId) {
+        this.db
+          .prepare(
+            `DELETE FROM events
+             WHERE concert_id = ? AND type = ?
+               AND json_extract(data, '$.movementId') = ?`,
+          )
+          .run(concertId, type, movementId);
+      }
+    }
     this.db
       .prepare(
         `INSERT INTO events (concert_id, type, data, timestamp) VALUES (?, ?, ?, ?)`,

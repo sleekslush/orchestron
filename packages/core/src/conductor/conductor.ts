@@ -12,6 +12,7 @@ import type {
   SectionBudget,
 } from '../types/score.js';
 import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
 import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
 import type { ConcertEvent } from '../types/events.js';
 import { SESSION_FORMATS, type ConcertManifestMovement, type SessionFormat } from '../types/recording.js';
@@ -165,6 +166,19 @@ export class Conductor implements IConductor {
     });
 
     await this.recording?.init(this.concert.id, this.score.id);
+    // Seed the playback counters from the surviving manifest so recovered
+    // entries continue the pre-crash order/attempt sequence instead of
+    // duplicating order 1/attempt 1.
+    if (this.recording) {
+      const manifest = await this.recording.get(this.concert.id);
+      if (manifest) {
+        this.recordingOrder = manifest.movements.length;
+        for (const m of manifest.movements) {
+          const prev = this.movementAttempts.get(m.movementId) ?? 0;
+          this.movementAttempts.set(m.movementId, Math.max(prev, m.attempt));
+        }
+      }
+    }
 
     const signal = this.abortController.signal;
     let currentId: MovementID | '__end__' | '__fail__';
@@ -207,6 +221,35 @@ export class Conductor implements IConductor {
         };
 
         await this.store.appendMovement(this.concert.id, failedRecord);
+
+        // Mirror the crash-failed attempt in the manifest so the store history
+        // and the replay contract stay in lockstep. The partial export file
+        // (if the adapter wrote one before the crash) is referenced under the
+        // same order/attempt the crashed process would have used.
+        if (this.recording) {
+          this.recordingOrder++;
+          const crashedAttempt = (this.movementAttempts.get(failedMovement.id) ?? 0) + 1;
+          this.movementAttempts.set(failedMovement.id, crashedAttempt);
+          const crashedExport = this.recording.exportFile(
+            this.concert.id,
+            failedMovement.id,
+            this.recordingOrder,
+          );
+          const entry: ConcertManifestMovement = {
+            order: this.recordingOrder,
+            movementId: failedMovement.id,
+            attempt: crashedAttempt,
+            status: 'failed',
+            startedAt: failedRecord.startedAt.toISOString(),
+            completedAt: new Date().toISOString(),
+            durationMs: 0,
+          };
+          if (existsSync(crashedExport)) {
+            entry.exportFile = this.recording.relative(this.concert.id, crashedExport);
+          }
+          await this.recording.registerMovement(this.concert.id, entry);
+        }
+
         this.emit({
           type: 'movement:failed',
           concertId: this.concert.id,
@@ -330,17 +373,30 @@ export class Conductor implements IConductor {
   private emit(event: ConcertEvent): void {
     // Fan out to the in-process event bus synchronously so listeners never block.
     this.eventEmitter.emit('event', event);
-    // Persist to the store's events table fire-and-forget so status surfaces
-    // (CLI `status`, plugin `get-status`) can query movement:progress and
-    // lifecycle events. The events table replaces the old live.jsonl file log
-    // as the persisted event source; the per-movement export files remain the
-    // authoritative session record.
-    this.store.pushEvent(event).catch((err) => {
-      console.error(
-        `Failed to persist event to store for concert '${this.concert.id}':`,
-        err,
-      );
-    });
+    // Persist a status-facing subset to the store's events table fire-and-forget.
+    // CLI `status` and plugin `get-status` read only (a) the failure line
+    // (concert:failed, constraint:breached), (b) the current prompt
+    // (movement:started), and (c) the latest progress row. Terminal movement
+    // records and lifecycle flags duplicate the concerts/movements tables, and
+    // per-tool history duplicates the export files — none of it is persisted
+    // here. movement:started / movement:progress replace their previous row per
+    // movement so the table holds only the most recent event. Per-delta text
+    // and heartbeat progress stream live on the in-process emitter only.
+    const persistable =
+      event.type === 'concert:failed' ||
+      event.type === 'constraint:breached' ||
+      event.type === 'movement:started' ||
+      (event.type === 'movement:progress' &&
+        event.progressType !== 'text_delta' &&
+        event.progressType !== 'heartbeat');
+    if (persistable) {
+      this.store.pushEvent(event).catch((err) => {
+        console.error(
+          `Failed to persist event to store for concert '${this.concert.id}':`,
+          err,
+        );
+      });
+    }
   }
 
   private buildPreviousOutputs(): Map<MovementID, MovementRecord> {
@@ -396,85 +452,97 @@ export class Conductor implements IConductor {
     let harnessAdapter: HarnessAdapter | undefined;
     let sessionId: string | undefined;
     let attempt = 0;
+    let order = 0;
     let sessionDir: string | undefined;
+    let sessionFile: string | undefined;
     let exportFile: string | undefined;
     let nativeSessionId: string | undefined;
+    let childConcertId: string | undefined;
 
     try {
-      if (movement.subscore) {
-        return await this.executeSubscore(movement, previousOutputs, signal, record);
-      }
-
-      harnessAdapter = await this.resolveAdapter(movement);
       attempt = (this.movementAttempts.get(movement.id) ?? 0) + 1;
       this.movementAttempts.set(movement.id, attempt);
-      const modelConfig = this.resolveModelConfig(movement, harnessAdapter.type);
-      const prompt = this.promptBuilder.buildPrompt(
-        movement,
-        previousOutputs,
-        this.concert.context.shared,
-      );
-      this.promptBuilder.recordVisit(movement.id);
-      const persistSession = this.score.program?.persistSession !== false;
-      sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
 
-      if (sessionId) {
-        this.activeSessions.set(sessionId, harnessAdapter);
-      }
-
-      // Recording: one native session dir per movement (shared across attempts)
-      // and one 1:1 event-stream export per attempt, 0-padded so `cat exports/*`
-      // reproduces playback order straight off disk. Only Pi persists real
-      // session files; opencode sessions live in opencode's own store.
+      // Every movement attempt consumes a global playback-order slot up front,
+      // so its export file (<order>.<movementId>.jsonl) is named by the exact
+      // order the concert ran it; `cat exports/*` reproduces playback order.
       if (this.recording) {
-        if (sessionId && harnessAdapter.type === 'pi') {
-          sessionDir = this.recording.sessionDir(this.concert.id, movement.id);
-        }
-        exportFile = this.recording.exportFile(this.concert.id, movement.id, attempt);
+        this.recordingOrder++;
+        order = this.recordingOrder;
       }
 
-      this.emit({
-        type: 'movement:started',
-        concertId: this.concert.id,
-        movementId: movement.id,
-        prompt: prompt.slice(0, 5000),
-        timestamp: startedAt,
-      });
+      if (movement.subscore) {
+        childConcertId = await this.executeSubscore(movement, previousOutputs, signal, record);
+      } else {
+        harnessAdapter = await this.resolveAdapter(movement);
+        const modelConfig = this.resolveModelConfig(movement, harnessAdapter.type);
+        const prompt = this.promptBuilder.buildPrompt(
+          movement,
+          previousOutputs,
+          this.concert.context.shared,
+        );
+        this.promptBuilder.recordVisit(movement.id);
+        const persistSession = this.score.program?.persistSession !== false;
+        sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
 
-      const { movementSignal, onParentAbort, timeoutHandle, heartbeatHandle } =
-        this.setupMovementExecution(movement, startedAt, signal);
+        if (sessionId) {
+          this.activeSessions.set(sessionId, harnessAdapter);
+        }
 
-      const onProgress = this.createProgressHandler(movement.id);
+        // Recording: one native session dir per movement (shared across attempts)
+        // and one 1:1 event-stream export per attempt. Only Pi persists real
+        // session files; opencode sessions live in opencode's own store.
+        if (this.recording) {
+          if (sessionId && harnessAdapter.type === 'pi') {
+            sessionDir = this.recording.sessionDir(this.concert.id, movement.id);
+          }
+          exportFile = this.recording.exportFile(this.concert.id, movement.id, order);
+        }
 
-      try {
-        const response = await harnessAdapter.execute(prompt, this.concert.context, {
-          signal: movementSignal,
-          output: movement.output,
+        this.emit({
+          type: 'movement:started',
+          concertId: this.concert.id,
           movementId: movement.id,
-          sessionId,
-          model: modelConfig.model,
-          provider: modelConfig.provider,
-          options: modelConfig.options,
-          onProgress,
-          cwd: this.cwd,
-          sessionDir,
-          exportJsonl: exportFile,
+          prompt: prompt.slice(0, 5000),
+          timestamp: startedAt,
         });
 
-        record.status = 'completed';
-        record.output = response.output;
-        if (response.structured) record.structured = response.structured;
-        record.summary = response.summary;
-        record.usage = response.usage;
-        if (record.usage.spend !== undefined) record.usage.spendSource = 'measured';
-        if (response.model) record.model = response.model;
-        if (response.provider) record.provider = response.provider;
-        nativeSessionId = response.sessionId;
-        record.durationMs = Date.now() - startedAt.getTime();
-      } finally {
-        clearTimeout(timeoutHandle);
-        clearInterval(heartbeatHandle);
-        signal.removeEventListener('abort', onParentAbort);
+        const { movementSignal, onParentAbort, timeoutHandle, heartbeatHandle } =
+          this.setupMovementExecution(movement, startedAt, signal);
+
+        const onProgress = this.createProgressHandler(movement.id);
+
+        try {
+          const response = await harnessAdapter.execute(prompt, this.concert.context, {
+            signal: movementSignal,
+            output: movement.output,
+            movementId: movement.id,
+            sessionId,
+            model: modelConfig.model,
+            provider: modelConfig.provider,
+            options: modelConfig.options,
+            onProgress,
+            cwd: this.cwd,
+            sessionDir,
+            exportJsonl: exportFile,
+          });
+
+          record.status = 'completed';
+          record.output = response.output;
+          if (response.structured) record.structured = response.structured;
+          record.summary = response.summary;
+          record.usage = response.usage;
+          if (record.usage.spend !== undefined) record.usage.spendSource = 'measured';
+          if (response.model) record.model = response.model;
+          if (response.provider) record.provider = response.provider;
+          nativeSessionId = response.sessionId;
+          sessionFile = response.sessionFile;
+          record.durationMs = Date.now() - startedAt.getTime();
+        } finally {
+          clearTimeout(timeoutHandle);
+          clearInterval(heartbeatHandle);
+          signal.removeEventListener('abort', onParentAbort);
+        }
       }
     } catch (err) {
       record.status = 'failed';
@@ -482,29 +550,42 @@ export class Conductor implements IConductor {
       record.error = this.serializeMovementError(err, movement.id);
     }
 
-    if (this.recording && harnessAdapter) {
-      this.recordingOrder++;
-      const sessionKey = nativeSessionId ?? sessionId ?? `${this.concert.id}:${movement.id}`;
-      await this.recording.registerMovement(this.concert.id, {
-        order: this.recordingOrder,
+    if (this.recording && order > 0) {
+      const entry: ConcertManifestMovement = {
+        order,
         movementId: movement.id,
         attempt,
         status: record.status as ConcertManifestMovement['status'],
-        harness: harnessAdapter.type,
-        format: this.recordingFormatFor(harnessAdapter.type),
-        exportFile: exportFile ? this.recording.relative(this.concert.id, exportFile) : undefined,
-        session: {
-          id: sessionKey,
-          dir: sessionDir ? this.recording.relative(this.concert.id, sessionDir) : undefined,
-          reopenHint:
-            harnessAdapter.type === 'opencode'
-              ? `opencode session ${sessionKey}`
-              : undefined,
-        },
         startedAt: record.startedAt.toISOString(),
         completedAt: record.completedAt?.toISOString(),
         durationMs: record.durationMs,
-      });
+      };
+      if (childConcertId) {
+        entry.childConcertId = childConcertId;
+      }
+      if (harnessAdapter) {
+        entry.harness = harnessAdapter.type;
+        entry.format = this.recordingFormatFor(harnessAdapter.type);
+        if (exportFile) {
+          entry.exportFile = this.recording.relative(this.concert.id, exportFile);
+        }
+        const sessionKey = nativeSessionId ?? sessionId ?? `${this.concert.id}:${movement.id}`;
+        const sessionFileRel = sessionFile
+          ? this.recording.relative(this.concert.id, sessionFile)
+          : undefined;
+        entry.session = {
+          id: sessionKey,
+          dir: sessionDir ? this.recording.relative(this.concert.id, sessionDir) : undefined,
+          file: sessionFileRel,
+          reopenHint:
+            harnessAdapter.type === 'opencode'
+              ? `opencode session ${sessionKey}`
+              : sessionFileRel
+                ? `pi --session ${sessionFileRel}`
+                : undefined,
+        };
+      }
+      await this.recording.registerMovement(this.concert.id, entry);
     }
 
     return record;
@@ -520,8 +601,8 @@ export class Conductor implements IConductor {
     _previousOutputs: Map<MovementID, MovementRecord>,
     _signal: AbortSignal,
     record: MovementRecord,
-  ): Promise<MovementRecord> {
-    if (!movement.subscore) return record;
+  ): Promise<string> {
+    if (!movement.subscore) return '';
 
     const maxDepth = this.score.program?.maxNestingDepth ?? 5;
     if (this.nestingDepth >= maxDepth) {
@@ -608,7 +689,7 @@ export class Conductor implements IConductor {
       timestamp: new Date(),
     });
 
-    return record;
+    return childConductor.concertId;
   }
 
   /**

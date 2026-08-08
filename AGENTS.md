@@ -5,8 +5,9 @@
 TypeScript monorepo (pnpm workspace) for workflow orchestration across AI harnesses
 (Pi, opencode, etc.). A **Score** (YAML DAG of **Movements**) defines a repeatable
 workflow; the **Conductor** executes it as a **Concert**, tracking state, spend, and
-tokens in a local SQLite store (**Loge**). Real-time progress and tool events are
-logged per concert to `traces/<concertId>/live.jsonl` (JSONL), not to Loge.
+tokens in a local SQLite store (**Loge**). Each concert's session recording (ordered
+manifest, per-attempt harness event exports, native sessions) is written to a
+per-concert tree under `concerts/<concertId>/`, not to Loge.
 
 ## Key Terminology
 
@@ -55,8 +56,9 @@ Harness resolution priority: movement-level > explicit CLI arg > config default.
 1. **Adapter pattern** — each Musician implements a common harness interface.
    New adapters go in `packages/adapter-*`.
 2. **The Conductor is the sole runtime** — it resolves movements, delegates to
-   adapters, evaluates goals, logs concerts/movements/usage to Loge and live
-   events to `traces/<id>/live.jsonl`. ConcertHall only creates and indexes.
+   adapters, evaluates goals, logs concerts/movements/usage to Loge and session
+   recordings (ordered manifest, per-attempt exports, native sessions) to the
+   per-concert `concerts/<id>/` tree. ConcertHall only creates and indexes.
 3. **Evaluators are separate harness sessions** — `FakeEvaluator` (deterministic)
    or `HarnessEvaluator` (LLM-based).
 4. **Session persistence** per movement (`concertId:movementId` key) unless

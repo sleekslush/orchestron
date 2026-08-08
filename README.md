@@ -6,8 +6,9 @@ Orchestron turns multi-step, agentic work into repeatable, observable, and
 budget-aware workflows. Define a **Score** (a DAG of **Movements**), pick a
 harness (Pi, opencode, or future adapters), and let a **Conductor** run the
 **Concert** while tracking spend, tokens, and state in a local SQLite store
-(`Loge`), with a live event log per concert at
-`~/.orchestron/traces/<concertId>/live.jsonl`.
+(`Loge`), with a session recording per concert at
+`~/.orchestron/concerts/<concertId>/` (manifest, per-attempt event exports,
+native harness sessions).
 
 ## Why Orchestron?
 
@@ -16,9 +17,9 @@ harness (Pi, opencode, or future adapters), and let a **Conductor** run the
 - **Harness-agnostic** — run movements on Pi, opencode, or future adapters through
   the same interface.
 - **Observable** — concerts, movements, outputs, and goal evaluations are
-  persisted to a local SQLite database (`Loge`); real-time progress, prompts, and
-  tool activity are streamed to a per-concert JSONL live event log
-  (`~/.orchestron/traces/<concertId>/live.jsonl`).
+  persisted to a local SQLite database (`Loge`); each concert's session
+  recording (ordered manifest, per-attempt harness event exports, native
+  sessions) is written to `~/.orchestron/concerts/<concertId>/`.
 - **Budget-aware** — set spend, movement, and duration limits at the score or
   section level.
 - **Composable** — scores can spawn sub-scores as child concerts.
@@ -83,12 +84,15 @@ pnpm orchestron start opencode-demo --context.topic='Obsidian plugins'
 
 # Monitor it
 pnpm orchestron list
-pnpm orchestron status <concert-id>   # reads the concert's live event log
+pnpm orchestron status <concert-id>   # reads concert/movement state from Loge
 pnpm orchestron status                # overview of all concerts
-pnpm orchestron status <concert-id> --watch   # tail the live event log
+pnpm orchestron status <concert-id> --watch   # poll for movement transitions
 
-Event history is logged to JSONL under `~/.orchestron/traces/<concertId>/live.jsonl`
-(one file per concert) — it is not stored in the SQLite `events` table.
+Each concert gets a session recording tree under
+`~/.orchestron/concerts/<concertId>/` — an ordered `manifest.json` (the replay
+contract), per-attempt harness event exports under `exports/`, and native
+harness session files under `sessions/`. These are written by the Conductor,
+separate from the SQLite store.
 
 # Pause, resume, or cancel a concert
 pnpm orchestron pause <concert-id>
@@ -120,7 +124,6 @@ Create `~/.orchestron/config.json` to set persistent defaults:
 {
   "storePath": "~/.orchestron/store.db",
   "scoresDirs": ["~/.orchestron/scores"],
-  "tracesDir": "~/.orchestron/traces",
   "defaultHarness": "pi",
   "opencode": {
     "provider": "opencode",

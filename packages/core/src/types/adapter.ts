@@ -67,9 +67,12 @@ export interface HarnessResponse {
   model?: string;
   provider?: string;
   /** The harness's native session identifier for this execution, when one exists
-   *  (e.g. the opencode sessionID). Lets the conductor record the real session
-   *  in the concert manifest rather than a synthesized key. */
+   *  (e.g. the opencode sessionID, the Pi session id). Lets the conductor record
+   *  the real session in the concert manifest rather than a synthesized key. */
   sessionId?: string;
+  /** The harness's native session file for this execution (Pi only, persisted
+   *  sessions), so the manifest can point at the exact reopenable file. */
+  sessionFile?: string;
 }
 
 export interface HarnessAdapterResolver {
