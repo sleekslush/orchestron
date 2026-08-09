@@ -6,8 +6,9 @@ Orchestron turns multi-step, agentic work into repeatable, observable, and
 budget-aware workflows. Define a **Score** (a DAG of **Movements**), pick a
 harness (Pi, opencode, or future adapters), and let a **Conductor** run the
 **Concert** while tracking spend, tokens, and state in a local SQLite store
-(`Loge`), with a live event log per concert at
-`~/.orchestron/traces/<concertId>/live.jsonl`.
+(`Loge`), with a raw session stream per concert at
+`~/.orchestron/concerts/<concertId>/stream.jsonl` and replayable native session
+snapshots per attempt.
 
 ## Why Orchestron?
 
@@ -16,9 +17,10 @@ harness (Pi, opencode, or future adapters), and let a **Conductor** run the
 - **Harness-agnostic** — run movements on Pi, opencode, or future adapters through
   the same interface.
 - **Observable** — concerts, movements, outputs, and goal evaluations are
-  persisted to a local SQLite database (`Loge`); real-time progress, prompts, and
-  tool activity are streamed to a per-concert JSONL live event log
-  (`~/.orchestron/traces/<concertId>/live.jsonl`).
+  persisted to a local SQLite database (`Loge`); every raw harness-session event
+  (prompts, tool activity, message deltas) is streamed verbatim, in order, to a
+  per-concert `stream.jsonl`, with replayable native session files per
+  attempt under `~/.orchestron/concerts/<concertId>/`.
 - **Budget-aware** — set spend, movement, and duration limits at the score or
   section level.
 - **Composable** — scores can spawn sub-scores as child concerts.
@@ -83,12 +85,21 @@ pnpm orchestron start opencode-demo --context.topic='Obsidian plugins'
 
 # Monitor it
 pnpm orchestron list
-pnpm orchestron status <concert-id>   # reads the concert's live event log
+pnpm orchestron status <concert-id>   # reads the concert's stream.jsonl
 pnpm orchestron status                # overview of all concerts
-pnpm orchestron status <concert-id> --watch   # tail the live event log
+pnpm orchestron status <concert-id> --watch   # tail stream.jsonl (--raw for raw records)
+pnpm orchestron status <concert-id> --raw     # one raw JSON envelope per line
 
-Event history is logged to JSONL under `~/.orchestron/traces/<concertId>/live.jsonl`
-(one file per concert) — it is not stored in the SQLite `events` table.
+# Reopen a recorded session (per movement/attempt)
+pnpm orchestron session <concert-id> <movement-id>            # final session of a movement
+pnpm orchestron session <concert-id> <movement-id> --attempt <n>   # a specific retry
+pnpm orchestron session <concert-id> <movement-id> --print         # render transcript
+pnpm orchestron session <concert-id> <movement-id> --open          # continue in its harness
+
+Every raw harness-session event is recorded to JSONL under
+`~/.orchestron/concerts/<concertId>/stream.jsonl` (one file per concert, line
+order = event order) — the SQLite `events` table keeps only concert-level
+lifecycle events.
 
 # Pause, resume, or cancel a concert
 pnpm orchestron pause <concert-id>
@@ -120,7 +131,6 @@ Create `~/.orchestron/config.json` to set persistent defaults:
 {
   "storePath": "~/.orchestron/store.db",
   "scoresDirs": ["~/.orchestron/scores"],
-  "tracesDir": "~/.orchestron/traces",
   "defaultHarness": "pi",
   "opencode": {
     "provider": "opencode",
@@ -349,6 +359,56 @@ By default, each movement retains its own harness session keyed by
 `concertId:movementId`. Re-visited movements keep their prior context, while
 movement A cannot see movement B's conversation history. Set
 `persistSession: false` in the score program to disable.
+
+## Recording & Reopening Sessions
+
+Every harness-session event is recorded **exactly as the SDK emitted it** — no
+normalization — into a unified raw envelope stream per concert:
+
+```
+~/.orchestron/concerts/<concertId>/
+  stream.jsonl                    # raw envelopes: `{ts, source, type, concertId, …}`
+  index.json                      # concert summary: status, stream, movement artifact refs
+  movements/<movementId>/
+    index.json                    # attempts[] + finalAttempt/finalStatus/finalSessionFile
+    final-pi-session.jsonl        # cumulative mode: aggregated native snapshot
+      (or final-opencode-session.json)
+    attempt-0/
+      metadata.json               # attempt summary written by the adapter
+      pi-session.jsonl            # native pi session snapshot (opencode: opencode-session.json)
+    attempt-1/ …                  # one dir per retry
+```
+
+- `source: "sdk"` envelopes carry raw `data`; `source: "concert"` envelopes are
+  conductor lifecycle events. Line order is event order; there is no `seq` field.
+- Cumulative (`persistSession: true`, default) movements keep each attempt's
+  snapshot and a final aggregated copy (`final-pi-session.jsonl` /
+  `final-opencode-session.json`). Fresh movements (`persistSession: false`)
+  write independent per-attempt sessions only, referenced as `attempt-<n>/…`.
+- Retries increment the attempt index (`attempt-0` = first attempt); each
+  attempt gets its own snapshot + `session_traces` row in Loge.
+
+Reopen a recorded session:
+
+```bash
+# Pi: fork the recorded session into a new one. This reads the artifact and
+# never writes to it; the new session links back via `parentSession`. (Plain
+# `pi --session <path>` would open the file as the live session store and
+# rewrite it as you continue, which would corrupt the recording.)
+pi --fork ~/.orchestron/concerts/<concertId>/movements/<id>/final-pi-session.jsonl
+# or per attempt
+pi --fork ~/.orchestron/concerts/<concertId>/movements/<id>/attempt-1/pi-session.jsonl
+
+# Opencode (import is read-only; creates a new session seeded from the export)
+opencode import /absolute/path/to/opencode-session.json
+
+# Or let the CLI launch the right harness for you (--open):
+pnpm orchestron session <concert-id> <movement-id> --open
+
+# The CLI prints the exact paths + reopened commands per concert
+pnpm orchestron session <concert-id> <movement-id>
+pnpm orchestron session <concert-id> <movement-id> --attempt <n> --print
+```
 
 ## Roadmap
 
