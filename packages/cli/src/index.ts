@@ -8,6 +8,7 @@ import {
   cancelCommandHandler,
 } from './commands/lifecycle.js';
 import { statusCommandHandler } from './commands/status.js';
+import { sessionCommandHandler } from './commands/session.js';
 import { listCommandHandler } from './commands/list.js';
 import { scoresCommandHandler } from './commands/scores.js';
 import { modelsCommandHandler } from './commands/models.js';
@@ -104,12 +105,31 @@ program
   .description('Show system status or detailed concert status')
   .option('--verbose', 'Show detailed movement information')
   .option('--watch', 'Tail live events for a running concert')
+  .option('--raw', 'With --watch, print raw stream envelopes instead of rendered lines')
   .action(safeAction(async (concertId: string | undefined, _options: unknown, command: Command) => {
     const opts = command.optsWithGlobals();
     const verbose = opts.verbose === true;
     const watch = opts.watch === true;
+    const raw = opts.raw === true;
     await withOrchestron(getOrchestronOptions(program), (orchestron) =>
-      statusCommandHandler(orchestron, concertId, wantsJson(command), verbose, watch),
+      statusCommandHandler(orchestron, concertId, wantsJson(command), verbose, watch, raw),
+    );
+  }));
+
+program
+  .command('session <concert-id> <movement-id>')
+  .description("Show, render, or open a movement's recorded session artifact")
+  .option('--attempt <n>', 'Show a specific attempt index (0 = first) instead of the final one')
+  .option('--print', 'Render the session transcript to stdout (display-only)')
+  .option('--open', 'Open the session in its harness (pi --fork / opencode import) and block while it runs')
+  .action(safeAction(async (concertId: string, movementId: string, _options: unknown, command: Command) => {
+    const opts = command.opts() as { attempt?: string; print?: boolean; open?: boolean };
+    const attempt = opts.attempt !== undefined ? Number(opts.attempt) : undefined;
+    if (opts.attempt !== undefined && (!Number.isInteger(attempt) || (attempt as number) < 0)) {
+      throw new Error('--attempt must be a non-negative integer');
+    }
+    await withOrchestron(getOrchestronOptions(program), (orchestron) =>
+      sessionCommandHandler(orchestron, concertId, movementId, wantsJson(command), attempt, opts.print === true, opts.open === true),
     );
   }));
 
