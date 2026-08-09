@@ -8,12 +8,12 @@ import {
   ScoreRegistry,
   SqliteLoge,
   ConcertHall,
-  LiveEventLog,
+  ConcertStream,
 } from '@orchestron/core';
 import type { Score } from '@orchestron/core';
 
 const testTracesDir = mkdtempSync(join(realpathSync(tmpdir()), 'orchestron-test-trace-'));
-const testLiveEventLog = new LiveEventLog(testTracesDir);
+const testConcertStream = new ConcertStream(testTracesDir);
 
 // Import the plugin and common functions to verify they're exported correctly
 import OrchestronPlugin from '../index.js';
@@ -195,13 +195,13 @@ describe('plugin-opencode tool functions', () => {
     });
 
     const { concertId } = await startConcert(
-      { store, registry, hall, scoresDirs: [], tracesDir: testTracesDir, liveEventLog: testLiveEventLog },
+      { store, registry, hall, scoresDirs: [], tracesDir: testTracesDir, concertStream: testConcertStream },
       { scoreId: 'linear-test' },
     );
     await new Promise((r) => setTimeout(r, 50));
 
     const result = await pauseConcert(
-      { store, registry, hall, scoresDirs: [], tracesDir: testTracesDir, liveEventLog: testLiveEventLog },
+      { store, registry, hall, scoresDirs: [], tracesDir: testTracesDir, concertStream: testConcertStream },
       { concertId },
     );
     expect(result.status).toBe('paused');
@@ -228,7 +228,7 @@ describe('plugin-opencode tool functions', () => {
       adapters: new Map([['fake', adapter]]),
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
-    const orchestron = { store, registry, hall, scoresDirs: [], tracesDir: testTracesDir, liveEventLog: testLiveEventLog };
+    const orchestron = { store, registry, hall, scoresDirs: [], tracesDir: testTracesDir, concertStream: testConcertStream };
 
     const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
 

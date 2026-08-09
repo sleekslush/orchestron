@@ -122,7 +122,7 @@ export async function waitForConcert(
       break;
     }
 
-    const events = await orchestron.liveEventLog.read(input.concertId);
+    const events = await orchestron.concertStream.readEvents(input.concertId);
     for (const event of events) {
       if (event.type !== 'movement:progress') continue;
       if (event.timestamp.getTime() <= lastTimestamp.getTime()) continue;

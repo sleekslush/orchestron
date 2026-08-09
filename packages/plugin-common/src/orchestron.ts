@@ -6,7 +6,7 @@ import type {
   Evaluator,
   HarnessAdapter,
   HarnessAdapterResolver,
-  LiveEventLog,
+  ConcertStream,
   ScoreRegistry,
   SqliteLoge,
 } from '@orchestron/core';
@@ -34,7 +34,7 @@ export interface Orchestron {
   store: SqliteLoge;
   registry: ScoreRegistry;
   hall: ConcertHall;
-  liveEventLog: LiveEventLog;
+  concertStream: ConcertStream;
   tracesDir: string;
   scoresDirs: string[];
 }
@@ -50,7 +50,7 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     ensureDir(dir);
   }
 
-  const { SqliteLoge, ScoreRegistry, ConcertHall, HarnessEvaluator, LiveEventLog } = await import(
+  const { SqliteLoge, ScoreRegistry, ConcertHall, HarnessEvaluator, ConcertStream } = await import(
     '@orchestron/core'
   );
 
@@ -85,9 +85,9 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
 
   const tracesDir = storePath === ':memory:'
     ? mkdtempSync(join(realpathSync(tmpdir()), 'orchestron-trace-'))
-    : join(dirname(storePath), 'traces');
+    : join(dirname(storePath), 'concerts');
   ensureDir(tracesDir);
-  const liveEventLog = new LiveEventLog(tracesDir);
+  const concertStream = new ConcertStream(tracesDir);
 
   const hall = new ConcertHall({
     store,
@@ -95,9 +95,9 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     adapters: adapterResolver,
     evaluator,
     tracesDir,
-    liveEventLog,
+    concertStream,
     defaultHarness,
   });
 
-  return { store, registry, hall, liveEventLog, tracesDir, scoresDirs };
+  return { store, registry, hall, concertStream, tracesDir, scoresDirs };
 }
