@@ -60,6 +60,58 @@ export class TraceService {
     }
   }
 
+  /**
+   * Record a per-attempt session trace row. Always recorded, regardless of
+   * whether the attempt's session was persistent (cumulative) or fresh; the
+   * on-disk attempt dir + metadata.json remain the authoritative index.
+   */
+  async recordAttempt(input: {
+    concertId: ConcertID;
+    movementId: MovementID;
+    sessionKey?: string;
+    sessionId?: string;
+    attemptIndex: number;
+    harness: string;
+    mode: 'cumulative' | 'fresh';
+    /** Path relative to tracesDir (e.g. `movements/m/attempt-0`). */
+    filePath: string;
+    status: 'completed' | 'failed' | 'rejected';
+    eventCount: number;
+    startedAt: Date;
+    endedAt: Date;
+  }): Promise<string | undefined> {
+    try {
+      const traceId = nanoid(12);
+      const format: SessionTrace['format'] =
+        input.harness === 'pi'
+          ? 'pi-jsonl'
+          : input.harness === 'opencode'
+            ? 'opencode-json'
+            : 'orchestron-trace';
+      const trace: SessionTrace = {
+        id: traceId,
+        concertId: input.concertId,
+        movementId: input.movementId,
+        sessionId: input.sessionId ?? input.sessionKey ?? '',
+        sessionKey: input.sessionKey,
+        attemptIndex: input.attemptIndex,
+        harness: input.harness,
+        mode: input.mode,
+        filePath: input.filePath,
+        startedAt: input.startedAt,
+        completedAt: input.endedAt,
+        eventCount: input.eventCount,
+        status: input.status === 'failed' ? 'failed' : 'completed',
+        format,
+      };
+      await this.store.createSessionTrace(trace);
+      return traceId;
+    } catch (err) {
+      console.error('Failed to record session attempt trace:', err);
+      return undefined;
+    }
+  }
+
   async readTurns(trace: SessionTrace): Promise<SessionTraceEvent[]> {
     const filePath = join(this.tracesDir, trace.filePath);
     if (!existsSync(filePath)) return [];

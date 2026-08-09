@@ -15,7 +15,9 @@ export { loadConfigFile, resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_CO
 export type { OrchestronConfig, ResolvedOrchestronConfig } from './config.js';
 
 export { SqliteLoge } from './store/sqlite-loge.js';
-export { LiveEventLog } from './store/live-event-log.js';
+export { ConcertStream } from './store/concert-stream.js';
+export type { StreamRecord } from './store/concert-stream.js';
+export { streamRecordToEvent, streamRecordsToEvents } from './store/concert-stream.js';
 export type { ConcertStore } from './store/concert-store.js';
 export { TraceService } from './store/trace-service.js';
 
@@ -38,6 +40,27 @@ export type { AdapterResolver } from './adapter-resolver.js';
 
 export { ConcertHall } from './hall/concert-hall.js';
 export type { ConcertHallOptions } from './hall/concert-hall.js';
+
+export {
+  NATIVE_SESSION_FILE,
+  FINAL_SESSION_FILE,
+  movementDirName,
+  attemptDirName,
+  movementDirPath,
+  attemptDirPath,
+  writeAttemptMetadata,
+  writeMovementIndex,
+  writeConcertIndex,
+  copyFinalSession,
+  readPiSessionId,
+} from './recording/artifacts.js';
+export type {
+  AttemptMetadata,
+  AttemptSummary,
+  MovementIndex,
+  ConcertIndex,
+  ConcertIndexMovement,
+} from './recording/artifacts.js';
 
 export { WorktreeManager } from './worktree/worktree-manager.js';
 export type { WorktreeOptions, WorktreeHandle, GitRunner } from './worktree/worktree-manager.js';

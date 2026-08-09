@@ -23,7 +23,7 @@ export interface FakeHarnessConfig {
 }
 
 export class FakeHarnessAdapter implements HarnessAdapter {
-  readonly type = 'fake';
+  readonly type: string = 'fake';
 
   constructor(private config: FakeHarnessConfig) {}
 

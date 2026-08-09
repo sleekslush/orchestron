@@ -12,12 +12,30 @@ import type {
   SectionBudget,
 } from '../types/score.js';
 import { EventEmitter } from 'node:events';
-import type { HarnessAdapter, ProgressUpdate } from '../types/adapter.js';
+import { mkdir } from 'node:fs/promises';
+import type {
+  HarnessAdapter,
+  ProgressUpdate,
+  RawEventSink,
+  SessionRecording,
+} from '../types/adapter.js';
 import type { ConcertEvent } from '../types/events.js';
 import type { Evaluator } from '../evaluator/evaluator.js';
 import type { ConcertStore } from '../store/concert-store.js';
 import { TraceService } from '../store/trace-service.js';
-import { LiveEventLog } from '../store/live-event-log.js';
+import { ConcertStream, type StreamRecord } from '../store/concert-stream.js';
+import {
+  NATIVE_SESSION_FILE,
+  attemptDirName,
+  attemptDirPath,
+  copyFinalSession,
+  movementDirName,
+  movementDirPath,
+  writeConcertIndex,
+  writeMovementIndex,
+  type ConcertIndexMovement,
+  type MovementIndex,
+} from '../recording/artifacts.js';
 import type { ChildConcertFactory } from './child-concert-factory.js';
 import type { IConductor } from './conductor-interface.js';
 import type { StartOptions } from './start-options.js';
@@ -48,13 +66,23 @@ export class Conductor implements IConductor {
   private adapterResolver: { get(name: string, concertId?: string): Promise<HarnessAdapter> };
   private loopPromise?: Promise<void>;
   private traceService?: TraceService;
-  private liveEventLog?: LiveEventLog;
+  private concertStream?: ConcertStream;
   private eventEmitter = new EventEmitter();
   private childConductors = new Map<ConcertID, IConductor>();
   private promptBuilder = new PromptBuilder();
   private constraintChecker: ConstraintChecker;
   private sectionMovementCount = new Map<string, number>();
   private sectionSpend = new Map<string, number>();
+  /** Per-movement count of executeMovement calls (0 = first attempt). */
+  private attemptCounters = new Map<MovementID, number>();
+  /** Per-movement harness type, set at each attempt start. */
+  private movementHarness = new Map<MovementID, string>();
+  /** Per-movement session mode, set at each attempt start. */
+  private movementMode = new Map<MovementID, 'cumulative' | 'fresh'>();
+  /** Per-movement attempt summaries (grows as attempts execute). */
+  private movementAttempts = new Map<MovementID, MovementIndex['attempts']>();
+  /** Per-movement resolved final session file path (movement dir-relative). */
+  private movementFinalSessionFile = new Map<MovementID, string | undefined>();
 
   constructor(
     private concert: Concert,
@@ -63,10 +91,10 @@ export class Conductor implements IConductor {
     private childFactory: ChildConcertFactory,
     adapters: Map<string, HarnessAdapter> | { get(name: string): Promise<HarnessAdapter> },
     private evaluator: Evaluator,
-    tracesDir?: string,
+    private tracesDir?: string,
     private defaultHarness?: string,
     private onFinalized?: (concertId: ConcertID) => void,
-    liveEventLog?: LiveEventLog,
+    concertStream?: ConcertStream,
     private cwd?: string,
     private worktreeDisposer?: () => Promise<void>,
   ) {
@@ -76,7 +104,8 @@ export class Conductor implements IConductor {
     if (tracesDir) {
       this.traceService = new TraceService(tracesDir, store);
     }
-    this.liveEventLog = liveEventLog ?? (tracesDir ? new LiveEventLog(tracesDir) : undefined);
+    this.concertStream =
+      concertStream ?? (tracesDir ? new ConcertStream(tracesDir) : undefined);
     this.adapterResolver = createAdapterResolver(adapters);
   }
 
@@ -324,15 +353,28 @@ export class Conductor implements IConductor {
     this.eventEmitter.off('event', listener);
   }
 
-  private emit(event: ConcertEvent): void {
+  private emit(
+    event: ConcertEvent,
+    ctx?: { movementId?: string; attempt?: number; harness?: string },
+  ): void {
     // Fan out to the in-process event bus synchronously so listeners never block.
     this.eventEmitter.emit('event', event);
-    // Persist to the live event log fire-and-forget to keep the hot path
-    // non-blocking; surface write failures instead of silently swallowing them.
-    if (this.liveEventLog) {
-      this.liveEventLog.append(this.concert.id, event).catch((err) => {
+    // Stamp the unified stream envelope and append fire-and-forget to keep the
+    // hot path non-blocking; surface write failures instead of swallowing them.
+    if (this.concertStream) {
+      const record: StreamRecord = {
+        ts: new Date().toISOString(),
+        source: 'concert',
+        type: event.type,
+        concertId: this.concert.id,
+        movementId: ctx?.movementId,
+        attempt: ctx?.attempt,
+        harness: ctx?.harness,
+        data: event,
+      };
+      this.concertStream.append(this.concert.id, record).catch((err) => {
         console.error(
-          `Failed to append event to live log for concert '${this.concert.id}':`,
+          `Failed to append record to concert stream for '${this.concert.id}':`,
           err,
         );
       });
@@ -391,6 +433,8 @@ export class Conductor implements IConductor {
 
     let harnessAdapter: HarnessAdapter | undefined;
     let sessionId: string | undefined;
+    let recording: SessionRecording | undefined;
+    let attemptIndex = 0;
 
     try {
       if (movement.subscore) {
@@ -407,18 +451,92 @@ export class Conductor implements IConductor {
       this.promptBuilder.recordVisit(movement.id);
       const persistSession = this.score.program?.persistSession !== false;
       sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
+      const mode: 'cumulative' | 'fresh' = persistSession ? 'cumulative' : 'fresh';
 
       if (sessionId) {
         this.activeSessions.set(sessionId, harnessAdapter);
       }
 
-      this.emit({
-        type: 'movement:started',
-        concertId: this.concert.id,
-        movementId: movement.id,
-        prompt: prompt.slice(0, 5000),
-        timestamp: startedAt,
-      });
+      attemptIndex = this.nextAttemptIndex(movement.id);
+      this.movementHarness.set(movement.id, harnessAdapter.type);
+      this.movementMode.set(movement.id, mode);
+
+      if (this.concertStream && this.tracesDir) {
+        const attemptDir = attemptDirPath(
+          this.tracesDir,
+          this.concert.id,
+          movement.id,
+          attemptIndex,
+        );
+        await mkdir(attemptDir, { recursive: true }).catch((err) => {
+          console.error(
+            `Failed to create attempt directory '${attemptDir}': ${(err as Error).message}`,
+          );
+        });
+        let sinkCount = 0;
+        const sink: RawEventSink = {
+          get count() {
+            return sinkCount;
+          },
+          record: (event, meta) => {
+            sinkCount += 1;
+            const type =
+              meta?.type ??
+              (event !== null &&
+              typeof event === 'object' &&
+              typeof (event as { type?: unknown }).type === 'string'
+                ? ((event as { type: string }).type as string)
+                : 'sdk.event');
+            const record: StreamRecord = {
+              ts: new Date().toISOString(),
+              source: 'sdk',
+              type,
+              concertId: this.concert.id,
+              movementId: movement.id,
+              attempt: attemptIndex,
+              harness: harnessAdapter!.type,
+              synthetic: meta?.synthetic,
+              sessionId: recording ? recording.sessionId : undefined,
+              data: event,
+            };
+            try {
+              this.concertStream!.append(this.concert.id, record).catch((err) => {
+                console.error(
+                  `Failed to append SDK record for concert '${this.concert.id}':`,
+                  err,
+                );
+              });
+            } catch (err) {
+              console.error(
+                `Failed to record SDK event type '${type}' for concert '${this.concert.id}':`,
+                err,
+              );
+            }
+          },
+          flush: () => this.concertStream!.flush(this.concert.id),
+        };
+        recording = {
+          concertId: this.concert.id,
+          movementId: movement.id,
+          attemptIndex,
+          events: sink,
+          attemptDir,
+          sessionKey: sessionId,
+          mode,
+          recordSynthetic: (type, data) => sink.record(data, { synthetic: true, type }),
+        };
+      }
+
+      this.emit(
+        {
+          type: 'movement:started',
+          concertId: this.concert.id,
+          movementId: movement.id,
+          prompt: prompt.slice(0, 5000),
+          timestamp: startedAt,
+        },
+        { movementId: movement.id, attempt: attemptIndex, harness: harnessAdapter!.type },
+      );
 
       const { movementSignal, onParentAbort, timeoutHandle, heartbeatHandle } =
         this.setupMovementExecution(movement, startedAt, signal);
@@ -436,6 +554,7 @@ export class Conductor implements IConductor {
           options: modelConfig.options,
           onProgress,
           cwd: this.cwd,
+          recording,
         });
 
         record.status = 'completed';
@@ -458,20 +577,150 @@ export class Conductor implements IConductor {
       record.error = this.serializeMovementError(err, movement.id);
     }
 
-    if (this.traceService && harnessAdapter && sessionId) {
-      const traceId = await this.traceService.recordFromAdapter(
-        harnessAdapter,
-        sessionId,
-        this.concert.id,
-        movement.id,
-        record.status,
-      );
-      if (traceId) {
-        record.traceId = traceId;
-      }
+    if (recording) {
+      await this.finalizeAttempt(movement, record, attemptIndex, sessionId, recording);
     }
 
     return record;
+  }
+
+  /** Bump the per-movement attempt counter and return this call's index. */
+  private nextAttemptIndex(movementId: MovementID): number {
+    const index = this.attemptCounters.get(movementId) ?? 0;
+    this.attemptCounters.set(movementId, index + 1);
+    return index;
+  }
+
+  /**
+   * Post-execution attempt bookkeeping: flush the raw event sink, append the
+   * attempt to the movement index, and record the per-attempt session trace row.
+   */
+  private async finalizeAttempt(
+    movement: Movement,
+    record: MovementRecord,
+    attemptIndex: number,
+    sessionKey: string | undefined,
+    recording: SessionRecording,
+  ): Promise<void> {
+    try {
+      await recording.events.flush().catch((err) => {
+        console.error(
+          `Failed to flush SDK records for '${this.concert.id}/${movement.id}' attempt ${attemptIndex}:`,
+          err,
+        );
+      });
+    } catch {
+      // flush() itself never throws; belt-and-suspenders for sink misbehaviour.
+    }
+
+    const attempts = this.movementAttempts.get(movement.id) ?? [];
+    attempts.push({
+      attempt: attemptIndex,
+      status: record.status as MovementIndex['attempts'][number]['status'],
+      sessionKey,
+      path: attemptDirName(attemptIndex),
+    });
+    this.movementAttempts.set(movement.id, attempts);
+
+    try {
+      const index: MovementIndex = {
+        concertId: this.concert.id,
+        movementId: movement.id,
+        movementName: movement.name,
+        harness: this.movementHarness.get(movement.id),
+        mode: this.movementMode.get(movement.id) ?? 'cumulative',
+        finalAttempt: undefined,
+        finalStatus: undefined,
+        finalSessionFile: undefined,
+        attempts,
+      };
+      await writeMovementIndex(
+        movementDirPath(this.tracesDir!, this.concert.id, movement.id),
+        index,
+      );
+    } catch (err) {
+      console.error(
+        `Failed to write movement index for '${this.concert.id}/${movement.id}':`,
+        err,
+      );
+    }
+
+    if (this.traceService) {
+      await this.traceService.recordAttempt({
+        concertId: this.concert.id,
+        movementId: movement.id,
+        sessionKey,
+        sessionId: recording.sessionId,
+        attemptIndex,
+        harness: this.movementHarness.get(movement.id) ?? 'unknown',
+        mode: this.movementMode.get(movement.id) ?? 'cumulative',
+        filePath: `${movementDirName(movement.id)}/${attemptDirName(attemptIndex)}`,
+        status: record.status as 'completed' | 'failed' | 'rejected',
+        eventCount: recording.events.count,
+        startedAt: record.startedAt,
+        endedAt: record.completedAt ?? new Date(),
+      });
+    }
+  }
+
+  /**
+   * Movement terminal bookkeeping: write the final movement index.json and, for
+   * cumulative sessions, the `final-<harness>-session.<ext>` copy.
+   */
+  private async finalizeMovementArtifacts(
+    movement: Movement,
+    record: MovementRecord,
+  ): Promise<void> {
+    if (!this.tracesDir) return;
+
+    const movementDir = movementDirPath(this.tracesDir, this.concert.id, movement.id);
+    const harness = this.movementHarness.get(movement.id);
+    const mode = this.movementMode.get(movement.id) ?? 'cumulative';
+    const attemptCount = this.attemptCounters.get(movement.id) ?? 0;
+    const lastAttempt = attemptCount > 0 ? attemptCount - 1 : undefined;
+
+    let finalSessionFile: string | undefined;
+    if (harness && lastAttempt !== undefined) {
+      if (mode === 'cumulative') {
+        finalSessionFile = await copyFinalSession(movementDir, harness, attemptCount).catch(
+          (err) => {
+            console.error(
+              `Failed to copy final session for '${this.concert.id}/${movement.id}':`,
+              err,
+            );
+            return undefined;
+          },
+        );
+      } else {
+        // Fresh mode: no aggregation — the index points at the last attempt's
+        // own native snapshot (each attempt has its own real session).
+        const native = NATIVE_SESSION_FILE[harness];
+        if (native) {
+          finalSessionFile = `${attemptDirName(lastAttempt)}/${native}`;
+        }
+      }
+    }
+    this.movementFinalSessionFile.set(movement.id, finalSessionFile);
+
+    try {
+      const index: MovementIndex = {
+        concertId: this.concert.id,
+        movementId: movement.id,
+        movementName: movement.name,
+        harness,
+        mode,
+        finalAttempt: lastAttempt,
+        finalStatus: record.status,
+        finalSessionFile,
+        attempts: this.movementAttempts.get(movement.id) ?? [],
+      };
+      await writeMovementIndex(movementDir, index);
+    } catch (err) {
+      console.error(
+        `Failed to write final movement index for '${this.concert.id}/${movement.id}':`,
+        err,
+      );
+    }
   }
 
   private async executeSubscore(
@@ -857,14 +1106,21 @@ export class Conductor implements IConductor {
         let totalSpend: number | undefined = record.usage.spend;
         let totalTokens = record.usage.tokens ?? 0;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          this.emit({
-            type: 'movement:failed',
-            concertId: this.concert.id,
-            movementId: movement.id,
-            error: record.error ?? { code: 'UNKNOWN', message: 'Unknown error', retryable: false },
-            retryCount: attempt,
-            timestamp: new Date(),
-          });
+          this.emit(
+            {
+              type: 'movement:failed',
+              concertId: this.concert.id,
+              movementId: movement.id,
+              error: record.error ?? { code: 'UNKNOWN', message: 'Unknown error', retryable: false },
+              retryCount: attempt,
+              timestamp: new Date(),
+            },
+            {
+              movementId: movement.id,
+              attempt: attempt - 1,
+              harness: this.movementHarness.get(movement.id),
+            },
+          );
           const retryRecord = await this.executeMovement(movement, previousOutputs, signal);
           totalSpend =
             totalSpend !== undefined || retryRecord.usage.spend !== undefined
@@ -920,14 +1176,21 @@ export class Conductor implements IConductor {
           // re-attempted as a rejection (which would conflate the two outcomes
           // and burn spend on a broken prompt/model combination).
           if (retryRecord.status === 'failed') {
-            this.emit({
-              type: 'movement:rejected',
-              concertId: this.concert.id,
-              movementId: movement.id,
-              result: record,
-              retryCount: attempt,
-              timestamp: new Date(),
-            });
+            this.emit(
+              {
+                type: 'movement:rejected',
+                concertId: this.concert.id,
+                movementId: movement.id,
+                result: record,
+                retryCount: attempt,
+                timestamp: new Date(),
+              },
+              {
+                movementId: movement.id,
+                attempt: attempt,
+                harness: this.movementHarness.get(movement.id),
+              },
+            );
             break;
           }
           const retryEvaluation = await this.evaluator.evaluate(
@@ -937,14 +1200,21 @@ export class Conductor implements IConductor {
             movement.id,
           );
           record.goalEvaluation = retryEvaluation;
-          this.emit({
-            type: 'movement:rejected',
-            concertId: this.concert.id,
-            movementId: movement.id,
-            result: record,
-            retryCount: attempt,
-            timestamp: new Date(),
-          });
+          this.emit(
+            {
+              type: 'movement:rejected',
+              concertId: this.concert.id,
+              movementId: movement.id,
+              result: record,
+              retryCount: attempt,
+              timestamp: new Date(),
+            },
+            {
+              movementId: movement.id,
+              attempt: attempt,
+              harness: this.movementHarness.get(movement.id),
+            },
+          );
           if (retryEvaluation.achieved) {
             break;
           }
@@ -971,37 +1241,50 @@ export class Conductor implements IConductor {
             : 'rejected';
 
       await this.store.appendMovement(this.concert.id, record);
+      const lastAttempt = (this.attemptCounters.get(movement.id) ?? 1) - 1;
+      const harness = this.movementHarness.get(movement.id);
       if (transitionStatus === 'success') {
-        this.emit({
-          type: 'movement:completed',
-          concertId: this.concert.id,
-          movementId: movement.id,
-          result: record,
-          timestamp: new Date(),
-        });
+        this.emit(
+          {
+            type: 'movement:completed',
+            concertId: this.concert.id,
+            movementId: movement.id,
+            result: record,
+            timestamp: new Date(),
+          },
+          { movementId: movement.id, attempt: lastAttempt, harness },
+        );
       } else if (transitionStatus === 'rejection') {
-        this.emit({
-          type: 'movement:rejected',
-          concertId: this.concert.id,
-          movementId: movement.id,
-          result: record,
-          retryCount: 0,
-          timestamp: new Date(),
-        });
+        this.emit(
+          {
+            type: 'movement:rejected',
+            concertId: this.concert.id,
+            movementId: movement.id,
+            result: record,
+            retryCount: 0,
+            timestamp: new Date(),
+          },
+          { movementId: movement.id, attempt: lastAttempt, harness },
+        );
       } else {
         // This branch fires only for true technical execution failures; a goal
         // rejection is emitted separately as `movement:rejected`. The record
         // normally carries a serialized error from executeMovement, so this
         // is a defensive fallback only.
-        this.emit({
-          type: 'movement:failed',
-          concertId: this.concert.id,
-          movementId: movement.id,
-          error: record.error ?? { code: 'EXECUTION_FAILED', message: 'Movement execution failed', retryable: false },
-          retryCount: 0,
-          timestamp: new Date(),
-        });
+        this.emit(
+          {
+            type: 'movement:failed',
+            concertId: this.concert.id,
+            movementId: movement.id,
+            error: record.error ?? { code: 'EXECUTION_FAILED', message: 'Movement execution failed', retryable: false },
+            retryCount: 0,
+            timestamp: new Date(),
+          },
+          { movementId: movement.id, attempt: lastAttempt, harness },
+        );
       }
+
+      await this.finalizeMovementArtifacts(movement, record);
 
       this.concert.history.push(record);
       previousOutputs.set(movement.id, record);
@@ -1118,11 +1401,54 @@ export class Conductor implements IConductor {
 
     this.childConductors.clear();
     this.onFinalized?.(this.concert.id);
-    await this.liveEventLog?.close(this.concert.id);
+    await this.writeConcertIndex(status);
+    await this.concertStream?.close(this.concert.id);
     if (this.worktreeDisposer) {
       const disposer = this.worktreeDisposer;
       this.worktreeDisposer = undefined;
       await disposer().catch(() => {});
+    }
+  }
+
+  /** Write the concert-level index.json summarizing all recorded movements. */
+  private async writeConcertIndex(status: ConcertStatus): Promise<void> {
+    if (!this.tracesDir || !this.concertStream) return;
+
+    const defaultMode = this.score.program?.persistSession !== false ? 'cumulative' : 'fresh';
+    const movements: ConcertIndexMovement[] = this.concert.history.map((record) => {
+      const mid = record.movementId;
+      const attemptCount = this.attemptCounters.get(mid) ?? 0;
+      const harness = this.movementHarness.get(mid);
+      let finalSessionFile = this.movementFinalSessionFile.get(mid);
+      if (finalSessionFile) {
+        finalSessionFile = `${movementDirName(mid)}/${finalSessionFile}`;
+      }
+      return {
+        id: mid,
+        name: record.movementName,
+        harness,
+        mode: this.movementMode.get(mid) ?? defaultMode,
+        attempts: attemptCount,
+        finalStatus: record.status,
+        finalSessionFile,
+      };
+    });
+
+    try {
+      await writeConcertIndex(this.tracesDir, this.concert.id, {
+        concertId: this.concert.id,
+        scoreId: this.score.id,
+        status,
+        startedAt: new Date(this.startedAt).toISOString(),
+        completedAt: this.concert.completedAt?.toISOString(),
+        stream: 'stream.jsonl',
+        movements,
+      });
+    } catch (err) {
+      console.error(
+        `Failed to write concert index for '${this.concert.id}':`,
+        err,
+      );
     }
   }
 }

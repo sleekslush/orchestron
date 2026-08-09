@@ -77,6 +77,10 @@ const SCHEMA_SQL = `
         concert_id TEXT NOT NULL,
         movement_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
+        session_key TEXT,
+        attempt_index INTEGER,
+        harness TEXT,
+        mode TEXT,
         file_path TEXT NOT NULL,
         started_at TEXT NOT NULL,
         completed_at TEXT,
@@ -144,6 +148,18 @@ export class SqliteLoge implements ConcertStore {
       !sessionTraceColumns.some((col) => col.name === 'event_count')
     ) {
       this.db.exec(`ALTER TABLE session_traces RENAME COLUMN turn_count TO event_count`);
+    }
+    if (!sessionTraceColumns.some((col) => col.name === 'session_key')) {
+      this.db.exec(`ALTER TABLE session_traces ADD COLUMN session_key TEXT`);
+    }
+    if (!sessionTraceColumns.some((col) => col.name === 'attempt_index')) {
+      this.db.exec(`ALTER TABLE session_traces ADD COLUMN attempt_index INTEGER`);
+    }
+    if (!sessionTraceColumns.some((col) => col.name === 'harness')) {
+      this.db.exec(`ALTER TABLE session_traces ADD COLUMN harness TEXT`);
+    }
+    if (!sessionTraceColumns.some((col) => col.name === 'mode')) {
+      this.db.exec(`ALTER TABLE session_traces ADD COLUMN mode TEXT`);
     }
   }
 
@@ -582,14 +598,19 @@ export class SqliteLoge implements ConcertStore {
     this.db
       .prepare(
         `INSERT INTO session_traces
-          (id, concert_id, movement_id, session_id, file_path, started_at, completed_at, event_count, status, format)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, concert_id, movement_id, session_id, session_key, attempt_index, harness, mode,
+           file_path, started_at, completed_at, event_count, status, format)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         trace.id,
         trace.concertId,
         trace.movementId,
         trace.sessionId,
+        trace.sessionKey ?? null,
+        trace.attemptIndex ?? null,
+        trace.harness ?? null,
+        trace.mode ?? null,
         trace.filePath,
         serializeDate(trace.startedAt),
         serializeDate(trace.completedAt),
