@@ -1,7 +1,15 @@
-import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo } from '@orchestron/core';
+import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo, SessionRecording } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
-import { HarnessError, dollarsToMicro, tryParseStructuredFromText, SessionPool } from '@orchestron/core';
+import {
+  HarnessError,
+  dollarsToMicro,
+  tryParseStructuredFromText,
+  SessionPool,
+  NATIVE_SESSION_FILE,
+  writeAttemptMetadata,
+  readPiSessionId,
+} from '@orchestron/core';
 import {
   createAgentSession,
   ModelRuntime,
@@ -61,6 +69,8 @@ export class PiAdapter implements HarnessAdapter {
     _context: ConcertContext,
     options?: HarnessAdapterExecuteOptions,
   ): Promise<HarnessResponse> {
+    const startedAt = new Date();
+    const recording = options?.recording;
     let finalPrompt = prompt;
     if (options?.output?.mode === 'structured' && options.output.schema) {
       finalPrompt =
@@ -80,6 +90,7 @@ export class PiAdapter implements HarnessAdapter {
     let session: AgentSession | undefined;
     let abortListener: (() => void) | undefined;
     let ownSession = false;
+    let attemptStatus: 'completed' | 'failed' = 'completed';
 
     try {
       if (options?.sessionId) {
@@ -104,6 +115,14 @@ export class PiAdapter implements HarnessAdapter {
       let cumulativeOutput = 0;
 
       const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+        // Record the raw SDK event verbatim, first, before any extraction.
+        if (recording) {
+          try {
+            recording.events.record(event);
+          } catch (err) {
+            console.error('Failed to record pi session event:', err);
+          }
+        }
         if (event.type === 'message_update') {
           const ame = event.assistantMessageEvent;
           if (ame.type === 'text_delta') {
@@ -173,8 +192,10 @@ export class PiAdapter implements HarnessAdapter {
       }
 
       try {
+        recording?.recordSynthetic('user.prompt', { prompt: finalPrompt });
         await session.prompt(finalPrompt);
       } catch (err) {
+        attemptStatus = 'failed';
         if (options?.signal?.aborted) {
           throw new HarnessError('Execution aborted', 'HARNESS_TIMEOUT');
         }
@@ -217,9 +238,69 @@ export class PiAdapter implements HarnessAdapter {
 
       return { output, structured, summary, usage, model, provider };
     } finally {
+      if (recording) {
+        await this.finalizeSessionRecording(recording, session, startedAt, attemptStatus);
+      }
       if (ownSession && session) {
         session.dispose();
       }
+    }
+  }
+
+  /**
+   * Per-attempt artifact finalization: flush the raw event sink, export the
+   * native pi session JSONL, and write attempt metadata.json. Runs before the
+   * session is disposed so the export captures the full session state.
+   */
+  private async finalizeSessionRecording(
+    recording: SessionRecording,
+    session: AgentSession | undefined,
+    startedAt: Date,
+    status: 'completed' | 'failed',
+  ): Promise<void> {
+    try {
+      await recording.events.flush();
+    } catch (err) {
+      console.error('Failed to flush pi session records:', err);
+    }
+
+    let native: string | undefined;
+    let sizeBytes: number | undefined;
+    if (session && typeof (session as AgentSession).exportToJsonl === 'function') {
+      try {
+        const { join } = await import('node:path');
+        const { stat } = await import('node:fs/promises');
+        native = NATIVE_SESSION_FILE.pi;
+        const filePath = join(recording.attemptDir, native);
+        session.exportToJsonl(filePath);
+        const fileStat = await stat(filePath);
+        sizeBytes = fileStat.size;
+        if (!recording.sessionId) {
+          recording.sessionId = await readPiSessionId(filePath);
+        }
+      } catch (err) {
+        console.error('Failed to export pi session JSONL:', err);
+        native = undefined;
+      }
+    }
+
+    try {
+      await writeAttemptMetadata(recording.attemptDir, {
+        concertId: recording.concertId,
+        movementId: recording.movementId,
+        attempt: recording.attemptIndex,
+        harness: 'pi',
+        mode: recording.mode,
+        sessionKey: recording.sessionKey,
+        sessionId: recording.sessionId,
+        startedAt: startedAt.toISOString(),
+        endedAt: new Date().toISOString(),
+        status,
+        eventCount: recording.events.count,
+        files: native ? { native, sizeBytes } : {},
+      });
+    } catch (err) {
+      console.error('Failed to write pi attempt metadata:', err);
     }
   }
 

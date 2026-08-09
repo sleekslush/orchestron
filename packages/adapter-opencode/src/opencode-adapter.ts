@@ -1,4 +1,4 @@
-import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo } from '@orchestron/core';
+import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo, SessionRecording } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
 import type { SessionTraceEvent } from '@orchestron/core';
 import {
@@ -7,6 +7,8 @@ import {
   tryParseStructured,
   tryParseStructuredFromText,
   SessionPool,
+  NATIVE_SESSION_FILE,
+  writeAttemptMetadata,
 } from '@orchestron/core';
 import {
   createOpencode,
@@ -155,6 +157,9 @@ export class OpencodeAdapter implements HarnessAdapter {
     let ownSession = false;
     let abortListener: (() => void) | undefined;
     const eventController = new AbortController();
+    const startedAt = new Date();
+    const recording = options?.recording;
+    let completedNormally = false;
 
     try {
       if (options?.sessionId) {
@@ -166,6 +171,9 @@ export class OpencodeAdapter implements HarnessAdapter {
       }
 
       const opencodeSessionId = sessionData.opencodeSessionId;
+      // The SDK reveals the real session id immediately; stamp it so envelope
+      // records and metadata.json carry it.
+      if (recording) recording.sessionId = opencodeSessionId;
 
       // Determine the message boundary for this turn so per-turn usage (cost +
       // tokens) can be aggregated across every assistant message in the turn
@@ -230,6 +238,7 @@ export class OpencodeAdapter implements HarnessAdapter {
 
       let promptResult: Awaited<ReturnType<OpencodeClient['session']['promptAsync']>> | undefined;
       try {
+        recording?.recordSynthetic('user.prompt', { prompt });
         promptResult = await this.client.session.promptAsync(parameters);
       } catch (err) {
         if (options?.signal?.aborted) {
@@ -274,6 +283,15 @@ export class OpencodeAdapter implements HarnessAdapter {
             if (eventController.signal.aborted) break;
             const event = raw as V2Event;
             if (!this.isEventForSession(event, opencodeSessionId)) continue;
+
+            // Record the raw SDK event verbatim, first, before any extraction.
+            if (recording) {
+              try {
+                recording.events.record(event);
+              } catch (err) {
+                console.error('Failed to record opencode session event:', err);
+              }
+            }
 
             const props = (event as Record<string, unknown>).properties as
               | Record<string, unknown>
@@ -354,6 +372,7 @@ export class OpencodeAdapter implements HarnessAdapter {
         // live stream: if promptAsync resolved after the turn finished, the
         // stream has already ended and an unobserved completion should not be a
         // hard failure.
+        completedNormally = true;
         return await this.waitForFinalResponse(
           opencodeSessionId,
           options?.signal,
@@ -363,6 +382,7 @@ export class OpencodeAdapter implements HarnessAdapter {
       }
 
       // Subscription failed; fall back to the post-hoc session trace.
+      completedNormally = true;
       return await this.waitForFinalResponse(
         opencodeSessionId,
         options?.signal,
@@ -374,11 +394,80 @@ export class OpencodeAdapter implements HarnessAdapter {
       if (abortListener && options?.signal) {
         options.signal.removeEventListener('abort', abortListener);
       }
+      if (recording && sessionData) {
+        await this.finalizeSessionRecording(
+          recording,
+          sessionData.opencodeSessionId,
+          startedAt,
+          completedNormally ? 'completed' : 'failed',
+        );
+      }
       if (ownSession && sessionData) {
         await this.client?.session
           .delete({ sessionID: sessionData.opencodeSessionId })
           .catch(() => {});
       }
+    }
+  }
+
+  /**
+   * Per-attempt artifact finalization: flush the raw event sink, export the
+   * native opencode session artifact (`{info, messages}` verbatim), and write
+   * attempt metadata.json. Runs before an own session is deleted.
+   */
+  private async finalizeSessionRecording(
+    recording: SessionRecording,
+    opencodeSessionId: string,
+    startedAt: Date,
+    status: 'completed' | 'failed',
+  ): Promise<void> {
+    try {
+      await recording.events.flush();
+    } catch (err) {
+      console.error('Failed to flush opencode session records:', err);
+    }
+
+    const { join } = await import('node:path');
+    const { writeFile, stat } = await import('node:fs/promises');
+    const native = NATIVE_SESSION_FILE.opencode;
+    const filePath = join(recording.attemptDir, native);
+    let info: unknown;
+    let messages: unknown;
+    try {
+      const infoRes = await this.client?.session.get({ sessionID: opencodeSessionId });
+      const msgsRes = await this.client?.session.messages({ sessionID: opencodeSessionId });
+      info = infoRes?.data ?? infoRes?.error;
+      messages = msgsRes?.data ?? [];
+      await writeFile(filePath, JSON.stringify({ info, messages }, null, 2) + '\n');
+    } catch (err) {
+      console.error('Failed to export opencode session:', err);
+      return;
+    }
+
+    let sizeBytes: number | undefined;
+    try {
+      sizeBytes = (await stat(filePath)).size;
+    } catch {
+      // Non-fatal; metadata simply omits the size.
+    }
+
+    try {
+      await writeAttemptMetadata(recording.attemptDir, {
+        concertId: recording.concertId,
+        movementId: recording.movementId,
+        attempt: recording.attemptIndex,
+        harness: 'opencode',
+        mode: recording.mode,
+        sessionKey: recording.sessionKey,
+        sessionId: recording.sessionId,
+        startedAt: startedAt.toISOString(),
+        endedAt: new Date().toISOString(),
+        status,
+        eventCount: recording.events.count,
+        files: { native, sizeBytes },
+      });
+    } catch (err) {
+      console.error('Failed to write opencode attempt metadata:', err);
     }
   }
 
