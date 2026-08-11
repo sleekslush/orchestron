@@ -154,6 +154,12 @@ export class ConcertStream {
   /**
    * Read records from the concert stream starting at a UTF-16 code-unit offset
    * (see class docs). Returns the newly parsed records and the new offset.
+   *
+   * Only COMPLETE lines (terminated by `\n`) are parsed and consumed. A trailing
+   * partial line — e.g. a record caught mid-write during a live tail — is left
+   * in place: `bytesRead` stays at the start of that line so the next call
+   * re-reads it once it finishes. This prevents a realtime tail from permanently
+   * losing an in-flight record.
    */
   async readSince(
     concertId: ConcertID,
@@ -166,8 +172,13 @@ export class ConcertStream {
 
     const content = await readFile(filePath, 'utf-8');
     const chunk = content.slice(offset);
-    const records = this.parseLines(chunk);
-    return { records, bytesRead: content.length };
+
+    // Consume only up to the last complete (newline-terminated) line so a
+    // trailing partial line survives for the next read.
+    const lastNewline = chunk.lastIndexOf('\n');
+    const consumable = lastNewline === -1 ? '' : chunk.slice(0, lastNewline + 1);
+    const records = this.parseLines(consumable);
+    return { records, bytesRead: offset + consumable.length };
   }
 
   /** Tail the concert stream, yielding batches of new records as appended. */
@@ -176,10 +187,16 @@ export class ConcertStream {
     options?: { signal?: AbortSignal },
   ): AsyncGenerator<StreamRecord[]> {
     const filePath = this.getPath(concertId);
+    // UTF-16 code-unit offset for slicing the decoded content.
     let offset = 0;
+    // Byte size of the file at the last read, used for growth detection. Kept
+    // separate from `offset` because the two are in different units (bytes vs
+    // UTF-16 code units); mixing them makes the poll misfire on multibyte data.
+    let lastByteSize = 0;
 
     const initial = await this.readSince(concertId, offset);
     offset = initial.bytesRead;
+    lastByteSize = this.byteSize(filePath);
     if (initial.records.length > 0) {
       yield initial.records;
     }
@@ -188,14 +205,15 @@ export class ConcertStream {
     while (true) {
       if (outerSignal?.aborted) break;
 
-      // Wait until the file grows beyond the current offset. fs.watch can miss
-      // appends through an already-open stream on some platforms, so also poll
-      // the file size as a fallback.
-      await this.waitForChange(filePath, outerSignal, offset);
+      // Wait until the file grows beyond what we've already read. fs.watch can
+      // miss appends through an already-open stream on some platforms, so also
+      // poll the file size as a fallback.
+      await this.waitForChange(filePath, outerSignal, lastByteSize);
       if (outerSignal?.aborted) break;
 
       const result = await this.readSince(concertId, offset);
       offset = result.bytesRead;
+      lastByteSize = this.byteSize(filePath);
       if (result.records.length > 0) {
         yield result.records;
       }
@@ -246,10 +264,18 @@ export class ConcertStream {
       .filter((r): r is StreamRecord => r !== undefined);
   }
 
+  private byteSize(filePath: string): number {
+    try {
+      return existsSync(filePath) ? statSync(filePath).size : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   private async waitForChange(
     filePath: string,
     signal?: AbortSignal,
-    offset = 0,
+    lastByteSize = 0,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const dir = dirname(filePath);
@@ -272,16 +298,11 @@ export class ConcertStream {
         () => settle(),
       );
 
-      // Poll fallback in case fs.watch misses the append.
-      const fileSize = () => {
-        try {
-          return existsSync(filePath) ? statSync(filePath).size : 0;
-        } catch {
-          return 0;
-        }
-      };
+      // Poll fallback in case fs.watch misses the append. Compare against the
+      // byte size at the last read (same unit as statSync().size) so multibyte
+      // content never causes a spurious settle.
       const poll = setInterval(() => {
-        if (fileSize() > offset) settle();
+        if (this.byteSize(filePath) > lastByteSize) settle();
       }, 150);
       poll.unref?.();
 

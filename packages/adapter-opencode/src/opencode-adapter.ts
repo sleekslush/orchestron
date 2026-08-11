@@ -1,6 +1,5 @@
 import type { HarnessAdapter, HarnessAdapterExecuteOptions, HarnessResponse, HarnessModelInfo, SessionRecording } from '@orchestron/core';
 import type { ConcertContext } from '@orchestron/core';
-import type { SessionTraceEvent } from '@orchestron/core';
 import {
   HarnessError,
   dollarsToMicro,
@@ -24,7 +23,7 @@ import type {
 } from '@opencode-ai/sdk/v2';
 
 // --------------------------------------------------------------------------
-// Part-filter helpers used by getSessionTraceEvents
+// Session part-filter helpers
 // --------------------------------------------------------------------------
 
 interface TextPart { type: 'text'; text: string }
@@ -40,33 +39,6 @@ function isTextPart(p: unknown): p is TextPart {
 
 function collectTextParts(parts: unknown[]): string[] {
   return parts.filter(isTextPart).map((p) => p.text);
-}
-
-interface ToolPart {
-  type: 'tool';
-  tool: string;
-  state: { status?: string; input?: Record<string, unknown>; output?: string; error?: string };
-}
-
-function isToolPart(p: unknown): p is ToolPart {
-  if (p == null || typeof p !== 'object') return false;
-  const obj = p as Record<string, unknown>;
-  return (
-    obj.type === 'tool' &&
-    typeof obj.tool === 'string' &&
-    obj.state != null &&
-    typeof obj.state === 'object' &&
-    !Array.isArray(obj.state)
-  );
-}
-
-function collectToolParts(
-  parts: unknown[],
-): Array<{ tool: string; state: ToolPart['state'] }> {
-  return parts.filter(isToolPart).map((p) => ({
-    tool: p.tool,
-    state: p.state,
-  }));
 }
 
 export interface OpencodeAdapterConfig {
@@ -474,57 +446,6 @@ export class OpencodeAdapter implements HarnessAdapter {
   async disposeSession(sessionId: string): Promise<void> {
     this.sessionCwds.delete(sessionId);
     await this.sessionPool.disposeSession(sessionId);
-  }
-
-  async getSessionTraceEvents(sessionId: string, _offset?: number): Promise<SessionTraceEvent[]> {
-    const data = this.sessionPool.get(sessionId);
-    if (!data || !this.client) return [];
-
-    try {
-      const result = await this.client.session.messages({
-        sessionID: data.opencodeSessionId,
-      });
-
-      const allMessages = result.data ?? [];
-      const events: SessionTraceEvent[] = [];
-
-      for (const msg of allMessages) {
-        const ts = new Date(msg.info?.time?.created ?? Date.now()).toISOString();
-        const parts = Array.isArray(msg.parts) ? msg.parts : [];
-
-        if (msg.info?.role === 'user') {
-          const content = collectTextParts(parts).join('\n');
-          if (content) {
-            events.push({ type: 'prompt', content, timestamp: ts });
-          }
-        } else if (msg.info?.role === 'assistant') {
-          for (const text of collectTextParts(parts)) {
-            events.push({ type: 'text_delta', delta: text, timestamp: ts });
-          }
-          for (const { tool, state } of collectToolParts(parts)) {
-            events.push({
-              type: 'tool_execution_start',
-              toolName: tool,
-              args: state.input,
-              timestamp: ts,
-            });
-            events.push({
-              type: 'tool_execution_end',
-              toolName: tool,
-              isError: state.status === 'error',
-              result: state.output ?? state.error,
-              error: state.status === 'error' ? state.error : undefined,
-              timestamp: ts,
-            });
-          }
-        }
-      }
-
-      return events;
-    } catch (err) {
-      console.error('Failed to get opencode session traces:', err);
-      return [];
-    }
   }
 
   async dispose(): Promise<void> {

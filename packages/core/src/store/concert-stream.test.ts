@@ -110,6 +110,30 @@ describe('ConcertStream', () => {
     await stream.close('c1');
   });
 
+  it('readSince does not consume a trailing partial line', async () => {
+    const stream = new ConcertStream(dir);
+    await stream.append('c1', record({ type: 'one' }));
+    const first = await stream.readSince('c1', 0);
+    expect(first.records.map((r) => r.type)).toEqual(['one']);
+
+    // Simulate a mid-write state: the JSON line has landed on disk but its
+    // trailing newline hasn't yet (partial append).
+    const { appendFileSync } = await import('node:fs');
+    appendFileSync(join(dir, 'c1', 'stream.jsonl'), JSON.stringify(record({ type: 'incomplete' })));
+
+    const partial = await stream.readSince('c1', first.bytesRead);
+    // The partial line must NOT be consumed (and not dropped); offset should not
+    // advance past it so a later read can pick it up once the newline lands.
+    expect(partial.records).toEqual([]);
+    expect(partial.bytesRead).toBe(first.bytesRead);
+
+    // Complete the line (the newline lands); the same offset yields the record.
+    appendFileSync(join(dir, 'c1', 'stream.jsonl'), '\n');
+    const completed = await stream.readSince('c1', first.bytesRead);
+    expect(completed.records.map((r) => r.type)).toEqual(['incomplete']);
+    await stream.close('c1');
+  });
+
   it('watch yields initial records then newly appended ones', async () => {
     const stream = new ConcertStream(dir);
     await stream.append('c1', record({ type: 'initial' }));
