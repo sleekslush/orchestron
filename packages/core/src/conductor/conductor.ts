@@ -68,7 +68,6 @@ export class Conductor implements IConductor {
     private onFinalized?: (concertId: ConcertID) => void,
     liveEventLog?: LiveEventLog,
     private cwd?: string,
-    private worktreeDisposer?: () => Promise<void>,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
@@ -1119,10 +1118,5 @@ export class Conductor implements IConductor {
     this.childConductors.clear();
     this.onFinalized?.(this.concert.id);
     await this.liveEventLog?.close(this.concert.id);
-    if (this.worktreeDisposer) {
-      const disposer = this.worktreeDisposer;
-      this.worktreeDisposer = undefined;
-      await disposer().catch(() => {});
-    }
   }
 }
