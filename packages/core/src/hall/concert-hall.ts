@@ -177,29 +177,25 @@ export class ConcertHall implements ChildConcertFactory {
       explicitHarness: startOptions?.harness,
     };
 
-    try {
-      const scoreYaml = yaml.dump(score);
-      await this.store.saveConcert(concert, scoreYaml);
+    const scoreYaml = yaml.dump(score);
+    await this.store.saveConcert(concert, scoreYaml);
 
-      const conductor = await this.buildConductor(
-        concert,
-        score,
-        startOptions?.harness,
-        cwd,
-      );
+    const conductor = await this.buildConductor(
+      concert,
+      score,
+      startOptions?.harness,
+      cwd,
+    );
 
-      this.conductors.set(concert.id, conductor);
+    this.conductors.set(concert.id, conductor);
 
-      if (concert.parentConcertId) {
-        const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
-        siblings.push(concert.id);
-        this.parentToChildren.set(concert.parentConcertId, siblings);
-      }
-
-      return conductor;
-    } catch (err) {
-      throw err;
+    if (concert.parentConcertId) {
+      const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
+      siblings.push(concert.id);
+      this.parentToChildren.set(concert.parentConcertId, siblings);
     }
+
+    return conductor;
   }
 
   /**
