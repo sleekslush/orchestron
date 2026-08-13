@@ -96,7 +96,6 @@ export class Conductor implements IConductor {
     private onFinalized?: (concertId: ConcertID) => void,
     concertStream?: ConcertStream,
     private cwd?: string,
-    private worktreeDisposer?: () => Promise<void>,
   ) {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
@@ -1403,11 +1402,6 @@ export class Conductor implements IConductor {
     this.onFinalized?.(this.concert.id);
     await this.writeConcertIndex(status);
     await this.concertStream?.close(this.concert.id);
-    if (this.worktreeDisposer) {
-      const disposer = this.worktreeDisposer;
-      this.worktreeDisposer = undefined;
-      await disposer().catch(() => {});
-    }
   }
 
   /** Write the concert-level index.json summarizing all recorded movements. */

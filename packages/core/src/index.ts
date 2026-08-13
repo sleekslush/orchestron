@@ -62,9 +62,6 @@ export type {
   ConcertIndexMovement,
 } from './recording/artifacts.js';
 
-export { WorktreeManager } from './worktree/worktree-manager.js';
-export type { WorktreeOptions, WorktreeHandle, GitRunner } from './worktree/worktree-manager.js';
-
 export { FakeEvaluator } from './evaluator/fake-evaluator.js';
 export type { Evaluator } from './evaluator/evaluator.js';
 export type { FakeEvaluatorConfig } from './evaluator/fake-evaluator.js';
