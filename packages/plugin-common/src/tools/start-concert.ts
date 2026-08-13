@@ -10,8 +10,6 @@ export interface StartConcertInput {
   harness?: string;
   /** Working directory for the concert's harness sessions. Default: process.cwd(). */
   cwd?: string;
-  /** Run the concert in an isolated git worktree. */
-  worktree?: boolean | { baseBranch?: string; keep?: boolean };
 }
 
 function progressText(event: ConcertEvent): string | undefined {
@@ -55,7 +53,6 @@ export async function startConcert(
     triggeredBy: 'agent',
     harness: input.harness,
     cwd: input.cwd,
-    worktree: input.worktree,
   });
 
   const state = await conductor.getState();

@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import yaml from 'js-yaml';
-import type { Concert, ConcertID, ConcertFilter, ConcertWorktree } from '../types/concert.js';
+import type { Concert, ConcertID, ConcertFilter } from '../types/concert.js';
 import type { Score, ScoreID } from '../types/score.js';
 import type { HarnessAdapter, HarnessAdapterResolver } from '../types/adapter.js';
 import type { ConcertStore } from '../store/concert-store.js';
@@ -13,7 +13,6 @@ import type { StartOptions } from '../conductor/start-options.js';
 import { HarnessEvaluator, type Evaluator } from '../evaluator/index.js';
 import { ConductorPanic } from '../types/errors.js';
 import { createAdapterResolver, type AdapterResolver } from '../adapter-resolver.js';
-import { WorktreeManager } from '../worktree/worktree-manager.js';
 
 export interface ConcertHallOptions {
   store: ConcertStore;
@@ -23,8 +22,6 @@ export interface ConcertHallOptions {
   tracesDir?: string;
   liveEventLog?: LiveEventLog;
   defaultHarness?: string;
-  /** Optional custom worktree manager (primarily for tests). */
-  worktreeManager?: WorktreeManager;
 }
 
 export class ConcertHall implements ChildConcertFactory {
@@ -37,7 +34,6 @@ export class ConcertHall implements ChildConcertFactory {
   private tracesDir?: string;
   private liveEventLog?: LiveEventLog;
   private defaultHarness?: string;
-  private worktreeManager: WorktreeManager;
 
   constructor(options: ConcertHallOptions) {
     this.store = options.store;
@@ -50,7 +46,6 @@ export class ConcertHall implements ChildConcertFactory {
     this.tracesDir = options.tracesDir;
     this.liveEventLog = options.liveEventLog ?? (options.tracesDir ? new LiveEventLog(options.tracesDir) : undefined);
     this.defaultHarness = options.defaultHarness;
-    this.worktreeManager = options.worktreeManager ?? new WorktreeManager();
   }
 
   getLiveEventLog(): LiveEventLog | undefined {
@@ -62,7 +57,6 @@ export class ConcertHall implements ChildConcertFactory {
     score: Score,
     explicitHarness?: string,
     cwd?: string,
-    worktreeDisposer?: () => Promise<void>,
   ): Promise<Conductor> {
     const conductor = new Conductor(
       concert,
@@ -76,7 +70,6 @@ export class ConcertHall implements ChildConcertFactory {
       (id) => this.cleanupConductor(id),
       this.liveEventLog,
       cwd,
-      worktreeDisposer,
     );
     return conductor;
   }
@@ -129,25 +122,10 @@ export class ConcertHall implements ChildConcertFactory {
       score = this.scoreRegistry.get(concert.scoreId);
     }
 
-    // Restore the isolated worktree the concert was created with (if any) so a
-    // restarted concert continues to run inside it and disposes it on terminal
-    // state instead of leaking it.
-    let cwd: string | undefined;
-    let worktreeDisposer: (() => Promise<void>) | undefined;
-    if (concert.worktree) {
-      cwd = concert.worktree.path;
-      if (!concert.worktree.keep) {
-        const ref = concert.worktree;
-        worktreeDisposer = () => this.worktreeManager.remove(ref.path, ref.branch, ref.baseDir);
-      }
-    }
-
     const conductor = await this.buildConductor(
       concert,
       score,
       concert.explicitHarness,
-      cwd,
-      worktreeDisposer,
     );
     this.conductors.set(concert.id, conductor);
 
@@ -181,31 +159,8 @@ export class ConcertHall implements ChildConcertFactory {
     const startOptions = options ?? {};
     const concertId = nanoid(12);
 
-    // Resolve the concert's working directory. When `worktree` is set, create an
-    // isolated git worktree first (from the base branch) and run the concert in
-    // it, disposing it when the concert reaches a terminal state.
+    // Resolve the concert's working directory.
     let cwd: string | undefined = startOptions.cwd;
-    let worktreeDisposer: (() => Promise<void>) | undefined;
-    let worktreeRef: ConcertWorktree | undefined;
-    if (startOptions.worktree) {
-      const worktreeOpts =
-        typeof startOptions.worktree === 'boolean'
-          ? {}
-          : startOptions.worktree;
-      const handle = await this.worktreeManager.create(score, worktreeOpts, concertId);
-      cwd = handle.path;
-      const keep = worktreeOpts.keep === true;
-      worktreeRef = {
-        path: handle.path,
-        branch: handle.branch,
-        baseDir: handle.baseDir,
-        ...(keep ? { keep: true } : {}),
-      };
-      if (!keep) {
-        const ref = worktreeRef;
-        worktreeDisposer = () => this.worktreeManager.remove(ref.path, ref.branch, ref.baseDir);
-      }
-    }
 
     const concert: Concert = {
       id: concertId,
@@ -220,38 +175,27 @@ export class ConcertHall implements ChildConcertFactory {
       parentConcertId: startOptions?.parentConcertId,
       childConcertIds: [],
       explicitHarness: startOptions?.harness,
-      worktree: worktreeRef,
     };
 
-    try {
-      const scoreYaml = yaml.dump(score);
-      await this.store.saveConcert(concert, scoreYaml);
+    const scoreYaml = yaml.dump(score);
+    await this.store.saveConcert(concert, scoreYaml);
 
-      const conductor = await this.buildConductor(
-        concert,
-        score,
-        startOptions?.harness,
-        cwd,
-        worktreeDisposer,
-      );
+    const conductor = await this.buildConductor(
+      concert,
+      score,
+      startOptions?.harness,
+      cwd,
+    );
 
-      this.conductors.set(concert.id, conductor);
+    this.conductors.set(concert.id, conductor);
 
-      if (concert.parentConcertId) {
-        const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
-        siblings.push(concert.id);
-        this.parentToChildren.set(concert.parentConcertId, siblings);
-      }
-
-      return conductor;
-    } catch (err) {
-      // If anything after worktree creation fails (DB error, build failure), do
-      // not leak the freshly created worktree/branch — dispose it before rethrowing.
-      if (worktreeDisposer) {
-        await worktreeDisposer().catch(() => {});
-      }
-      throw err;
+    if (concert.parentConcertId) {
+      const siblings = this.parentToChildren.get(concert.parentConcertId) ?? [];
+      siblings.push(concert.id);
+      this.parentToChildren.set(concert.parentConcertId, siblings);
     }
+
+    return conductor;
   }
 
   /**

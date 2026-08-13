@@ -66,16 +66,6 @@ export const OrchestronPlugin: Plugin = async (_input, options) => {
             .string()
             .optional()
             .describe("Optional working directory for the concert (tool calls land here). Defaults to the current working directory."),
-          worktree: tool.schema
-            .union([
-              tool.schema.boolean(),
-              tool.schema.object({
-                baseBranch: tool.schema.string().optional().describe("Base branch for the worktree (default: score metadata.baseBranch or origin/main)"),
-                keep: tool.schema.boolean().optional().describe("Keep the worktree after the concert finishes"),
-              }),
-            ])
-            .optional()
-            .describe("Run the concert in an isolated git worktree"),
         },
         async execute(args) {
           const o = await getOrchestron();
