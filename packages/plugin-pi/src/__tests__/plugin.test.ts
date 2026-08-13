@@ -137,7 +137,7 @@ describe('Orchestron Pi plugin tools', () => {
       store: orchestron.store,
       scoreRegistry: orchestron.registry,
       tracesDir: orchestron.tracesDir,
-      liveEventLog: orchestron.liveEventLog,
+      concertStream: orchestron.concertStream,
       adapters: new Map([
         [
           'fake',
@@ -191,7 +191,7 @@ describe('Orchestron Pi plugin tools', () => {
       store: orchestron.store,
       scoreRegistry: orchestron.registry,
       tracesDir: orchestron.tracesDir,
-      liveEventLog: orchestron.liveEventLog,
+      concertStream: orchestron.concertStream,
       adapters: new Map([
         [
           'fake',
@@ -307,7 +307,7 @@ describe('Orchestron Pi plugin tools', () => {
       hall,
       scoresDirs: [],
       tracesDir: orchestron.tracesDir,
-      liveEventLog: orchestron.liveEventLog,
+      concertStream: orchestron.concertStream,
     };
 
     const { concertId } = await startConcert(orchestron2, { scoreId: 'linear-test' });
@@ -361,7 +361,7 @@ describe('Orchestron Pi plugin tools', () => {
       hall,
       scoresDirs: [],
       tracesDir: orchestron.tracesDir,
-      liveEventLog: orchestron.liveEventLog,
+      concertStream: orchestron.concertStream,
     };
 
     const { concertId } = await startConcert(orchestron2, { scoreId: 'linear-test' });

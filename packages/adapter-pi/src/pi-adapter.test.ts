@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PiAdapter } from './pi-adapter.js';
-import type { HarnessResponse } from '@orchestron/core';
+import type { HarnessResponse, SessionRecording } from '@orchestron/core';
 
 const mockSession = {
   subscribe: vi.fn(() => vi.fn()),
@@ -500,5 +503,62 @@ describe('PiAdapter cwd', () => {
 
     const sessionOptions = (createAgentSessionMock as Mock).mock.calls[0][0] as Record<string, unknown>;
     expect(sessionOptions.cwd).toBeUndefined();
+  });
+
+  it('records raw session events and exports the native session + metadata', async () => {
+    let messageHandler: ((event: unknown) => void) | undefined;
+    const exportToJsonl = vi.fn();
+    const recordingSession = {
+      ...mockSession,
+      exportToJsonl,
+      subscribe: vi.fn((handler: (event: unknown) => void) => {
+        messageHandler = handler;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        messageHandler?.({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'hello ' },
+        });
+        messageHandler?.({ type: 'agent_end', messages: [], willRetry: false });
+      }),
+    };
+    createAgentSessionMock.mockResolvedValueOnce({ session: recordingSession, extensionsResult: {} });
+
+    const attemptDir = mkdtempSync(join(tmpdir(), 'pi-rec-'));
+    const recorded: Array<{ event: unknown; meta?: { synthetic?: boolean; type?: string } }> = [];
+    const recording: SessionRecording = {
+      concertId: 'c1',
+      movementId: 'm1',
+      attemptIndex: 0,
+      attemptDir,
+      sessionKey: 'c1:m1',
+      mode: 'cumulative',
+      events: {
+        get count() {
+          return recorded.length;
+        },
+        record(event: unknown, meta?: { synthetic?: boolean; type?: string }) {
+          recorded.push({ event, meta });
+        },
+        flush: () => Promise.resolve(),
+      },
+      recordSynthetic: (type, data) => recorded.push({ event: data, meta: { synthetic: true, type } }),
+    };
+
+    const adapter = new PiAdapter();
+    await adapter.execute('hello world', { shared: {} }, { recording, sessionId: 'c1:m1' });
+
+    // Raw SDK events recorded verbatim, in emission order, user.prompt first.
+    expect(recorded[0]).toMatchObject({ event: { prompt: 'hello world' }, meta: { synthetic: true, type: 'user.prompt' } });
+    expect(recorded[1]!.event).toMatchObject({ type: 'message_update' });
+    expect(recorded[2]!.event).toMatchObject({ type: 'agent_end' });
+
+    // Native session exported into the attempt dir before disposal.
+    expect(exportToJsonl).toHaveBeenCalledWith(join(attemptDir, 'pi-session.jsonl'));
+    expect(existsSync(join(attemptDir, 'metadata.json'))).toBe(true);
+    expect(recording.sessionId).toBeUndefined(); // export is mocked; no header id to read
+
+    rmSync(attemptDir, { recursive: true, force: true });
   });
 });

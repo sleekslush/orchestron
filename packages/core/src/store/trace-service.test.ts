@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TraceService } from './trace-service.js';
@@ -22,30 +22,37 @@ describe('TraceService', () => {
     await rm(tracesDir, { recursive: true, force: true });
   });
 
-  it('readTurns skips malformed JSON lines', async () => {
-    const concertId = 'c1';
-    const filePath = join(tracesDir, concertId, 't1.jsonl');
-    await mkdir(join(tracesDir, concertId), { recursive: true });
-    await writeFile(
-      filePath,
-      '{"type":"prompt","content":"hi","timestamp":"2024-01-01T00:00:00.000Z"}\nthis is not json\n{"type":"text_delta","delta":"ok","timestamp":"2024-01-01T00:00:01.000Z"}\n',
-    );
-
-    const trace = {
-      id: 't1',
-      concertId,
+  it('recordAttempt stores a per-attempt session trace row', async () => {
+    const id = await service.recordAttempt({
+      concertId: 'c1',
       movementId: 'm1',
-      sessionId: 's1',
-      filePath: join(concertId, 't1.jsonl'),
-      startedAt: new Date(),
+      sessionKey: 'c1:m1',
+      sessionId: 'pi-sess',
+      attemptIndex: 0,
+      harness: 'pi',
+      mode: 'cumulative',
+      filePath: 'movements/m1/attempt-0',
+      status: 'completed',
       eventCount: 3,
-      status: 'completed' as const,
-      format: 'orchestron-trace' as const,
-    };
+      startedAt: new Date('2024-01-01T00:00:00.000Z'),
+      endedAt: new Date('2024-01-01T00:00:01.000Z'),
+    });
 
-    const events = await service.readTurns(trace);
-    expect(events).toHaveLength(2);
-    expect(events[0].type).toBe('prompt');
-    expect(events[1].type).toBe('text_delta');
+    expect(id).toBeDefined();
+    const row = await store.getSessionTraceForMovement('c1', 'm1');
+    expect(row).not.toBeNull();
+    expect(row).toMatchObject({
+      concertId: 'c1',
+      movementId: 'm1',
+      sessionId: 'pi-sess',
+      sessionKey: 'c1:m1',
+      attemptIndex: 0,
+      harness: 'pi',
+      mode: 'cumulative',
+      filePath: 'movements/m1/attempt-0',
+      eventCount: 3,
+      status: 'completed',
+      format: 'pi-jsonl',
+    });
   });
 });

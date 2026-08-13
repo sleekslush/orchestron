@@ -143,7 +143,7 @@ it('movement spend limit breach', async () => {
   const conductor = await hall.createConcert('movement-constrained');
   await conductor.start();
   expect(conductor.status).toBe('failed');
-  const events = (await hall.getLiveEventLog()!.read(conductor.concertId)).filter(e => e.type === 'constraint:breached');
+  const events = (await hall.getConcertStream()!.readEvents(conductor.concertId)).filter(e => e.type === 'constraint:breached');
   expect(events).toHaveLength(1);
   const breachEvent = events[0] as Extract<typeof events[0], { type: 'constraint:breached' }>;
   expect(breachEvent.constraint).toBe('maxSpendDollars');
@@ -463,7 +463,7 @@ describe('Conductor constraints', () => {
     const conductor = await hall.createConcert('duration-limit');
     await conductor.start();
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -501,7 +501,7 @@ describe('Conductor constraints', () => {
     const conductor = await hall.createConcert('section-movement-limit');
     await conductor.start();
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -539,7 +539,7 @@ describe('Conductor constraints', () => {
     const conductor = await hall.createConcert('section-spend-limit');
     await conductor.start();
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -611,7 +611,7 @@ describe('Conductor constraints', () => {
     const conductor = await hall.createConcert('wildcard-unlisted');
     await conductor.start();
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -652,7 +652,7 @@ describe('Conductor constraints', () => {
     await conductor.start();
     // execution maxMovements = 1 (explicit override), maxSpendDollars = 0.5 (from wildcard)
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -694,7 +694,7 @@ describe('Conductor constraints', () => {
     // execution maxMovements = 5 (explicit), maxSpendDollars = 0.5 (from wildcard)
     // First movement costs $0.6, which exceeds $0.5
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 
@@ -735,7 +735,7 @@ describe('Conductor constraints', () => {
     await conductor.start();
     // execution maxMovements = 1 (from wildcard), maxSpendDollars = 5 (explicit)
     expect(conductor.status).toBe('failed');
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'constraint:breached')).toBe(true);
   });
 });
@@ -776,7 +776,7 @@ describe('Conductor movement progress', () => {
     const conductor = await hall.createConcert('progress-test');
     await conductor.start();
     expect(conductor.status).toBe('completed');
-    const progressEvents = (await hall.getLiveEventLog()!.read(conductor.concertId)).filter(e => e.type === 'movement:progress');
+    const progressEvents = (await hall.getConcertStream()!.readEvents(conductor.concertId)).filter(e => e.type === 'movement:progress');
     expect(progressEvents.length).toBeGreaterThanOrEqual(2);
     expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_start')).toBe(true);
     expect(progressEvents.some((e) => e.type === 'movement:progress' && (e as any).progressType === 'tool_execution_end')).toBe(true);
@@ -1142,7 +1142,7 @@ describe('Dual prompt selection', () => {
     const state = await conductor.getState();
     expect(state.history[0].status).toBe('rejected');
     expect(state.history[0].goalEvaluation.achieved).toBe(false);
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     expect(events.some((e) => e.type === 'movement:rejected')).toBe(true);
     expect(events.some((e) => e.type === 'movement:failed')).toBe(false);
   });

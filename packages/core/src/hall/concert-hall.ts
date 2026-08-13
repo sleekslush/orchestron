@@ -4,7 +4,7 @@ import type { Concert, ConcertID, ConcertFilter } from '../types/concert.js';
 import type { Score, ScoreID } from '../types/score.js';
 import type { HarnessAdapter, HarnessAdapterResolver } from '../types/adapter.js';
 import type { ConcertStore } from '../store/concert-store.js';
-import { LiveEventLog } from '../store/live-event-log.js';
+import { ConcertStream } from '../store/concert-stream.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { Conductor } from '../conductor/conductor.js';
 import type { IConductor } from '../conductor/conductor-interface.js';
@@ -20,7 +20,7 @@ export interface ConcertHallOptions {
   adapters: Map<string, HarnessAdapter> | HarnessAdapterResolver;
   evaluator?: Evaluator;
   tracesDir?: string;
-  liveEventLog?: LiveEventLog;
+  concertStream?: ConcertStream;
   defaultHarness?: string;
 }
 
@@ -32,7 +32,7 @@ export class ConcertHall implements ChildConcertFactory {
   private adapterResolver: AdapterResolver;
   private evaluator: Evaluator;
   private tracesDir?: string;
-  private liveEventLog?: LiveEventLog;
+  private concertStream?: ConcertStream;
   private defaultHarness?: string;
 
   constructor(options: ConcertHallOptions) {
@@ -44,12 +44,14 @@ export class ConcertHall implements ChildConcertFactory {
     }
     this.evaluator = options.evaluator;
     this.tracesDir = options.tracesDir;
-    this.liveEventLog = options.liveEventLog ?? (options.tracesDir ? new LiveEventLog(options.tracesDir) : undefined);
+    this.concertStream =
+      options.concertStream ??
+      (options.tracesDir ? new ConcertStream(options.tracesDir) : undefined);
     this.defaultHarness = options.defaultHarness;
   }
 
-  getLiveEventLog(): LiveEventLog | undefined {
-    return this.liveEventLog;
+  getConcertStream(): ConcertStream | undefined {
+    return this.concertStream;
   }
 
   private async buildConductor(
@@ -68,7 +70,7 @@ export class ConcertHall implements ChildConcertFactory {
       this.tracesDir,
       this.defaultHarness,
       (id) => this.cleanupConductor(id),
-      this.liveEventLog,
+      this.concertStream,
       cwd,
     );
     return conductor;

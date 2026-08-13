@@ -1,5 +1,5 @@
 import { dirname, join, resolve } from 'node:path';
-import type { Evaluator, HarnessAdapter, HarnessAdapterResolver, HarnessModelInfo, SqliteLoge, ScoreRegistry, ConcertHall, LiveEventLog } from '@orchestron/core';
+import type { Evaluator, HarnessAdapter, HarnessAdapterResolver, HarnessModelInfo, SqliteLoge, ScoreRegistry, ConcertHall, ConcertStream } from '@orchestron/core';
 import { resolveOrchestronConfig, DEFAULT_CONFIG_DIR, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR, ensureDir, loadScoresFromDir } from '@orchestron/core';
 
 export { DEFAULT_CONFIG_DIR, DEFAULT_STORE_PATH, DEFAULT_SCORES_DIR, LOCAL_SCORES_DIR };
@@ -23,7 +23,7 @@ export interface Orchestron {
   store: SqliteLoge;
   registry: ScoreRegistry;
   hall: ConcertHall;
-  liveEventLog: LiveEventLog;
+  concertStream: ConcertStream;
   tracesDir: string;
   /** List available models for one harness, or for all registered harnesses. */
   listModels(harness?: string): Promise<OrchestronModelEntry[]>;
@@ -155,10 +155,10 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     evaluator = new HarnessEvaluator({ adapter: defaultAdapter });
   }
 
-  const tracesDir = join(dirname(storePath), 'traces');
+  const tracesDir = join(dirname(storePath), 'concerts');
   ensureDir(tracesDir);
-  const { LiveEventLog } = await import('@orchestron/core');
-  const liveEventLog = new LiveEventLog(tracesDir);
+  const { ConcertStream } = await import('@orchestron/core');
+  const concertStream = new ConcertStream(tracesDir);
 
   const hall = new ConcertHall({
     store,
@@ -166,11 +166,11 @@ export async function createOrchestron(options: OrchestronOptions = {}): Promise
     adapters: adapterResolver,
     evaluator,
     tracesDir,
-    liveEventLog,
+    concertStream,
     defaultHarness,
   });
 
-  return { store, registry, hall, liveEventLog, tracesDir, listModels, dispose };
+  return { store, registry, hall, concertStream, tracesDir, listModels, dispose };
 }
 
 function adapterNames(source: Map<string, HarnessAdapter> | HarnessAdapterResolver): string[] {

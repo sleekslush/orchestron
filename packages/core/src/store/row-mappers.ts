@@ -95,6 +95,10 @@ export interface SessionTraceRow {
   concert_id: string;
   movement_id: string;
   session_id: string;
+  session_key: string | null;
+  attempt_index: number | null;
+  harness: string | null;
+  mode: string | null;
   file_path: string;
   started_at: string;
   completed_at: string | null;
@@ -159,6 +163,10 @@ export function rowToSessionTrace(row: SessionTraceRow): SessionTrace {
     concertId: row.concert_id,
     movementId: row.movement_id,
     sessionId: row.session_id,
+    sessionKey: row.session_key ?? undefined,
+    attemptIndex: row.attempt_index ?? undefined,
+    harness: row.harness ?? undefined,
+    mode: row.mode === 'cumulative' || row.mode === 'fresh' ? row.mode : undefined,
     filePath: row.file_path,
     startedAt: deserializeDate(row.started_at)!,
     completedAt: deserializeDate(row.completed_at),

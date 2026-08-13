@@ -1,5 +1,6 @@
 import type { Orchestron } from '../orchestron.js';
-import type { ConcertEvent } from '@orchestron/core';
+import type { ConcertEvent, StreamRecord } from '@orchestron/core';
+import { streamRecordToEvent, streamRecordsToEvents } from '@orchestron/core';
 import {
   printOutput,
   formatConcertHuman,
@@ -89,6 +90,88 @@ function printLiveEvent(event: ConcertEvent): void {
   }
 }
 
+function truncateJson(data: unknown, max = 240): string {
+  let text: string;
+  try {
+    text = JSON.stringify(data);
+  } catch {
+    text = String(data);
+  }
+  return text.length > max ? text.slice(0, max) + '…' : text;
+}
+
+/** Render a raw SDK stream record for the terminal (display-only). */
+function printSdkRecord(record: StreamRecord): void {
+  const attempt = record.attempt !== undefined ? ` attempt=${record.attempt}` : '';
+  const harness = record.harness ? `[${record.harness}]` : '';
+  const data = record.data as Record<string, unknown> | undefined;
+  const props = (data?.properties as Record<string, unknown> | undefined) ?? data;
+
+  if (record.synthetic && record.type === 'user.prompt') {
+    const prompt = (data as { prompt?: unknown } | undefined)?.prompt;
+    if (typeof prompt === 'string') {
+      const text = prompt.length > 200 ? prompt.slice(0, 200) + '…' : prompt;
+      process.stderr.write(`\n> ${text}\n`);
+      return;
+    }
+  }
+
+  switch (record.type) {
+    case 'message_update': {
+      const inner = data?.assistantMessageEvent as { type?: unknown; delta?: unknown } | undefined;
+      if (inner?.type === 'text_delta' && typeof inner.delta === 'string') {
+        process.stderr.write(inner.delta);
+      }
+      return;
+    }
+    case 'tool_execution_start':
+      console.error(`  ↳ ${harness}${attempt} ${String(data?.toolName ?? 'tool')}...`);
+      return;
+    case 'tool_execution_end':
+      if (typeof data?.isError === 'boolean' && data.isError) {
+        console.error(`  ↳ ${harness}${attempt} ${String(data?.toolName ?? 'tool')} [error: ${String(data?.error ?? 'unknown')}]`);
+      } else {
+        console.error(`  ↳ ${harness}${attempt} ${String(data?.toolName ?? 'tool')}`);
+      }
+      return;
+    case 'session.next.text.delta': {
+      const delta = props?.delta;
+      if (typeof delta === 'string') {
+        process.stderr.write(delta);
+      }
+      return;
+    }
+    case 'session.next.tool.called':
+      console.error(`  ↳ ${harness}${attempt} ${String(props?.tool ?? 'tool')}...`);
+      return;
+    case 'session.next.tool.success':
+    case 'session.next.tool.failed':
+      console.error(
+        `  ↳ ${harness}${attempt} ${String(props?.tool ?? props?.callID ?? 'tool')}${record.type === 'session.next.tool.failed' ? ' [error]' : ''}`,
+      );
+      return;
+    case 'turn_end':
+    case 'agent_end':
+      console.error(`  ${harness}${attempt} ${record.type}`);
+      return;
+    case 'session.next.step.ended':
+    case 'session.next.step.failed':
+      console.error(`  ${harness}${attempt} ${record.type.replace('session.next.', '')}`);
+      return;
+    default:
+      console.error(`  ${harness}${attempt} ${record.type} ${truncateJson(record.data)}`);
+  }
+}
+
+function printStreamRecord(record: StreamRecord): void {
+  if (record.source === 'concert') {
+    const event = streamRecordToEvent(record);
+    if (event) printLiveEvent(event);
+    return;
+  }
+  printSdkRecord(record);
+}
+
 async function renderStatus(
   orchestron: Orchestron,
   concertId: string,
@@ -101,11 +184,12 @@ async function renderStatus(
   }
 
   const history = await orchestron.store.getMovementHistory(concertId);
-  const events = await orchestron.liveEventLog.read(concertId);
-  const fallbackEvents = events.length === 0 ? await orchestron.store.getEvents(concertId) : events;
-  const failure = extractFailure(fallbackEvents);
-  const progress = latestProgressEvent(fallbackEvents);
-  const started = latestStartedEvent(fallbackEvents);
+  const records = await orchestron.concertStream.read(concertId);
+  const streamEvents = streamRecordsToEvents(records);
+  const events = streamEvents.length > 0 ? streamEvents : await orchestron.store.getEvents(concertId);
+  const failure = extractFailure(events);
+  const progress = latestProgressEvent(events);
+  const started = latestStartedEvent(events);
   const currentCommand = currentCommandFromProgress(progress);
   const currentPrompt = started?.prompt;
 
@@ -124,7 +208,7 @@ async function renderStatus(
   };
 
   printOutput(json, output, () =>
-    formatConcertHuman(state, history, fallbackEvents, verbose, currentCommand, currentPrompt),
+    formatConcertHuman(state, history, events, verbose, currentCommand, currentPrompt),
   );
 }
 
@@ -133,6 +217,7 @@ async function watchStatus(
   concertId: string,
   json: boolean,
   verbose: boolean,
+  raw: boolean,
 ): Promise<void> {
   const state = await orchestron.store.getConcert(concertId);
   if (!state) {
@@ -158,17 +243,23 @@ async function watchStatus(
   };
 
   try {
-    for await (const batch of orchestron.liveEventLog.watch(concertId, {
+    for await (const batch of orchestron.concertStream.watch(concertId, {
       signal: controller.signal,
     })) {
-      for (const event of batch) {
-        printLiveEvent(event);
+      for (const record of batch) {
+        if (raw) {
+          console.log(JSON.stringify(record));
+          continue;
+        }
+        printStreamRecord(record);
       }
       const terminal = await checkTerminal();
       if (terminal) break;
     }
-  } catch {
-    // Aborted by terminal status or user; render final status below.
+  } catch (err) {
+    if (!(err instanceof Error && err.name === 'AbortError')) {
+      console.error(`watch interrupted: ${(err as Error).message}`);
+    }
   }
 
   await renderStatus(orchestron, concertId, json, verbose);
@@ -180,10 +271,11 @@ export async function statusCommandHandler(
   json: boolean,
   verbose = false,
   watch = false,
+  raw = false,
 ): Promise<void> {
   if (concertId) {
     if (watch) {
-      await watchStatus(orchestron, concertId, json, verbose);
+      await watchStatus(orchestron, concertId, json, verbose, raw);
       return;
     }
     await renderStatus(orchestron, concertId, json, verbose);

@@ -156,7 +156,7 @@ describe('Use Case: Plan → Review → End', () => {
     const conductor = await hall.createConcert('plan-review');
     await conductor.start();
 
-    const events = await hall.getLiveEventLog()!.read(conductor.concertId);
+    const events = await hall.getConcertStream()!.readEvents(conductor.concertId);
     const eventTypes = events.map(e => e.type);
     expect(eventTypes).toEqual([
       'concert:started',

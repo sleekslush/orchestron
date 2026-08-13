@@ -47,9 +47,9 @@ export async function getConcertStatus(
   const history = await orchestron.store.getMovementHistory(input.concertId);
   let events: ConcertEvent[] = [];
   if (state.currentMovement) {
-    // Prefer the live event log; fall back to SQLite events (backward compat)
-    // when no live log exists for the concert yet.
-    const live = await orchestron.liveEventLog.read(input.concertId);
+    // Prefer the unified stream; fall back to SQLite events (backward compat)
+    // when no stream exists for the concert yet.
+    const live = await orchestron.concertStream.readEvents(input.concertId);
     events = live.length > 0
       ? live
       : await orchestron.store.getEvents(input.concertId, {

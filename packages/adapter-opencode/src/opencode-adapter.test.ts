@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { OpencodeAdapter } from './opencode-adapter.js';
-import type { HarnessResponse } from '@orchestron/core';
+import type { HarnessResponse, SessionRecording } from '@orchestron/core';
 
 const mockModelList = vi.fn();
 
@@ -11,6 +14,7 @@ const mockClient = {
     delete: vi.fn(),
     abort: vi.fn(),
     messages: vi.fn(),
+    get: vi.fn(),
   },
   event: {
     subscribe: vi.fn(),
@@ -485,32 +489,6 @@ describe('OpencodeAdapter', () => {
     expect(mockClient.session.delete).not.toHaveBeenCalled();
   });
 
-  it('getSessionTraceEvents ignores tool parts with null state', async () => {
-    mockClient.session.messages.mockResolvedValue({
-      data: [
-        {
-          info: { role: 'assistant', time: { created: Date.now() } },
-          parts: [
-            makeTextPart('hello'),
-            { type: 'tool', tool: 'git_status', state: null },
-            { type: 'tool', tool: 'read', state: { status: 'success', input: { path: 'a.ts' }, output: 'content' } },
-          ],
-        },
-      ],
-    });
-    const adapter = new OpencodeAdapter();
-
-    await adapter.execute('x', { shared: {} }, { sessionId: 'c1:m1' });
-    const events = await adapter.getSessionTraceEvents('c1:m1');
-
-    expect(events).toHaveLength(3); // text_delta + tool_execution_start + tool_execution_end
-    expect(events[0].type).toBe('text_delta');
-    expect(events[1].type).toBe('tool_execution_start');
-    expect((events[1] as any).toolName).toBe('read');
-    expect(events[2].type).toBe('tool_execution_end');
-    expect((events[2] as any).toolName).toBe('read');
-  });
-
   it('validates model before prompt when model and provider are specified', async () => {
     const adapter = new OpencodeAdapter();
 
@@ -775,4 +753,61 @@ describe('OpencodeAdapter', () => {
     await adapter.execute('hello', { shared: {} });
 
     expect(mockClient.session.create).toHaveBeenCalledWith({ title: 'ephemeral' });
+  });
+
+  it('records raw SDK events and exports the native session + metadata', async () => {
+    const sdkEvents = [
+      { type: 'session.next.text.delta', properties: { sessionID: 'session-1', delta: 'Hello ' } },
+      { type: 'session.next.step.ended', properties: { sessionID: 'session-1' } },
+    ];
+    mockClient.event.subscribe.mockResolvedValue({
+      stream: (async function* () {
+        for (const e of sdkEvents) yield e;
+      })(),
+    });
+    mockClient.session.get.mockResolvedValue({
+      data: { id: 'session-1', title: 'test', version: 1 },
+    });
+    mockClient.session.messages.mockResolvedValue({
+      data: [{ info: { role: 'assistant', id: 'msg-1', sessionID: 'session-1' }, parts: [makeTextPart('hello')] }],
+    });
+
+    const attemptDir = mkdtempSync(join(tmpdir(), 'opencode-rec-'));
+    const recorded: Array<{ event: unknown; meta?: { synthetic?: boolean; type?: string } }> = [];
+    const recording: SessionRecording = {
+      concertId: 'c1',
+      movementId: 'm1',
+      attemptIndex: 0,
+      attemptDir,
+      sessionKey: undefined,
+      mode: 'fresh',
+      events: {
+        get count() {
+          return recorded.length;
+        },
+        record(event: unknown, meta?: { synthetic?: boolean; type?: string }) {
+          recorded.push({ event, meta });
+        },
+        flush: () => Promise.resolve(),
+      },
+      recordSynthetic: (type, data) => recorded.push({ event: data, meta: { synthetic: true, type } }),
+    };
+
+    const adapter = new OpencodeAdapter();
+    await adapter.execute('hi there', { shared: {} }, { recording });
+
+    // Real SDK session id stamped on the recording as soon as it is known.
+    expect(recording.sessionId).toBe('session-1');
+
+    // user.prompt synthetic first, then raw SDK events verbatim.
+    expect(recorded[0]).toMatchObject({ event: { prompt: 'hi there' }, meta: { synthetic: true, type: 'user.prompt' } });
+    expect(recorded[1]!.event).toEqual(sdkEvents[0]);
+    expect(recorded[2]!.event).toEqual(sdkEvents[1]);
+
+    // Native {info, messages} artifact + metadata.json written before session deletion.
+    expect(existsSync(join(attemptDir, 'opencode-session.json'))).toBe(true);
+    expect(existsSync(join(attemptDir, 'metadata.json'))).toBe(true);
+    expect(mockClient.session.get).toHaveBeenCalledWith({ sessionID: 'session-1' });
+
+    rmSync(attemptDir, { recursive: true, force: true });
   });
