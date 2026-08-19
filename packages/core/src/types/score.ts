@@ -111,6 +111,13 @@ export interface Score {
   startMovement: MovementID;
   program?: Program;
   /**
+   * Dot-path keys (e.g. `ticket`, `project.name`) that must resolve to a
+   * non-null value in the shared context when a concert starts. A concert
+   * whose required key is missing fails immediately, before any movement
+   * executes.
+   */
+  requiredContext?: string[];
+  /**
    * Optional score-level model defaults, keyed by harness type.
    * Movements inherit these unless they specify their own \`model\`.
    */

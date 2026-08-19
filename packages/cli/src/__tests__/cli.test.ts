@@ -61,7 +61,9 @@ ${m.transitions.map((t) => `      - to: ${t.to}\n        on: ${t.on}`).join('\n'
 name: ${score.name}
 version: ${score.version}
 startMovement: ${score.startMovement}
-movements:
+${score.requiredContext ? `requiredContext:
+${score.requiredContext.map((k) => `  - ${k}`).join('\n')}
+` : ''}movements:
 ${movementsYaml}
 program: {}
 `;
@@ -845,5 +847,63 @@ describe('CLI commands', () => {
     const output = logs.join('\n');
     expect(output).not.toContain('$0.000000');
     expect(output).toContain('Usage: unknown / 50 tokens');
+  });
+
+  it('fails a start when a required context key is missing and succeeds when supplied', async () => {
+    const requiredScore: Score = {
+      id: 'req-cli',
+      name: 'Req CLI',
+      version: '1.0.0',
+      startMovement: 'step1',
+      requiredContext: ['ticket'],
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'test',
+          harness: 'fake',
+          prompt: 'Do step 1 for {{context.ticket}}',
+          goal: { description: 'Step 1 done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+
+    const scoresDir = join(dir, 'scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, requiredScore);
+
+    const orchestron = await createOrchestron({
+      storePath: join(dir, 'req-cli-store.db'),
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', new FakeHarnessAdapter({ defaultResponse: { output: 'ok', summary: 'ok', usage: { spend: 1, tokens: 1 } } })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'req-cli', {}, false);
+    } finally {
+      restore();
+    }
+    const failedOutput = logs.join('\n');
+    expect(failedOutput).toContain('Status:  failed');
+    expect(failedOutput).toContain('Missing required context: ticket');
+
+    const failedConcerts = await orchestron.store.listConcerts();
+    expect(failedConcerts).toHaveLength(1);
+    expect(failedConcerts[0].status).toBe('failed');
+    expect(await orchestron.store.getMovementHistory(failedConcerts[0].id)).toHaveLength(0);
+
+    const { logs: okLogs, restore: restoreOk } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'req-cli', { ticket: 'PROJ-1' }, false);
+    } finally {
+      restoreOk();
+      orchestron.store.close();
+    }
+    expect(okLogs.join('\n')).toContain('Status:  completed');
   });
 });

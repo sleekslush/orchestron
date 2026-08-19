@@ -223,6 +223,26 @@ describe('ScoreRegistry', () => {
     ).toThrow();
   });
 
+  it('should accept a valid requiredContext list', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['ticket', 'project.name'] })),
+    ).not.toThrow();
+  });
+
+  it('should reject a requiredContext that is not an array of non-empty strings', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: 'ticket' as unknown as string[] })),
+    ).toThrow(/requiredContext/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['ticket', ''] })),
+    ).toThrow(/requiredContext/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['ticket', 42 as unknown as string] })),
+    ).toThrow(/requiredContext/);
+  });
+
   it('should throw on get for an unregistered score', () => {
     const registry = new ScoreRegistry();
     expect(() => registry.get('nonexistent')).toThrow('not found');
