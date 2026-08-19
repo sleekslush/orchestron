@@ -10,9 +10,18 @@ function makeTempDir(): string {
   return dir;
 }
 
-function writeScore(dir: string, score: { id: string; requiredContext?: string[] }): void {
+function writeScore(
+  dir: string,
+  score: { id: string; requiredContext?: Array<string | { key: string; description: string }> },
+): void {
   const required = score.requiredContext
-    ? `requiredContext:\n${score.requiredContext.map((k) => `  - ${k}`).join('\n')}\n`
+    ? `requiredContext:\n${score.requiredContext
+        .map((k) =>
+          typeof k === 'string'
+            ? `  - ${k}`
+            : `  - key: ${k.key}\n    description: ${k.description}`,
+        )
+        .join('\n')}\n`
     : '';
   const yaml = `id: ${score.id}
 name: ${score.id} Score
@@ -75,6 +84,21 @@ describe('orchestron start help', () => {
     expect(stdout).toContain('Required context:');
     expect(stdout).toContain('  --context.ticket=<value>');
     expect(stdout).toContain('  --context.project.name=<value>');
+  });
+
+  it('shows the description for object entries while keeping string-only keys unchanged', async () => {
+    writeScore(dir, {
+      id: 'req-help',
+      requiredContext: ['ticket', { key: 'project.name', description: 'Namespace of the project to act on' }],
+    });
+
+    const { stdout } = await runHelp(['--scores-dir', dir, 'start', 'req-help', '--help']);
+
+    // String-only key renders exactly as before.
+    expect(stdout).toContain('  --context.ticket=<value>');
+    // Object key renders its flag plus the description.
+    expect(stdout).toContain('  --context.project.name=<value>');
+    expect(stdout).toContain('    Namespace of the project to act on');
   });
 
   it('supports -h the same as --help', async () => {

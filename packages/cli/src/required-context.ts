@@ -1,6 +1,10 @@
 import { readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { ScoreRegistry } from '@orchestron/core';
+import {
+  ScoreRegistry,
+  normalizeRequiredContext,
+  type RequiredContextItem,
+} from '@orchestron/core';
 
 const SCORE_FILE_PATTERN = /\.score\.(ya?ml)$/i;
 
@@ -17,7 +21,7 @@ const SCORE_FILE_PATTERN = /\.score\.(ya?ml)$/i;
 function loadScoreRequiredContext(
   scoreId: string,
   scoresDirs: string[],
-): string[] | undefined {
+): RequiredContextItem[] | undefined {
   const registry = new ScoreRegistry();
   for (const dir of scoresDirs) {
     let entries: string[];
@@ -44,7 +48,8 @@ function loadScoreRequiredContext(
     }
   }
   try {
-    return registry.get(scoreId).requiredContext ?? [];
+    const required = registry.get(scoreId).requiredContext;
+    return normalizeRequiredContext(required);
   } catch {
     return undefined;
   }
@@ -70,6 +75,12 @@ export function renderRequiredContextHelp(
   if (required.length === 0) {
     return '\nRequired context:\n  This score declares no required context.\n';
   }
-  const rows = required.map((key) => `  --context.${key}=<value>`).join('\n');
+  const rows = required
+    .map(({ key, description }) =>
+      description
+        ? `  --context.${key}=<value>\n    ${description}`
+        : `  --context.${key}=<value>`,
+    )
+    .join('\n');
   return `\nRequired context:\n${rows}\n`;
 }

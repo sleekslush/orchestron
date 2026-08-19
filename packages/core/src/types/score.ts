@@ -101,6 +101,19 @@ export interface MovementBudget {
   timeoutMs?: number;
 }
 
+export interface RequiredContextEntry {
+  key: string;
+  description: string;
+}
+
+/**
+ * A single required-context input, expressed either as a flat dot-path key
+ * (no description) or an object carrying the key plus a human-readable
+ * description. Object entries power richer `orchestron start <id> --help`
+ * output; both forms behave identically for enforcement.
+ */
+export type RequiredContext = Array<string | RequiredContextEntry>;
+
 export interface Score {
   id: ScoreID;
   name: string;
@@ -114,9 +127,10 @@ export interface Score {
    * Dot-path keys (e.g. `ticket`, `project.name`) that must resolve to a
    * non-null value in the shared context when a concert starts. A concert
    * whose required key is missing fails immediately, before any movement
-   * executes.
+   * executes. Each entry is either a flat key (no description) or a
+   * `{ key, description }` object whose description is shown in start help.
    */
-  requiredContext?: string[];
+  requiredContext?: RequiredContext;
   /**
    * Optional score-level model defaults, keyed by harness type.
    * Movements inherit these unless they specify their own \`model\`.

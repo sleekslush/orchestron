@@ -88,18 +88,73 @@ export class ScoreRegistry {
     const movementIds = new Set(score.movements.map((m) => m.id));
 
     if (score.requiredContext !== undefined) {
-      if (
-        !Array.isArray(score.requiredContext) ||
-        score.requiredContext.some(
-          (key) => typeof key !== 'string' || key.trim() === '',
-        )
-      ) {
+      if (!Array.isArray(score.requiredContext)) {
         errors.push(
           new ScoreValidationError(
-            `Score '${score.id}': 'requiredContext' must be an array of non-empty strings`,
+            `Score '${score.id}': 'requiredContext' must be an array of non-empty strings or {key, description} objects`,
             'INVALID_SCORE',
           ),
         );
+      } else {
+        const seen = new Map<string, boolean>();
+        for (const entry of score.requiredContext) {
+          const isObjectEntry = isPlainObject(entry);
+          let key: string | undefined;
+          if (isObjectEntry) {
+            const obj = entry as { key?: unknown; description?: unknown };
+            if (typeof obj.key !== 'string' || obj.key.trim() === '') {
+              errors.push(
+                new ScoreValidationError(
+                  `Score '${score.id}': requiredContext object entries must have a non-empty 'key'`,
+                  'INVALID_SCORE',
+                ),
+              );
+              continue;
+            }
+            if (typeof obj.description !== 'string' || obj.description.trim() === '') {
+              errors.push(
+                new ScoreValidationError(
+                  `Score '${score.id}': requiredContext object entry '${obj.key}' must have a non-empty 'description'`,
+                  'INVALID_SCORE',
+                ),
+              );
+              continue;
+            }
+            key = obj.key;
+          } else if (typeof entry === 'string') {
+            if (entry.trim() === '') {
+              errors.push(
+                new ScoreValidationError(
+                  `Score '${score.id}': requiredContext entries must be non-empty strings`,
+                  'INVALID_SCORE',
+                ),
+              );
+              continue;
+            }
+            key = entry;
+          } else {
+            errors.push(
+              new ScoreValidationError(
+                `Score '${score.id}': requiredContext entries must be non-empty strings or {key, description} objects`,
+                'INVALID_SCORE',
+              ),
+            );
+            continue;
+          }
+          const previouslyObject = seen.get(key);
+          if (previouslyObject !== undefined) {
+            if (isObjectEntry || previouslyObject) {
+              errors.push(
+                new ScoreValidationError(
+                  `Score '${score.id}': requiredContext key '${key}' is duplicated with an object entry`,
+                  'INVALID_SCORE',
+                ),
+              );
+            }
+          } else {
+            seen.set(key, isObjectEntry);
+          }
+        }
       }
     }
 

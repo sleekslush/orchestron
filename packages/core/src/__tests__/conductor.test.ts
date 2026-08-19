@@ -8,7 +8,7 @@ import { ConcertHall } from '../hall/concert-hall.js';
 import { Conductor } from '../conductor/conductor.js';
 import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
 import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
-import type { Score, MovementID } from '../types/score.js';
+import type { Score, MovementID, RequiredContext } from '../types/score.js';
 import type { Concert, ConcertID } from '../types/concert.js';
 import type { ConcertEvent } from '../types/events.js';
 import type { ConcertHallOptions } from '../hall/concert-hall.js';
@@ -312,7 +312,7 @@ it('sub-scores keep spend undefined when the child cost is unmeasured', async ()
 // ─── Required Context Tests ────────────────────────────────
 
 describe('Required context', () => {
-  const requiredScore = (requiredContext: string[]): Score => ({
+  const requiredScore = (requiredContext: RequiredContext): Score => ({
     id: 'req-test',
     name: 'Req Test',
     description: 'requires input',
@@ -427,6 +427,41 @@ describe('Required context', () => {
 
     const stored = await store.getConcert(missing.concertId);
     expect(stored?.status).toBe('failed');
+  });
+
+  it('fails immediately when a required object-entry key is missing', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore([
+      { key: 'project.name', description: 'Namespace of the project to act on' },
+    ]));
+    const { hall, adapter } = createTestHall(registry);
+
+    const conductor = await hall.createConcert('req-test', { initialContext: {} });
+    const events: ConcertEvent[] = [];
+    conductor.onEvent((e) => events.push(e));
+    await conductor.start();
+
+    const state = await conductor.getState();
+    expect(state.status).toBe('failed');
+    expect(state.history).toHaveLength(0);
+    expect(adapter.prompts).toHaveLength(0);
+    const failed = events.find((e) => e.type === 'concert:failed');
+    expect(failed?.error?.message).toContain('project.name');
+  });
+
+  it('completes normally when all required object-entry keys are present', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore([
+      'ticket',
+      { key: 'project.name', description: 'Namespace of the project to act on' },
+    ]));
+    const { hall } = createTestHall(registry);
+
+    const conductor = await hall.createConcert('req-test', {
+      initialContext: { ticket: 'PROJ-1', project: { name: 'alpha' } },
+    });
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
   });
 
   it('treats falsy-but-present values as present', async () => {

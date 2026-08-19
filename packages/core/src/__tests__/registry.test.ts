@@ -243,6 +243,70 @@ describe('ScoreRegistry', () => {
     ).toThrow(/requiredContext/);
   });
 
+  it('should accept requiredContext object entries with a key and description', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({
+        requiredContext: ['ticket', { key: 'project.name', description: 'Namespace of the project to act on' }],
+      })),
+    ).not.toThrow();
+  });
+
+  it('should reject requiredContext object entries with a missing/non-string/blank key', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: [{ description: 'x' } as never] })),
+    ).toThrow(/key/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: [{ key: '', description: 'x' }] })),
+    ).toThrow(/key/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: [{ key: 42 as never, description: 'x' }] })),
+    ).toThrow(/key/);
+  });
+
+  it('should reject requiredContext object entries with a missing/non-string/blank description', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: [{ key: 'ticket' } as never] })),
+    ).toThrow(/description/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: [{ key: 'ticket', description: '' }] })),
+    ).toThrow(/description/);
+  });
+
+  it('should reject requiredContext entries that are neither a string nor a plain object', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: [42 as unknown as string] })),
+    ).toThrow(/requiredContext/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: [null as unknown as string] })),
+    ).toThrow(/requiredContext/);
+  });
+
+  it('should reject duplicate requiredContext keys when at least one entry is an object', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['ticket', { key: 'ticket', description: 'd' }] })),
+    ).toThrow(/duplicated/);
+    expect(() =>
+      registry.register(validScore({
+        requiredContext: [
+          { key: 'ticket', description: 'a' },
+          { key: 'ticket', description: 'b' },
+        ],
+      })),
+    ).toThrow(/duplicated/);
+  });
+
+  it('should allow duplicate requiredContext keys when both are flat strings', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['ticket', 'ticket'] })),
+    ).not.toThrow();
+  });
+
   it('should throw on get for an unregistered score', () => {
     const registry = new ScoreRegistry();
     expect(() => registry.get('nonexistent')).toThrow('not found');
