@@ -849,7 +849,7 @@ describe('CLI commands', () => {
     expect(output).toContain('Usage: unknown / 50 tokens');
   });
 
-  it('fails a start when a required context key is missing and succeeds when supplied', async () => {
+  it('rejects a start before creating a concert when a required context key is missing', async () => {
     const requiredScore: Score = {
       id: 'req-cli',
       name: 'Req CLI',
@@ -882,20 +882,12 @@ describe('CLI commands', () => {
       defaultHarness: 'fake',
     });
 
-    const { logs, restore } = captureOutput();
-    try {
-      await startCommandHandler(orchestron, 'req-cli', {}, false);
-    } finally {
-      restore();
-    }
-    const failedOutput = logs.join('\n');
-    expect(failedOutput).toContain('Status:  failed');
-    expect(failedOutput).toContain('Missing required context: ticket');
+    await expect(
+      startCommandHandler(orchestron, 'req-cli', {}, false),
+    ).rejects.toThrow('Missing required context: ticket');
 
-    const failedConcerts = await orchestron.store.listConcerts();
-    expect(failedConcerts).toHaveLength(1);
-    expect(failedConcerts[0].status).toBe('failed');
-    expect(await orchestron.store.getMovementHistory(failedConcerts[0].id)).toHaveLength(0);
+    const concerts = await orchestron.store.listConcerts();
+    expect(concerts).toHaveLength(0);
 
     const { logs: okLogs, restore: restoreOk } = captureOutput();
     try {
