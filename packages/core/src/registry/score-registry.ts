@@ -87,6 +87,22 @@ export class ScoreRegistry {
 
     const movementIds = new Set(score.movements.map((m) => m.id));
 
+    if (score.requiredContext !== undefined) {
+      if (
+        !Array.isArray(score.requiredContext) ||
+        score.requiredContext.some(
+          (key) => typeof key !== 'string' || key.trim() === '',
+        )
+      ) {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${score.id}': 'requiredContext' must be an array of non-empty strings`,
+            'INVALID_SCORE',
+          ),
+        );
+      }
+    }
+
     for (const [scope, entry] of this.collectModelEntries(score)) {
       if (entry.options !== undefined && !isPlainObject(entry.options)) {
         errors.push(

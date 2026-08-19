@@ -56,6 +56,19 @@ export { StartOptions };
 const DEFAULT_MOVEMENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const HEARTBEAT_INTERVAL_MS = 5000; // 5 seconds
 
+/** Resolve a dot-path key (e.g. `ticket`, `project.name`) in a context object. */
+function resolveContextPath(context: Record<string, unknown>, path: string): unknown {
+  let value: unknown = context;
+  for (const part of path.split('.')) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      value = (value as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
+  }
+  return value;
+}
+
 export class Conductor implements IConductor {
   private abortController = new AbortController();
   private pauseResolver: (() => void) | null = null;
@@ -133,6 +146,18 @@ export class Conductor implements IConductor {
       };
     }
 
+    // Fail fast when required input context is missing: finalize as failed
+    // before the `running` transition so no `concert:started` event fires, no
+    // movement executes, and no harness session is resolved.
+    const missingRequired = this.missingRequiredContext();
+    if (missingRequired.length > 0) {
+      await this.finalize(
+        'failed',
+        `Missing required context: ${missingRequired.join(', ')}`,
+      );
+      return;
+    }
+
     if (options?.nestingDepth !== undefined) {
       this.nestingDepth = options.nestingDepth;
     } else if (this.concert.parentConcertId) {
@@ -163,6 +188,23 @@ export class Conductor implements IConductor {
       (err) => this.handleExecutionError(err),
     );
     await this.loopPromise;
+  }
+
+  /**
+   * Required context keys whose dot-path value in the shared context is
+   * `undefined` or `null`. Falsy-but-present values (`false`, `0`, `''`)
+   * count as present.
+   */
+  private missingRequiredContext(): string[] {
+    const required = this.score.requiredContext ?? [];
+    const missing: string[] = [];
+    for (const key of required) {
+      const value = resolveContextPath(this.concert.context.shared, key);
+      if (value === undefined || value === null) {
+        missing.push(key);
+      }
+    }
+    return missing;
   }
 
   async recover(): Promise<void> {
@@ -1433,7 +1475,7 @@ export class Conductor implements IConductor {
         concertId: this.concert.id,
         scoreId: this.score.id,
         status,
-        startedAt: new Date(this.startedAt).toISOString(),
+        startedAt: this.concert.startedAt.toISOString(),
         completedAt: this.concert.completedAt?.toISOString(),
         stream: 'stream.jsonl',
         movements,

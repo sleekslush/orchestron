@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteLoge } from '../store/sqlite-loge.js';
@@ -10,6 +10,7 @@ import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
 import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
 import type { Score, MovementID } from '../types/score.js';
 import type { Concert, ConcertID } from '../types/concert.js';
+import type { ConcertEvent } from '../types/events.js';
 import type { ConcertHallOptions } from '../hall/concert-hall.js';
 
 function createHall(options: Omit<ConcertHallOptions, 'tracesDir'>): ConcertHall {
@@ -306,6 +307,255 @@ it('sub-scores keep spend undefined when the child cost is unmeasured', async ()
   const state = await conductor.getState();
   expect(state.usage.spend).toBeUndefined();
   expect(state.usage.tokens).toBe(50);
+});
+
+// ─── Required Context Tests ────────────────────────────────
+
+describe('Required context', () => {
+  const requiredScore = (requiredContext: string[]): Score => ({
+    id: 'req-test',
+    name: 'Req Test',
+    description: 'requires input',
+    version: '1.0.0',
+    startMovement: 'step1',
+    requiredContext,
+    movements: [
+      {
+        id: 'step1',
+        name: 'Step 1',
+        section: 'default',
+        harness: 'fake',
+        prompt: 'Do step 1 for {{context.ticket}}',
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      },
+    ],
+    program: {},
+  });
+
+  function createTestHall(registry: ScoreRegistry) {
+    const store = new SqliteLoge(':memory:');
+    const adapter = new CapturingFakeHarnessAdapter({
+      defaultResponse: { output: 'out', summary: 'done', usage: { spend: 5, tokens: 50 } },
+    });
+    const hall = createHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    return { store, adapter, hall };
+  }
+
+  it('fails immediately when a required context key is missing', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['ticket']));
+    const { store, adapter, hall } = createTestHall(registry);
+
+    const conductor = await hall.createConcert('req-test', { initialContext: {} });
+    const events: ConcertEvent[] = [];
+    conductor.onEvent((e) => events.push(e));
+    await conductor.start();
+
+    const state = await conductor.getState();
+    expect(state.status).toBe('failed');
+    expect(state.history).toHaveLength(0);
+    expect(adapter.prompts).toHaveLength(0);
+    // No `concert:started` event — the concert never transitioned to running.
+    expect(events.some((e) => e.type === 'concert:started')).toBe(false);
+    const failed = events.find((e) => e.type === 'concert:failed');
+    expect(failed?.error?.message).toContain('ticket');
+
+    const stored = await store.getConcert(conductor.concertId);
+    expect(stored?.status).toBe('failed');
+    expect(stored?.history).toHaveLength(0);
+  });
+
+  it('writes a real startedAt to the traced index on fail-fast', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['ticket']));
+    const store = new SqliteLoge(':memory:');
+    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-events-'));
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['fake', new FakeHarnessAdapter({
+        defaultResponse: { output: 'out', summary: 'done', usage: { spend: 5, tokens: 50 } },
+      })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      tracesDir,
+    });
+
+    const conductor = await hall.createConcert('req-test', { initialContext: {} });
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+
+    // The fail-fast path finalizes before the running transition, so the
+    // concert index must fall back to the creation-time startedAt rather than
+    // an unset (epoch 1970) timestamp.
+    const raw = readFileSync(join(tracesDir, conductor.concertId, 'index.json'), 'utf-8');
+    const index = JSON.parse(raw) as { startedAt: string };
+    expect(new Date(index.startedAt).getTime()).toBeGreaterThan(0);
+  });
+
+  it('completes normally when all required context is present', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['ticket']));
+    const { hall } = createTestHall(registry);
+
+    const conductor = await hall.createConcert('req-test', { initialContext: { ticket: 'PROJ-1' } });
+    await conductor.start();
+    expect(conductor.status).toBe('completed');
+  });
+
+  it('resolves nested required keys against the shared context', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['a.b']));
+    const { store, hall } = createTestHall(registry);
+
+    const ok = await hall.createConcert('req-test', { initialContext: { a: { b: 1 } } });
+    await ok.start();
+    expect(ok.status).toBe('completed');
+
+    const missing = await hall.createConcert('req-test', { initialContext: { a: 1 } });
+    const events: ConcertEvent[] = [];
+    missing.onEvent((e) => events.push(e));
+    await missing.start();
+    expect(missing.status).toBe('failed');
+    const failed = events.find((e) => e.type === 'concert:failed');
+    expect(failed?.error?.message).toContain('a.b');
+
+    const stored = await store.getConcert(missing.concertId);
+    expect(stored?.status).toBe('failed');
+  });
+
+  it('treats falsy-but-present values as present', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['flag', 'count', 'label']));
+    const { hall } = createTestHall(registry);
+
+    for (const values of [
+      { flag: false, count: 0, label: '' },
+      { flag: 'false', count: '0', label: 'x' },
+    ]) {
+      const conductor = await hall.createConcert('req-test', { initialContext: values });
+      await conductor.start();
+      expect(conductor.status).toBe('completed');
+    }
+  });
+
+  it('names all missing keys', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['ticket', 'project.name', 'owner']));
+    const { hall } = createTestHall(registry);
+
+    const conductor = await hall.createConcert('req-test', { initialContext: {} });
+    const events: ConcertEvent[] = [];
+    conductor.onEvent((e) => events.push(e));
+    await conductor.start();
+
+    expect(conductor.status).toBe('failed');
+    const failed = events.find((e) => e.type === 'concert:failed');
+    expect(failed?.error?.message).toContain('ticket');
+    expect(failed?.error?.message).toContain('project.name');
+    expect(failed?.error?.message).toContain('owner');
+  });
+
+  it('fails a child concert created via createChildConcert when context is missing', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['ticket']));
+    const { store, hall } = createTestHall(registry);
+
+    const child = await hall.createChildConcert('req-test', { initialContext: {} });
+    await child.start();
+    expect(child.status).toBe('failed');
+    const stored = await store.getConcert(child.concertId);
+    expect(stored?.status).toBe('failed');
+    expect(stored?.history).toHaveLength(0);
+  });
+
+  it('runs a child concert via createChildConcert when required context is supplied', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['ticket']));
+    const { hall } = createTestHall(registry);
+
+    const child = await hall.createChildConcert('req-test', { initialContext: { ticket: 'PROJ-2' } });
+    await child.start();
+    expect(child.status).toBe('completed');
+  });
+
+  it('propagates a missing subscore required key as a parent movement failure', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'parent-req', name: 'Parent Req', description: 'x', version: '1.0.0',
+      startMovement: 'p1',
+      movements: [{
+        id: 'p1', name: 'P1', section: 'x', description: 'x',
+        subscore: { scoreId: 'req-test', contextMapping: { unrelated: 'shared.input' } },
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [
+          { to: '__end__', on: 'success' },
+          { to: '__fail__', on: 'failure' },
+        ],
+      }],
+      program: {},
+    });
+    registry.register(requiredScore(['ticket']));
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'out', summary: 'done', usage: { spend: 5, tokens: 50 } },
+    });
+    const hall = createHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const parent = await hall.createConcert('parent-req', { initialContext: { input: 'x' } });
+    await parent.start();
+    expect(parent.status).toBe('failed');
+    const state = await parent.getState();
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0].status).toBe('failed');
+    expect(state.childConcertIds).toHaveLength(1);
+    const child = await store.getConcert(state.childConcertIds[0]);
+    expect(child?.status).toBe('failed');
+    expect(child?.history).toHaveLength(0);
+  });
+
+  it('supplies subscore required keys through contextMapping', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'parent-map',
+      name: 'Parent Map',
+      description: 'x',
+      version: '1.0.0',
+      startMovement: 'p1',
+      movements: [{
+        id: 'p1', name: 'P1', section: 'x', description: 'x',
+        subscore: { scoreId: 'req-test', contextMapping: { ticket: 'shared.ticket' } },
+        goal: { description: 'done', strategy: 'llm_judge' },
+        transitions: [{ to: '__end__', on: 'success' }],
+      }],
+      program: {},
+    });
+    registry.register(requiredScore(['ticket']));
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'out', summary: 'done', usage: { spend: 5, tokens: 50 } },
+    });
+    const hall = createHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+
+    const parent = await hall.createConcert('parent-map', { initialContext: { ticket: 'PROJ-1' } });
+    await parent.start();
+    expect(parent.status).toBe('completed');
+  });
 });
 
 // ─── Conductor Lifecycle Tests ───────────────────────────────
