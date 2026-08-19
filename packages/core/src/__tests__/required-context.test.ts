@@ -26,6 +26,17 @@ describe('normalizeRequiredContext', () => {
     ]);
   });
 
+  it('trims whitespace-padded keys', () => {
+    const required: RequiredContext = [
+      ' ticket ',
+      { key: ' project.name ', description: 'Namespace' },
+    ];
+    expect(normalizeRequiredContext(required)).toEqual([
+      { key: 'ticket' },
+      { key: 'project.name', description: 'Namespace' },
+    ]);
+  });
+
   it('preserves array ordering', () => {
     const required: RequiredContext = [
       { key: 'b', description: 'bee' },

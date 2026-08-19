@@ -21,7 +21,7 @@ export function normalizeRequiredContext(
   if (!requiredContext) return [];
   return requiredContext.map((entry) =>
     typeof entry === 'string'
-      ? { key: entry }
-      : { key: entry.key, description: entry.description },
+      ? { key: entry.trim() }
+      : { key: entry.key.trim(), description: entry.description },
   );
 }

@@ -252,6 +252,15 @@ describe('ScoreRegistry', () => {
     ).not.toThrow();
   });
 
+  it('should accept whitespace-padded requiredContext keys (trimmed on normalization)', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({
+        requiredContext: [' ticket ', { key: ' project.name ', description: 'Namespace' }],
+      })),
+    ).not.toThrow();
+  });
+
   it('should reject requiredContext object entries with a missing/non-string/blank key', () => {
     const registry = new ScoreRegistry();
     expect(() =>
@@ -272,6 +281,9 @@ describe('ScoreRegistry', () => {
     ).toThrow(/description/);
     expect(() =>
       registry.register(validScore({ requiredContext: [{ key: 'ticket', description: '' }] })),
+    ).toThrow(/description/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: [{ key: 'ticket', description: 42 as never }] })),
     ).toThrow(/description/);
   });
 

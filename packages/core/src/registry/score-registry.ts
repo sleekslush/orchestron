@@ -120,7 +120,7 @@ export class ScoreRegistry {
               );
               continue;
             }
-            key = obj.key;
+            key = obj.key.trim();
           } else if (typeof entry === 'string') {
             if (entry.trim() === '') {
               errors.push(
@@ -131,7 +131,7 @@ export class ScoreRegistry {
               );
               continue;
             }
-            key = entry;
+            key = entry.trim();
           } else {
             errors.push(
               new ScoreValidationError(
