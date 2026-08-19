@@ -21,6 +21,9 @@ export { streamRecordToEvent, streamRecordsToEvents } from './store/concert-stre
 export type { ConcertStore } from './store/concert-store.js';
 export { TraceService } from './store/trace-service.js';
 
+export { normalizeRequiredContext } from './required-context.js';
+export type { RequiredContextItem } from './required-context.js';
+
 export { ScoreRegistry } from './registry/score-registry.js';
 export type { ScoreValidationResult } from './registry/score-registry.js';
 export { ensureDir, loadScoresFromDir } from './fs-utils.js';

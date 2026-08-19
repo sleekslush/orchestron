@@ -50,6 +50,7 @@ import { ConstraintChecker } from './constraint-checker.js';
 import { matchTransition } from './transition-resolver.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
+import { normalizeRequiredContext } from '../required-context.js';
 
 export { StartOptions };
 
@@ -196,9 +197,9 @@ export class Conductor implements IConductor {
    * count as present.
    */
   private missingRequiredContext(): string[] {
-    const required = this.score.requiredContext ?? [];
+    const required = normalizeRequiredContext(this.score.requiredContext);
     const missing: string[] = [];
-    for (const key of required) {
+    for (const { key } of required) {
       const value = resolveContextPath(this.concert.context.shared, key);
       if (value === undefined || value === null) {
         missing.push(key);
