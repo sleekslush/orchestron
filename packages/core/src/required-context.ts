@@ -25,3 +25,33 @@ export function normalizeRequiredContext(
       : { key: entry.key.trim(), description: entry.description },
   );
 }
+
+/** Resolve a dot-path key (e.g. `ticket`, `project.name`) in a context object. */
+export function resolveContextPath(context: Record<string, unknown>, path: string): unknown {
+  let value: unknown = context;
+  for (const part of path.split('.')) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      value = (value as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
+  }
+  return value;
+}
+
+/**
+ * Return the required-context keys whose dot-path value in `context` is
+ * `undefined` or `null`. Falsy-but-present values (`false`, `0`, `''`) count
+ * as present.
+ */
+export function findMissingRequiredContext(
+  requiredContext: RequiredContext | undefined,
+  context: Record<string, unknown>,
+): string[] {
+  return normalizeRequiredContext(requiredContext)
+    .map((item) => item.key)
+    .filter((key) => {
+      const value = resolveContextPath(context, key);
+      return value === undefined || value === null;
+    });
+}
