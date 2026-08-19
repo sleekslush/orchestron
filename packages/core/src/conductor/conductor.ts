@@ -1475,7 +1475,7 @@ export class Conductor implements IConductor {
         concertId: this.concert.id,
         scoreId: this.score.id,
         status,
-        startedAt: new Date(this.startedAt).toISOString(),
+        startedAt: this.concert.startedAt.toISOString(),
         completedAt: this.concert.completedAt?.toISOString(),
         stream: 'stream.jsonl',
         movements,

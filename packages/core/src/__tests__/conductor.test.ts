@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteLoge } from '../store/sqlite-loge.js';
@@ -369,6 +369,33 @@ describe('Required context', () => {
     const stored = await store.getConcert(conductor.concertId);
     expect(stored?.status).toBe('failed');
     expect(stored?.history).toHaveLength(0);
+  });
+
+  it('writes a real startedAt to the traced index on fail-fast', async () => {
+    const registry = new ScoreRegistry();
+    registry.register(requiredScore(['ticket']));
+    const store = new SqliteLoge(':memory:');
+    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-events-'));
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['fake', new FakeHarnessAdapter({
+        defaultResponse: { output: 'out', summary: 'done', usage: { spend: 5, tokens: 50 } },
+      })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      tracesDir,
+    });
+
+    const conductor = await hall.createConcert('req-test', { initialContext: {} });
+    await conductor.start();
+    expect(conductor.status).toBe('failed');
+
+    // The fail-fast path finalizes before the running transition, so the
+    // concert index must fall back to the creation-time startedAt rather than
+    // an unset (epoch 1970) timestamp.
+    const raw = readFileSync(join(tracesDir, conductor.concertId, 'index.json'), 'utf-8');
+    const index = JSON.parse(raw) as { startedAt: string };
+    expect(new Date(index.startedAt).getTime()).toBeGreaterThan(0);
   });
 
   it('completes normally when all required context is present', async () => {

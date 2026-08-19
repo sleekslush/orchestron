@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildProgram } from '../program.js';
@@ -109,13 +109,31 @@ describe('orchestron start help', () => {
   });
 
   it('renders help without constructing the full Orchestron stack', async () => {
-    // No store, adapters, or harness server exist anywhere near this call;
-    // help inspection loads the score YAML directly via the registry.
+    // If help inspection were routed through createOrchestron, the store
+    // (and its `concerts` traces dir) would be created next to --store.
     writeScore(dir, { id: 'req-help', requiredContext: ['ticket'] });
+    const storePath = join(dir, 'should-not-exist.db');
 
-    const { stdout, stderr } = await runHelp(['--scores-dir', dir, 'start', 'req-help', '--help']);
+    const { stdout, stderr } = await runHelp([
+      '--store', storePath,
+      '--scores-dir', dir,
+      'start', 'req-help', '--help',
+    ]);
 
     expect(stderr).toBe('');
+    expect(stdout).toContain('  --context.ticket=<value>');
+    expect(existsSync(storePath)).toBe(false);
+    expect(existsSync(join(dir, 'concerts'))).toBe(false);
+  });
+
+  it('still finds the score when an invalid score file sorts before it', async () => {
+    // A malformed .score.yaml that loads before the target must not abort
+    // loading the rest of the directory.
+    writeScore(dir, { id: 'req-help', requiredContext: ['ticket'] });
+    writeFileSync(join(dir, 'aaa-broken.score.yaml'), 'id: [unclosed\nnot: - valid: yaml\n');
+
+    const { stdout } = await runHelp(['--scores-dir', dir, 'start', 'req-help', '--help']);
+
     expect(stdout).toContain('  --context.ticket=<value>');
   });
 });

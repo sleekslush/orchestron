@@ -1,9 +1,16 @@
-import { ScoreRegistry, loadScoresFromDir } from '@orchestron/core';
+import { readdirSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { ScoreRegistry } from '@orchestron/core';
+
+const SCORE_FILE_PATTERN = /\.score\.(ya?ml)$/i;
 
 /**
  * Load the required-context keys of a score directly from the configured
  * scores directories. Used only by help output, so it must not construct the
  * full Orchestron stack (store, adapters, harness servers).
+ *
+ * Each score file is loaded under its own try/catch: a single invalid or
+ * unreadable `.score.yaml` must not mask a valid score in the same directory.
  *
  * Returns `undefined` when the score cannot be found in any directory.
  */
@@ -13,11 +20,27 @@ function loadScoreRequiredContext(
 ): string[] | undefined {
   const registry = new ScoreRegistry();
   for (const dir of scoresDirs) {
+    let entries: string[];
     try {
-      loadScoresFromDir(dir, registry);
+      entries = readdirSync(dir);
     } catch {
-      // An invalid or unreadable score in one directory must not break help
-      // inspection; the next directory may still contain the score.
+      // Unreadable or absent directory — try the next one.
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = resolve(dir, entry);
+      let isFile: boolean;
+      try {
+        isFile = statSync(fullPath).isFile();
+      } catch {
+        continue;
+      }
+      if (!isFile || !SCORE_FILE_PATTERN.test(entry)) continue;
+      try {
+        registry.loadFrom(fullPath);
+      } catch {
+        // A malformed or invalid score file must not break help inspection.
+      }
     }
   }
   try {
