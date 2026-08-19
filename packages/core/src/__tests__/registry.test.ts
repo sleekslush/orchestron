@@ -226,7 +226,7 @@ describe('ScoreRegistry', () => {
   it('should accept a valid requiredContext list', () => {
     const registry = new ScoreRegistry();
     expect(() =>
-      registry.register(validScore({ requiredContext: ['ticket', 'project.name'] })),
+      registry.register(validScore({ requiredContext: ['ticket', 'project.name', 'a.b.c'] })),
     ).not.toThrow();
   });
 
@@ -241,6 +241,33 @@ describe('ScoreRegistry', () => {
     expect(() =>
       registry.register(validScore({ requiredContext: ['ticket', 42 as unknown as string] })),
     ).toThrow(/requiredContext/);
+  });
+
+  it('should reject requiredContext keys with empty dot-path segments', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['.ticket'] })),
+    ).toThrow(/non-empty segments/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['a.'] })),
+    ).toThrow(/non-empty segments/);
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['a..b'] })),
+    ).toThrow(/non-empty segments/);
+  });
+
+  it('should name the offending key when rejecting a malformed requiredContext key', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: ['a..b'] })),
+    ).toThrow(/key 'a\.\.b'/);
+  });
+
+  it('should reject object-entry requiredContext keys with empty dot-path segments', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ requiredContext: [{ key: '.ticket', description: 'x' }] })),
+    ).toThrow(/non-empty segments/);
   });
 
   it('should accept requiredContext object entries with a key and description', () => {
@@ -358,6 +385,37 @@ program: {}
   it('should throw when loading from a nonexistent file', () => {
     const registry = new ScoreRegistry();
     expect(() => registry.loadFrom('/nonexistent/path.yaml')).toThrow('not found');
+  });
+
+  it('should throw when loading a YAML score with a malformed requiredContext key', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orchestron-test-'));
+    const path = join(dir, 'bad-context.yaml');
+    writeFileSync(path, `
+id: bad-context
+name: "Bad Context"
+description: "Malformed requiredContext"
+version: "1.0.0"
+startMovement: step_a
+requiredContext:
+  - .ticket
+movements:
+  - id: step_a
+    name: "Step A"
+    section: default
+    harness: pi
+    prompt: "Do step A"
+    goal:
+      description: "done"
+      strategy: llm_judge
+    transitions:
+      - to: __end__
+        on: success
+program: {}
+`, 'utf-8');
+
+    const registry = new ScoreRegistry();
+    expect(() => registry.loadFrom(path)).toThrow(/non-empty segments/);
+    expect(registry.list().some((s) => s.id === 'bad-context')).toBe(false);
   });
 
   it('should register multiple scores at once', () => {

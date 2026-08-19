@@ -141,6 +141,15 @@ export class ScoreRegistry {
             );
             continue;
           }
+          if (key.split('.').some((segment) => segment === '')) {
+            errors.push(
+              new ScoreValidationError(
+                `Score '${score.id}': requiredContext key '${key}' must be a dot-path with non-empty segments (no leading, trailing, or doubled dots)`,
+                'INVALID_SCORE',
+              ),
+            );
+            continue;
+          }
           const previouslyObject = seen.get(key);
           if (previouslyObject !== undefined) {
             if (isObjectEntry || previouslyObject) {
