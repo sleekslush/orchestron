@@ -1,4 +1,5 @@
 import type { Orchestron } from '../orchestron.js';
+import { findMissingRequiredContext } from '@orchestron/core';
 import type { ConcertEvent } from '@orchestron/core';
 import { printOutput, formatConcertHuman, extractFailure, movementToOutput } from '../output.js';
 
@@ -52,6 +53,12 @@ export async function startCommandHandler(
   context: Record<string, unknown>,
   json: boolean,
 ): Promise<void> {
+  const score = orchestron.registry.get(scoreId);
+  const missing = findMissingRequiredContext(score.requiredContext, context);
+  if (missing.length > 0) {
+    throw new Error(`Missing required context: ${missing.join(', ')}`);
+  }
+
   const conductor = await orchestron.hall.createConcert(scoreId, {
     initialContext: context,
     triggeredBy: 'cli',

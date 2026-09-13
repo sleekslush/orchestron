@@ -50,25 +50,12 @@ import { ConstraintChecker } from './constraint-checker.js';
 import { matchTransition } from './transition-resolver.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
-import { normalizeRequiredContext } from '../required-context.js';
+import { findMissingRequiredContext } from '../required-context.js';
 
 export { StartOptions };
 
 const DEFAULT_MOVEMENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const HEARTBEAT_INTERVAL_MS = 5000; // 5 seconds
-
-/** Resolve a dot-path key (e.g. `ticket`, `project.name`) in a context object. */
-function resolveContextPath(context: Record<string, unknown>, path: string): unknown {
-  let value: unknown = context;
-  for (const part of path.split('.')) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      value = (value as Record<string, unknown>)[part];
-    } else {
-      return undefined;
-    }
-  }
-  return value;
-}
 
 export class Conductor implements IConductor {
   private abortController = new AbortController();
@@ -197,15 +184,7 @@ export class Conductor implements IConductor {
    * count as present.
    */
   private missingRequiredContext(): string[] {
-    const required = normalizeRequiredContext(this.score.requiredContext);
-    const missing: string[] = [];
-    for (const { key } of required) {
-      const value = resolveContextPath(this.concert.context.shared, key);
-      if (value === undefined || value === null) {
-        missing.push(key);
-      }
-    }
-    return missing;
+    return findMissingRequiredContext(this.score.requiredContext, this.concert.context.shared);
   }
 
   async recover(): Promise<void> {
