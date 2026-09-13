@@ -610,7 +610,7 @@ describe('PiAdapter skills', () => {
     const { base, skillPath } = makeSkillDir();
     const adapter = new PiAdapter();
 
-    await adapter.execute('do it', { shared: {} }, { skills: ['my-skill'], cwd: base });
+    await adapter.execute('do it', { shared: {} }, { skills: [skillPath], cwd: base });
 
     const options = createAgentSessionMock.mock.calls[0][0] as { resourceLoader?: { getSkills(): { skills: Array<{ filePath: string }> }; options: Record<string, unknown> } };
     expect(options.resourceLoader).toBeInstanceOf(MockResourceLoader);
@@ -649,11 +649,20 @@ describe('PiAdapter skills', () => {
     const adapter = new PiAdapter();
 
     await expect(
-      adapter.execute('do it', { shared: {} }, { skills: ['nope'], cwd: base }),
+      adapter.execute('do it', { shared: {} }, { skills: [join(base, 'nope')] }),
     ).rejects.toThrow(`Declared skill path does not exist: '${join(base, 'nope')}'`);
     expect(createAgentSessionMock).not.toHaveBeenCalled();
 
     rmSync(base, { recursive: true, force: true });
+  });
+
+  it('rejects a relative declared skill path', async () => {
+    const adapter = new PiAdapter();
+
+    await expect(
+      adapter.execute('do it', { shared: {} }, { skills: ['relative/skill'] }),
+    ).rejects.toThrow("Declared skill path must be absolute: 'relative/skill'");
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
   });
 
   it('the real pi DefaultResourceLoader loads a skill from additionalSkillPaths', async () => {

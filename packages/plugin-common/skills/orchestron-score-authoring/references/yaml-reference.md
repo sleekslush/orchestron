@@ -158,17 +158,17 @@ A score can declare which skills its sessions need, making the dependency explic
 
 ```yaml
 skills:              # score-level default for every session
-  - ../skills/review
+  - /opt/orchestron/skills/review
 
 evaluator:
   skills:            # overrides the score default for the evaluator session only
-    - ../skills/judging
+    - /opt/orchestron/skills/judging
 
 movements:
   - id: implement
     # ...
     skills:          # overrides the score default for this movement's session
-      - ../skills/coding
+      - /opt/orchestron/skills/coding
   - id: lint
     # ...
     skills: []       # explicitly load no declared skills (opts out of the score default)
@@ -181,7 +181,7 @@ movements:
 
 This mirrors model resolution. `skills: []` at a movement or evaluator level means "specify none" and opts that session out of the score default; at the score level it means no sessions get declared skills.
 
-**Path resolution.** Each entry is resolved relative to the concert's working directory (`cwd`, where tool calls land) — not relative to the score file. Absolute paths are used as-is. A declared path that does not exist on disk fails the session immediately with an error naming the missing path. Relative-to-score-file paths are not supported.
+**Path resolution.** Each entry must be an **absolute path** to a skill directory (containing `SKILL.md`) or a skill file. Relative paths are rejected — both by the score registry at load time and by the adapters at execution. A declared path that does not exist on disk fails the session immediately with an error naming the missing path. Paths relative to the score file or the concert `cwd` are not supported.
 
 **Additive semantics.** Declared skills *augment* whatever the harness auto-discovers; they do not replace it. There is no "load only these" mode (Pi has `includeDefaults`/`noSkills` but Opencode does not, so restrictive scoping is not portable). Orchestron is a pure pass-through: each harness loads the paths through its own native skill loader and owns discovery, formatting, and diagnostics.
 
@@ -274,4 +274,4 @@ The `contextMapping` maps keys in the child score's context to dot-paths in the 
 - All transition targets must be valid movement ids, `__end__`, or `__fail__`.
 - The movement graph must not have cycles that cannot reach a terminal state (`__end__` or `__fail__`).
 - `maxNestingDepth` controls how many levels of subscores are allowed.
-- Optional `skills` (on the score, a movement, or the evaluator) must be an array of non-empty strings. An empty array is valid. Each entry is resolved relative to the concert `cwd`; a path that does not exist fails the session.
+- Optional `skills` (on the score, a movement, or the evaluator) must be an array of absolute, non-empty strings. An empty array is valid. A path that is relative or does not exist is rejected (the registry rejects relative paths; adapters reject both relative and missing paths).

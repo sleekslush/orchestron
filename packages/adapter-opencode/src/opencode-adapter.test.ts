@@ -754,7 +754,7 @@ describe('OpencodeAdapter', () => {
     );
 
     const adapter = new OpencodeAdapter({ embedded: {} });
-    await adapter.execute('hi', { shared: {} }, { skills: ['my-skill'], cwd: base });
+    await adapter.execute('hi', { shared: {} }, { skills: [skillPath], cwd: base });
 
     // Applied through the native server config surface (not prompt text).
     expect(mockClient.config.update).toHaveBeenCalledWith({
@@ -778,7 +778,7 @@ describe('OpencodeAdapter', () => {
     writeFileSync(join(skillPath, 'SKILL.md'), '---\nname: merged\ndescription: x\n---\n');
 
     const adapter = new OpencodeAdapter({ embedded: {} });
-    await adapter.execute('hi', { shared: {} }, { skills: ['merged'], cwd: base });
+    await adapter.execute('hi', { shared: {} }, { skills: [skillPath], cwd: base });
 
     expect(mockClient.config.update).toHaveBeenCalledWith({
       config: { skills: { paths: ['/existing', skillPath] } },
@@ -803,7 +803,7 @@ describe('OpencodeAdapter', () => {
 
     // A missing path must NOT fail here: connected mode ignores declared skills,
     // so there is nothing to load and the session should still run.
-    await adapter.execute('hi', { shared: {} }, { skills: ['does-not-exist'], cwd: base });
+    await adapter.execute('hi', { shared: {} }, { skills: [join(base, 'does-not-exist')], cwd: base });
 
     expect(mockClient.config.update).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('connected-server mode'));
@@ -817,12 +817,22 @@ describe('OpencodeAdapter', () => {
     const adapter = new OpencodeAdapter({ embedded: {} });
 
     await expect(
-      adapter.execute('hi', { shared: {} }, { skills: ['nope'], cwd: base }),
+      adapter.execute('hi', { shared: {} }, { skills: [join(base, 'nope')] }),
     ).rejects.toThrow(`Declared skill path does not exist: '${join(base, 'nope')}'`);
     expect(mockClient.config.update).not.toHaveBeenCalled();
     expect(mockClient.session.create).not.toHaveBeenCalled();
 
     rmSync(base, { recursive: true, force: true });
+  });
+
+  it('rejects a relative declared skill path on the embedded server', async () => {
+    const adapter = new OpencodeAdapter({ embedded: {} });
+
+    await expect(
+      adapter.execute('hi', { shared: {} }, { skills: ['relative/skill'] }),
+    ).rejects.toThrow("Declared skill path must be absolute: 'relative/skill'");
+    expect(mockClient.config.update).not.toHaveBeenCalled();
+    expect(mockClient.session.create).not.toHaveBeenCalled();
   });
 });
 

@@ -2958,12 +2958,11 @@ describe('model resolution', () => {
 
 describe('conductor skill resolution', () => {
   class SkillCapturingAdapter extends FakeHarnessAdapter {
-    calls: { skills: string[] | undefined; structured: boolean; cwd: string | undefined }[] = [];
+    calls: { skills: string[] | undefined; structured: boolean }[] = [];
     async execute(prompt: string, context: any, options?: any) {
       this.calls.push({
         skills: options?.skills,
         structured: options?.output?.mode === 'structured',
-        cwd: options?.cwd,
       });
       return super.execute(prompt, context, options);
     }
@@ -2974,10 +2973,6 @@ describe('conductor skill resolution', () => {
 
     evaluatorSkills(): string[] | undefined {
       return this.calls.find((c) => c.structured)?.skills;
-    }
-
-    evaluatorCwd(): string | undefined {
-      return this.calls.find((c) => c.structured)?.cwd;
     }
   }
 
@@ -3006,7 +3001,7 @@ describe('conductor skill resolution', () => {
   it('passes the score-level skills default to a movement without its own list', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();
-    registry.register(skillScore({ skills: ['skills/score-default'] }));
+    registry.register(skillScore({ skills: ['/abs/skills/score-default'] }));
     const adapter = new SkillCapturingAdapter({
       defaultResponse: { output: 'ok', summary: 'ok' },
     });
@@ -3017,7 +3012,7 @@ describe('conductor skill resolution', () => {
     const conductor = await hall.createConcert('skills-test');
     await conductor.start();
 
-    expect(adapter.skills).toEqual([['skills/score-default']]);
+    expect(adapter.skills).toEqual([['/abs/skills/score-default']]);
   });
 
   it('prefers movement-level skills over the score default', async () => {
@@ -3025,7 +3020,7 @@ describe('conductor skill resolution', () => {
     const registry = new ScoreRegistry();
     registry.register(
       skillScore({
-        skills: ['skills/score-default'],
+        skills: ['/abs/skills/score-default'],
         movements: [
           {
             id: 'step_a',
@@ -3033,7 +3028,7 @@ describe('conductor skill resolution', () => {
             section: 'default',
             harness: 'fake',
             prompt: 'Do step A',
-            skills: ['skills/movement'],
+            skills: ['/abs/skills/movement'],
             goal: { description: 'Done', strategy: 'llm_judge' },
             transitions: [{ to: '__end__', on: 'success' }],
           },
@@ -3050,7 +3045,7 @@ describe('conductor skill resolution', () => {
     const conductor = await hall.createConcert('skills-test');
     await conductor.start();
 
-    expect(adapter.skills).toEqual([['skills/movement']]);
+    expect(adapter.skills).toEqual([['/abs/skills/movement']]);
   });
 
   it('treats movement skills: [] as an explicit opt-out of the score default', async () => {
@@ -3058,7 +3053,7 @@ describe('conductor skill resolution', () => {
     const registry = new ScoreRegistry();
     registry.register(
       skillScore({
-        skills: ['skills/score-default'],
+        skills: ['/abs/skills/score-default'],
         movements: [
           {
             id: 'step_a',
@@ -3106,7 +3101,7 @@ describe('conductor skill resolution', () => {
   it('passes the score-level skills default to the evaluator session', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();
-    registry.register(skillScore({ skills: ['skills/score-default'], evaluator: { harness: 'fake' } }));
+    registry.register(skillScore({ skills: ['/abs/skills/score-default'], evaluator: { harness: 'fake' } }));
     const adapter = new SkillCapturingAdapter({
       defaultResponse: {
         output: '{"achieved":true,"confidence":1,"summary":"ok"}',
@@ -3121,7 +3116,7 @@ describe('conductor skill resolution', () => {
     const conductor = await hall.createConcert('skills-test');
     await conductor.start();
 
-    expect(adapter.evaluatorSkills()).toEqual(['skills/score-default']);
+    expect(adapter.evaluatorSkills()).toEqual(['/abs/skills/score-default']);
     expect(conductor.status).toBe('completed');
   });
 
@@ -3130,8 +3125,8 @@ describe('conductor skill resolution', () => {
     const registry = new ScoreRegistry();
     registry.register(
       skillScore({
-        skills: ['skills/score-default'],
-        evaluator: { harness: 'fake', skills: ['skills/eval'] },
+        skills: ['/abs/skills/score-default'],
+        evaluator: { harness: 'fake', skills: ['/abs/skills/eval'] },
       }),
     );
     const adapter = new SkillCapturingAdapter({
@@ -3148,7 +3143,7 @@ describe('conductor skill resolution', () => {
     const conductor = await hall.createConcert('skills-test');
     await conductor.start();
 
-    expect(adapter.evaluatorSkills()).toEqual(['skills/eval']);
+    expect(adapter.evaluatorSkills()).toEqual(['/abs/skills/eval']);
   });
 
   it('treats evaluator skills: [] as an explicit opt-out of the score default', async () => {
@@ -3156,7 +3151,7 @@ describe('conductor skill resolution', () => {
     const registry = new ScoreRegistry();
     registry.register(
       skillScore({
-        skills: ['skills/score-default'],
+        skills: ['/abs/skills/score-default'],
         evaluator: { harness: 'fake', skills: [] },
       }),
     );
@@ -3180,7 +3175,7 @@ describe('conductor skill resolution', () => {
   it('applies the score-level skills default to a default HarnessEvaluator', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();
-    registry.register(skillScore({ skills: ['skills/default-evaluator'] }));
+    registry.register(skillScore({ skills: ['/abs/skills/default-evaluator'] }));
     const adapter = new SkillCapturingAdapter({
       defaultResponse: {
         output: '{"achieved":true,"confidence":1,"summary":"ok"}',
@@ -3195,38 +3190,14 @@ describe('conductor skill resolution', () => {
     const conductor = await hall.createConcert('skills-test');
     await conductor.start();
 
-    expect(adapter.evaluatorSkills()).toEqual(['skills/default-evaluator']);
+    expect(adapter.evaluatorSkills()).toEqual(['/abs/skills/default-evaluator']);
     expect(conductor.status).toBe('completed');
-  });
-
-  it('passes the concert cwd to the evaluator session (for skill path resolution)', async () => {
-    const store = new SqliteLoge(':memory:');
-    const registry = new ScoreRegistry();
-    registry.register(skillScore({ skills: ['skills/eval'], evaluator: { harness: 'fake' } }));
-    const adapter = new SkillCapturingAdapter({
-      defaultResponse: {
-        output: '{"achieved":true,"confidence":1,"summary":"ok"}',
-        structured: { achieved: true, confidence: 1, summary: 'ok' },
-        summary: 'ok',
-      },
-    });
-    const hall = createHall({
-      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
-      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
-    });
-    const cwd = mkdtempSync(join(tmpdir(), 'orchestron-eval-cwd-'));
-    const conductor = await hall.createConcert('skills-test', { cwd });
-    await conductor.start();
-
-    expect(adapter.evaluatorCwd()).toBe(cwd);
-
-    rmSync(cwd, { recursive: true, force: true });
   });
 
   it('preserves a host evaluator\'s own skills over the score-level default', async () => {
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();
-    registry.register(skillScore({ skills: ['skills/score-default'] }));
+    registry.register(skillScore({ skills: ['/abs/skills/score-default'] }));
     const adapter = new SkillCapturingAdapter({
       defaultResponse: {
         output: '{"achieved":true,"confidence":1,"summary":"ok"}',
@@ -3236,11 +3207,11 @@ describe('conductor skill resolution', () => {
     });
     const hall = createHall({
       store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
-      evaluator: new HarnessEvaluator({ adapter, skills: ['judge-skills'] }),
+      evaluator: new HarnessEvaluator({ adapter, skills: ['/abs/judge-skills'] }),
     });
     const conductor = await hall.createConcert('skills-test');
     await conductor.start();
 
-    expect(adapter.evaluatorSkills()).toEqual(['judge-skills']);
+    expect(adapter.evaluatorSkills()).toEqual(['/abs/judge-skills']);
   });
 });

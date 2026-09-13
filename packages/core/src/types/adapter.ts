@@ -82,11 +82,11 @@ export interface HarnessAdapterExecuteOptions {
   cwd?: string;
   /**
    * Skill paths to load into this harness session through the harness's own
-   * native skill loader. Each entry is a path to a skill directory (containing
-   * `SKILL.md`) or a skill file, resolved relative to `cwd`. Loading is
-   * additive: declared skills augment whatever the harness auto-discovers.
-   * An empty array specifies no skills (and does not disable auto-discovery).
-   * Declared paths that do not exist on disk fail the session loudly.
+   * native skill loader. Each entry must be an absolute path to a skill
+   * directory (containing `SKILL.md`) or a skill file. Loading is additive:
+   * declared skills augment whatever the harness auto-discovers. An empty array
+   * specifies no skills (and does not disable auto-discovery). Declared paths
+   * that are relative or do not exist on disk fail the session loudly.
    */
   skills?: string[];
   /**

@@ -22,7 +22,7 @@ import type {
   V2Event,
 } from '@opencode-ai/sdk/v2';
 import { existsSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute } from 'node:path';
 
 // --------------------------------------------------------------------------
 // Session part-filter helpers
@@ -120,15 +120,15 @@ export class OpencodeAdapter implements HarnessAdapter {
       );
     }
 
-    // Resolve and validate declared skill paths before creating a session, so a
-    // missing path fails fast and names the path. Opencode loads skills from
-    // server-global config (`config.skills.paths`), applied at execute time
-    // because the embedded server has already started. A connected server owns
-    // its own skill config, so declared paths are ignored (with a warning) and
+    // Validate declared skill paths before creating a session, so a bad path
+    // fails fast and names the path. Opencode loads skills from server-global
+    // config (`config.skills.paths`), applied at execute time because the
+    // embedded server has already started. A connected server owns its own
+    // skill config, so declared paths are ignored (with a warning) and
     // deliberately not validated there — nothing would be loaded either way.
     if (options?.skills && options.skills.length > 0) {
       if (this.ownsServer) {
-        await this.applySkills(this.resolveSkillPaths(options.skills, options.cwd));
+        await this.applySkills(this.resolveSkillPaths(options.skills));
       } else {
         console.warn(
           'Opencode connected-server mode cannot inject declared skills: the server owns its skill configuration. Declared skill paths are ignored.',
@@ -505,25 +505,25 @@ export class OpencodeAdapter implements HarnessAdapter {
   }
 
   /**
-   * Resolve declared skill paths relative to the concert working directory and
-   * fail loudly, naming the path, when one does not exist on disk. Path
-   * resolution only — opencode performs discovery and content validation
-   * natively. `skills: []` means "no declared skills".
+   * Validate declared skill paths and fail loudly when one is not absolute or
+   * does not exist on disk. Skill paths must be absolute: there is no cwd-based
+   * resolution. Opencode performs discovery and content validation natively.
    */
-  private resolveSkillPaths(
-    skills: string[],
-    cwd: string | undefined,
-  ): string[] {
-    const base = cwd ?? process.cwd();
+  private resolveSkillPaths(skills: string[]): string[] {
     return skills.map((skill) => {
-      const resolved = isAbsolute(skill) ? skill : resolve(base, skill);
-      if (!existsSync(resolved)) {
+      if (!isAbsolute(skill)) {
         throw new HarnessError(
-          `Declared skill path does not exist: '${resolved}'`,
+          `Declared skill path must be absolute: '${skill}'`,
           'HARNESS_FAILURE',
         );
       }
-      return resolved;
+      if (!existsSync(skill)) {
+        throw new HarnessError(
+          `Declared skill path does not exist: '${skill}'`,
+          'HARNESS_FAILURE',
+        );
+      }
+      return skill;
     });
   }
 

@@ -67,7 +67,7 @@ export class ConcertHall implements ChildConcertFactory {
       this.store,
       this,
       this.adapterResolver,
-      await this.resolveEvaluator(score, explicitHarness, cwd),
+      await this.resolveEvaluator(score, explicitHarness),
       this.tracesDir,
       this.defaultHarness,
       (id) => this.cleanupConductor(id),
@@ -92,7 +92,6 @@ export class ConcertHall implements ChildConcertFactory {
   private async resolveEvaluator(
     score: Score,
     explicitHarness?: string,
-    cwd?: string,
   ): Promise<Evaluator> {
     const harness = score.evaluator?.harness ?? explicitHarness;
     if (harness) {
@@ -111,8 +110,6 @@ export class ConcertHall implements ChildConcertFactory {
         // Evaluator skills follow the same precedence rule as movements:
         // the evaluator-level list wins, otherwise the score-level default.
         skills: score.evaluator?.skills ?? score.skills,
-        // Skill paths resolve against the concert cwd, exactly like movements.
-        cwd,
         defaultOnParseFailure: score.evaluator?.defaultOnParseFailure,
         maxRepairAttempts: score.evaluator?.maxRepairAttempts,
       });
@@ -127,14 +124,9 @@ export class ConcertHall implements ChildConcertFactory {
     if (this.evaluator instanceof HarnessEvaluator) {
       const hostSkills = this.evaluator.skills;
       const resolvedSkills = score.evaluator?.skills ?? hostSkills ?? score.skills;
-      let evaluator = this.evaluator;
       if (resolvedSkills !== hostSkills) {
-        evaluator = evaluator.withSkills(resolvedSkills);
+        return this.evaluator.withSkills(resolvedSkills);
       }
-      if (evaluator.cwd !== cwd) {
-        evaluator = evaluator.withCwd(cwd);
-      }
-      return evaluator;
     }
     return this.evaluator;
   }

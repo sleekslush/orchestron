@@ -20,7 +20,7 @@ import {
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage, Model, Usage, Api } from '@earendil-works/pi-ai';
 import { existsSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute } from 'node:path';
 
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -82,9 +82,9 @@ export class PiAdapter implements HarnessAdapter {
   ): Promise<HarnessResponse> {
     const startedAt = new Date();
     const recording = options?.recording;
-    // Resolve and validate declared skill paths before any session is created
-    // or model resolved, so a missing path fails fast and names the path.
-    const skillPaths = this.resolveSkillPaths(options?.skills, options?.cwd);
+    // Validate declared skill paths before any session is created or model
+    // resolved, so a bad path fails fast and names the path.
+    const skillPaths = this.resolveSkillPaths(options?.skills);
     let finalPrompt = prompt;
     if (options?.output?.mode === 'structured' && options.output.schema) {
       finalPrompt =
@@ -446,27 +446,28 @@ export class PiAdapter implements HarnessAdapter {
   }
 
   /**
-   * Resolve declared skill paths relative to the concert working directory and
-   * fail loudly, naming the path, when one does not exist on disk. Path
-   * resolution only — pi performs discovery and content validation natively.
+   * Validate declared skill paths and fail loudly when one is not absolute or
+   * does not exist on disk. Skill paths must be absolute: there is no cwd-based
+   * resolution. The harness performs discovery and content validation natively.
    * `skills: []` means "no declared skills" and resolves to `undefined`,
    * leaving session setup byte-identical to the no-skills path.
    */
-  private resolveSkillPaths(
-    skills: string[] | undefined,
-    cwd: string | undefined,
-  ): string[] | undefined {
+  private resolveSkillPaths(skills: string[] | undefined): string[] | undefined {
     if (skills === undefined || skills.length === 0) return undefined;
-    const base = cwd ?? process.cwd();
     return skills.map((skill) => {
-      const resolved = isAbsolute(skill) ? skill : resolve(base, skill);
-      if (!existsSync(resolved)) {
+      if (!isAbsolute(skill)) {
         throw new HarnessError(
-          `Declared skill path does not exist: '${resolved}'`,
+          `Declared skill path must be absolute: '${skill}'`,
           'HARNESS_FAILURE',
         );
       }
-      return resolved;
+      if (!existsSync(skill)) {
+        throw new HarnessError(
+          `Declared skill path does not exist: '${skill}'`,
+          'HARNESS_FAILURE',
+        );
+      }
+      return skill;
     });
   }
 

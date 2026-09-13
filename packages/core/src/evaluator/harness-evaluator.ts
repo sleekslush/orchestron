@@ -49,16 +49,10 @@ export interface HarnessEvaluatorConfig {
   maxRepairAttempts?: number;
   /**
    * Skill paths to load into the evaluator session (both the main judge call
-   * and the bounded self-repair call), resolved relative to the concert `cwd`.
-   * Loading is additive; an empty array specifies no skills.
+   * and the bounded self-repair call). Paths must be absolute. Loading is
+   * additive; an empty array specifies no skills.
    */
   skills?: string[];
-  /**
-   * Concert working directory the evaluator session runs in. Skill paths are
-   * resolved relative to this (matching movement sessions); defaults to the
-   * process cwd when absent.
-   */
-  cwd?: string;
 }
 
 export class HarnessEvaluator implements Evaluator {
@@ -74,22 +68,9 @@ export class HarnessEvaluator implements Evaluator {
     return new HarnessEvaluator({ ...this.config, skills });
   }
 
-  /**
-   * Return an evaluator with the same configuration but the given concert
-   * working directory, against which skill paths resolve.
-   */
-  withCwd(cwd: string | undefined): HarnessEvaluator {
-    return new HarnessEvaluator({ ...this.config, cwd });
-  }
-
   /** Resolved skill paths configured for this evaluator, if any. */
   get skills(): string[] | undefined {
     return this.config.skills;
-  }
-
-  /** Concert working directory configured for this evaluator, if any. */
-  get cwd(): string | undefined {
-    return this.config.cwd;
   }
 
   async evaluate(
@@ -108,7 +89,6 @@ export class HarnessEvaluator implements Evaluator {
       model: this.config.model,
       provider: this.config.provider,
       skills: this.config.skills,
-      cwd: this.config.cwd,
     });
 
     // 1. Direct parse of the judge's own output.
@@ -328,7 +308,6 @@ Return a JSON object with:
           model: this.config.model,
           provider: this.config.provider,
           skills: this.config.skills,
-          cwd: this.config.cwd,
         },
       );
       const parsed = this.tryParse(repairResponse);

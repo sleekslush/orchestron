@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import yaml from 'js-yaml';
 import type { Score, Movement, ScoreID, MovementID, HarnessModelConfig } from '../types/score.js';
 import { ScoreValidationError } from '../types/errors.js';
@@ -246,10 +247,10 @@ export class ScoreRegistry {
   }
 
   /**
-   * Validate an optional `skills` list: it must be an array of non-empty
-   * strings when present. An empty array is valid (it explicitly specifies no
-   * skills). Non-array values, non-string entries, and empty-string entries are
-   * rejected.
+   * Validate an optional `skills` list: it must be an array of absolute,
+   * non-empty strings when present. An empty array is valid (it explicitly
+   * specifies no skills). Non-array values, non-string entries, empty-string
+   * entries, and relative paths are rejected.
    */
   private validateSkills(
     value: unknown,
@@ -261,7 +262,7 @@ export class ScoreRegistry {
     if (!Array.isArray(value)) {
       errors.push(
         new ScoreValidationError(
-          `Score '${scoreId}': ${scope} 'skills' must be an array of non-empty strings`,
+          `Score '${scoreId}': ${scope} 'skills' must be an array of absolute, non-empty strings`,
           'INVALID_SCORE',
         ),
       );
@@ -279,6 +280,13 @@ export class ScoreRegistry {
         errors.push(
           new ScoreValidationError(
             `Score '${scoreId}': ${scope} skills[${index}] must be a non-empty string`,
+            'INVALID_SCORE',
+          ),
+        );
+      } else if (!isAbsolute(entry)) {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${scoreId}': ${scope} skills[${index}] must be an absolute path (got '${entry}')`,
             'INVALID_SCORE',
           ),
         );

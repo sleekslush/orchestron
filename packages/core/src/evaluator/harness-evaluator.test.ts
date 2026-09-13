@@ -348,12 +348,11 @@ describe('HarnessEvaluator', () => {
       },
     });
     const executeSpy = vi.spyOn(adapter, 'execute');
-    const evaluator = new HarnessEvaluator({ adapter, skills: ['skills/eval'], cwd: '/concert/cwd' });
+    const evaluator = new HarnessEvaluator({ adapter, skills: ['/abs/skills/eval'] });
 
     await evaluator.evaluate(goal, 'output', context);
 
-    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['skills/eval']);
-    expect(executeSpy.mock.calls[0][2]?.cwd).toBe('/concert/cwd');
+    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['/abs/skills/eval']);
   });
 
   it('forwards configured skills to the self-repair call', async () => {
@@ -373,16 +372,14 @@ describe('HarnessEvaluator', () => {
       }
       return { output: 'not valid json', summary: 'E', usage: {} };
     });
-    const evaluator = new HarnessEvaluator({ adapter, skills: ['skills/eval'], cwd: '/concert/cwd' });
+    const evaluator = new HarnessEvaluator({ adapter, skills: ['/abs/skills/eval'] });
 
     const result = await evaluator.evaluate(goal, 'output', context);
 
     expect(result.achieved).toBe(true);
     expect(executeSpy).toHaveBeenCalledTimes(2);
-    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['skills/eval']);
-    expect(executeSpy.mock.calls[1][2]?.skills).toEqual(['skills/eval']);
-    // cwd (skill-path resolution base) is forwarded on the repair call too.
-    expect(executeSpy.mock.calls[1][2]?.cwd).toBe('/concert/cwd');
+    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['/abs/skills/eval']);
+    expect(executeSpy.mock.calls[1][2]?.skills).toEqual(['/abs/skills/eval']);
   });
 
   it('forwards an explicit empty skills array (opt-out) to the adapter', async () => {
@@ -412,16 +409,13 @@ describe('HarnessEvaluator', () => {
       },
     });
     const executeSpy = vi.spyOn(adapter, 'execute');
-    const original = new HarnessEvaluator({ adapter, cwd: '/concert/cwd' });
-    const derived = original.withSkills(['skills/x']);
+    const original = new HarnessEvaluator({ adapter });
+    const derived = original.withSkills(['/abs/skills/x']);
 
     await derived.evaluate(goal, 'output', context);
     await original.evaluate(goal, 'output', context);
 
-    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['skills/x']);
-    // withSkills clones all other config, including cwd.
-    expect(executeSpy.mock.calls[0][2]?.cwd).toBe('/concert/cwd');
+    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['/abs/skills/x']);
     expect(executeSpy.mock.calls[1][2]?.skills).toBeUndefined();
-    expect(executeSpy.mock.calls[1][2]?.cwd).toBe('/concert/cwd');
   });
 });

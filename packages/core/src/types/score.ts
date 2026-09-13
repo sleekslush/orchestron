@@ -94,9 +94,9 @@ export interface Movement {
   /** Provider name. Only used when \`model\` is a flat string. */
   provider?: string;
   /**
-   * Skill paths this movement's session needs, resolved relative to the
-   * concert `cwd`. When omitted, the score-level \`skills\` default applies.
-   * An empty array explicitly specifies no skills for this movement.
+   * Absolute skill paths this movement's session needs. When omitted, the
+   * score-level \`skills\` default applies. An empty array explicitly specifies
+   * no skills for this movement. Relative paths are rejected.
    */
   skills?: string[];
 }
@@ -143,11 +143,11 @@ export interface Score {
    */
   models?: Record<string, HarnessModelConfig>;
   /**
-   * Skill paths every session in this score loads by default, resolved
-   * relative to the concert `cwd`. Movement and evaluator sessions use their
-   * own \`skills\` list when present, otherwise this shared default. An empty
-   * array specifies no skills. Loading is additive — the harness still
-   * auto-discovers its own skills.
+   * Absolute skill paths every session in this score loads by default. Movement
+   * and evaluator sessions use their own \`skills\` list when present, otherwise
+   * this shared default. An empty array specifies no skills. Loading is
+   * additive — the harness still auto-discovers its own skills. Relative paths
+   * are rejected.
    */
   skills?: string[];
   metadata?: Record<string, unknown>;
@@ -174,9 +174,9 @@ export interface EvaluatorConfig {
    */
   maxRepairAttempts?: number;
   /**
-   * Skill paths the evaluator session needs, resolved relative to the concert
-   * `cwd`. When omitted, the score-level \`skills\` default applies. An empty
-   * array explicitly specifies no skills for the evaluator session.
+   * Absolute skill paths the evaluator session needs. When omitted, the
+   * score-level \`skills\` default applies. An empty array explicitly specifies
+   * no skills for the evaluator session. Relative paths are rejected.
    */
   skills?: string[];
 }

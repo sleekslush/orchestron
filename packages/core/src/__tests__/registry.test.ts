@@ -623,8 +623,8 @@ program: {}
     expect(() =>
       registry.register(
         validScore({
-          skills: ['skills/dev'],
-          evaluator: { harness: 'pi', skills: ['skills/eval'] },
+          skills: ['/abs/skills/dev'],
+          evaluator: { harness: 'pi', skills: ['/abs/skills/eval'] },
           movements: [
             {
               id: 'step_a',
@@ -632,7 +632,7 @@ program: {}
               section: 'default',
               harness: 'pi',
               prompt: 'Do step A',
-              skills: ['skills/a', 'skills/shared.md'],
+              skills: ['/abs/skills/a', '/abs/skills/shared.md'],
               goal: { description: 'Step A complete', strategy: 'llm_judge' },
               transitions: [{ to: '__end__', on: 'success' }],
             },
@@ -660,7 +660,7 @@ program: {}
     const registry = new ScoreRegistry();
     expect(() =>
       registry.register(validScore({ skills: 'skills/dev' as unknown as string[] })),
-    ).toThrow("'skills' must be an array of non-empty strings");
+    ).toThrow("'skills' must be an array of absolute, non-empty strings");
   });
 
   it('should reject non-string skill entries', () => {
@@ -677,6 +677,13 @@ program: {}
     );
   });
 
+  it('should reject relative skill paths', () => {
+    const registry = new ScoreRegistry();
+    expect(() => registry.register(validScore({ skills: ['skills/relative'] }))).toThrow(
+      "skills[0] must be an absolute path (got 'skills/relative')",
+    );
+  });
+
   it('should reject invalid movement-level skills', () => {
     const registry = new ScoreRegistry();
     expect(() =>
@@ -689,7 +696,7 @@ program: {}
               section: 'default',
               harness: 'pi',
               prompt: 'Do step A',
-              skills: ['ok', ''] as string[],
+              skills: ['/abs/ok', ''] as string[],
               goal: { description: 'Step A complete', strategy: 'llm_judge' },
               transitions: [{ to: '__end__', on: 'success' }],
             },
@@ -698,6 +705,29 @@ program: {}
         }),
       ),
     ).toThrow("movement 'step_a' skills[1] must be a non-empty string");
+  });
+
+  it('should reject a relative movement-level skill path', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              harness: 'pi',
+              prompt: 'Do step A',
+              skills: ['relative/path'],
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow("movement 'step_a' skills[0] must be an absolute path (got 'relative/path')");
   });
 
   it('should reject invalid evaluator-level skills', () => {
