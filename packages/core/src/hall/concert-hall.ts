@@ -6,6 +6,7 @@ import type { HarnessAdapter, HarnessAdapterResolver } from '../types/adapter.js
 import type { ConcertStore } from '../store/concert-store.js';
 import { ConcertStream } from '../store/concert-stream.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
+import { buildInitialSharedContext } from '../required-context.js';
 import { Conductor } from '../conductor/conductor.js';
 import type { IConductor } from '../conductor/conductor-interface.js';
 import type { ChildConcertFactory } from '../conductor/child-concert-factory.js';
@@ -171,7 +172,12 @@ export class ConcertHall implements ChildConcertFactory {
       startedAt: new Date(),
       currentMovement: null,
       history: [],
-      context: { shared: { ...startOptions?.initialContext, concertId, scoreId: score.id } },
+      context: {
+        shared: buildInitialSharedContext(startOptions?.initialContext, {
+          concertId,
+          scoreId: score.id,
+        }),
+      },
       usage: {},
       triggeredBy: startOptions?.triggeredBy ?? 'cli',
       parentConcertId: startOptions?.parentConcertId,

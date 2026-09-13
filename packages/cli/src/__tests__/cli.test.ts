@@ -898,4 +898,53 @@ describe('CLI commands', () => {
     }
     expect(okLogs.join('\n')).toContain('Status:  completed');
   });
+
+  it('starts when a score only requires runtime-injected context', async () => {
+    const runtimeRequiredScore: Score = {
+      id: 'runtime-req-cli',
+      name: 'Runtime Req CLI',
+      version: '1.0.0',
+      startMovement: 'step1',
+      // `concertId`/`scoreId` are injected by the runtime, not supplied via
+      // `--context.*`. The CLI preflight must not reject them.
+      requiredContext: ['concertId', 'scoreId'],
+      movements: [
+        {
+          id: 'step1',
+          name: 'Step 1',
+          section: 'test',
+          harness: 'fake',
+          prompt: 'Concert {{context.concertId}} for score {{context.scoreId}}',
+          goal: { description: 'Step 1 done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+
+    const scoresDir = join(dir, 'runtime-scores');
+    mkdirSync(scoresDir, { recursive: true });
+    writeScore(scoresDir, runtimeRequiredScore);
+
+    const orchestron = await createOrchestron({
+      storePath: join(dir, 'runtime-req-store.db'),
+      scoresDirs: [scoresDir],
+      adapters: new Map([['fake', new FakeHarnessAdapter({ defaultResponse: { output: 'ok', summary: 'ok', usage: { spend: 1, tokens: 1 } } })]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      defaultHarness: 'fake',
+    });
+
+    const { logs, restore } = captureOutput();
+    try {
+      await startCommandHandler(orchestron, 'runtime-req-cli', {}, false);
+    } finally {
+      restore();
+    }
+
+    expect(logs.join('\n')).toContain('Status:  completed');
+    const concerts = await orchestron.store.listConcerts();
+    expect(concerts).toHaveLength(1);
+    expect(concerts[0].status).toBe('completed');
+    orchestron.store.close();
+  });
 });
