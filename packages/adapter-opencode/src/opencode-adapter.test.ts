@@ -760,7 +760,10 @@ describe('OpencodeAdapter', () => {
     expect(mockClient.config.update).toHaveBeenCalledWith({
       config: { skills: { paths: [skillPath] } },
     });
-    // And observable in the server's registered-skill list.
+    // And observable in the server's registered-skill list. NOTE: the fake
+    // server projects `config.skills.paths` into `v2.skill.list()`, so this
+    // assertion checks the adapter used the config surface, not that a real
+    // opencode server loaded the skill. Use the real server for integration.
     const list = await mockClient.v2.skill.list();
     expect((list.data.data as Array<{ location: string }>).map((s) => s.location)).toContain(skillPath);
 

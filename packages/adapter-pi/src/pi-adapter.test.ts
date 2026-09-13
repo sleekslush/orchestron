@@ -655,4 +655,23 @@ describe('PiAdapter skills', () => {
 
     rmSync(base, { recursive: true, force: true });
   });
+
+  it('the real pi DefaultResourceLoader loads a skill from additionalSkillPaths', async () => {
+    // Independent check against pi's real loader (not the mock) that the option
+    // name and the resolved path we pass actually surface the skill.
+    const actual = await vi.importActual<typeof import('@earendil-works/pi-coding-agent')>(
+      '@earendil-works/pi-coding-agent',
+    );
+    const { base, skillPath } = makeSkillDir();
+    const loader = new actual.DefaultResourceLoader({
+      cwd: base,
+      agentDir: join(base, 'agent'),
+      additionalSkillPaths: [skillPath],
+    });
+    await loader.reload();
+
+    expect(loader.getSkills().skills.some((s) => s.name === 'my-skill')).toBe(true);
+
+    rmSync(base, { recursive: true, force: true });
+  });
 });

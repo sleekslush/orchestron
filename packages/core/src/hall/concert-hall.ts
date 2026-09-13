@@ -67,7 +67,7 @@ export class ConcertHall implements ChildConcertFactory {
       this.store,
       this,
       this.adapterResolver,
-      await this.resolveEvaluator(score, explicitHarness),
+      await this.resolveEvaluator(score, explicitHarness, cwd),
       this.tracesDir,
       this.defaultHarness,
       (id) => this.cleanupConductor(id),
@@ -89,7 +89,11 @@ export class ConcertHall implements ChildConcertFactory {
     }
   }
 
-  private async resolveEvaluator(score: Score, explicitHarness?: string): Promise<Evaluator> {
+  private async resolveEvaluator(
+    score: Score,
+    explicitHarness?: string,
+    cwd?: string,
+  ): Promise<Evaluator> {
     const harness = score.evaluator?.harness ?? explicitHarness;
     if (harness) {
       const adapter = await this.adapterResolver.get(harness);
@@ -107,6 +111,8 @@ export class ConcertHall implements ChildConcertFactory {
         // Evaluator skills follow the same precedence rule as movements:
         // the evaluator-level list wins, otherwise the score-level default.
         skills: score.evaluator?.skills ?? score.skills,
+        // Skill paths resolve against the concert cwd, exactly like movements.
+        cwd,
         defaultOnParseFailure: score.evaluator?.defaultOnParseFailure,
         maxRepairAttempts: score.evaluator?.maxRepairAttempts,
       });
@@ -114,10 +120,21 @@ export class ConcertHall implements ChildConcertFactory {
     // No explicit evaluator harness: the host-provided default evaluator is
     // used. When it is a HarnessEvaluator (i.e. it starts a harness session),
     // apply the score's resolved skills so score-level `skills` reaches the
-    // default evaluator session too. `withSkills` clones rather than mutates.
-    const defaultSkills = score.evaluator?.skills ?? score.skills;
-    if (defaultSkills !== undefined && this.evaluator instanceof HarnessEvaluator) {
-      return this.evaluator.withSkills(defaultSkills);
+    // default evaluator session too. The host evaluator's own skills count as
+    // an explicit evaluator-level declaration (`evaluator.skills`) and win over
+    // the score-level default; `withSkills` clones rather than mutates, so the
+    // shared default evaluator is never modified.
+    if (this.evaluator instanceof HarnessEvaluator) {
+      const hostSkills = this.evaluator.skills;
+      const resolvedSkills = score.evaluator?.skills ?? hostSkills ?? score.skills;
+      let evaluator = this.evaluator;
+      if (resolvedSkills !== hostSkills) {
+        evaluator = evaluator.withSkills(resolvedSkills);
+      }
+      if (evaluator.cwd !== cwd) {
+        evaluator = evaluator.withCwd(cwd);
+      }
+      return evaluator;
     }
     return this.evaluator;
   }

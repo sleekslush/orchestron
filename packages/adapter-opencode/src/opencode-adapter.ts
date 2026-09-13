@@ -466,6 +466,12 @@ export class OpencodeAdapter implements HarnessAdapter {
    * session, so this is a global mutation applied at execute time. Declared
    * paths are merged additively with the server's current paths. Connected-server
    * mode cannot inject skills and logs a warning instead.
+   *
+   * Caveat: because paths accumulate globally, a session declaring `skills: []`
+   * (which skips this method) cannot unload paths registered by an earlier
+   * session or concert on a shared server. `[]` means "declare no additional
+   * skills", not "remove previously registered skills". Synchronization is out
+   * of scope; use a fresh embedded server when a clean skill set matters.
    */
   private async applySkills(skillPaths: string[]): Promise<void> {
     if (!this.client) return;

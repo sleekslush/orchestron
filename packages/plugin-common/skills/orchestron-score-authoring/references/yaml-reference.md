@@ -188,6 +188,7 @@ This mirrors model resolution. `skills: []` at a movement or evaluator level mea
 **Harness notes.**
 - **Pi** loads declared paths through its native `DefaultResourceLoader` (`additionalSkillPaths`). Pi's own skill diagnostics are surfaced.
 - **Opencode (embedded)** merges declared paths into the server's `config.skills.paths` at execute time. Skills are server-global, not per-session: concurrent sessions with different skill lists against one embedded server can affect each other. Prefer one skill list per embedded server where it matters.
+  - **`skills: []` caveat:** because skills are server-global and the merge is additive, `skills: []` cannot *unload* paths that an earlier session or concert already applied to a shared embedded server — those paths stay registered for the server's lifetime. `[]` only means "declare no additional skills for this session", not "remove previously registered skills". Use a fresh embedded server (or avoid sharing one) when a clean skill set matters.
 - **Opencode (connected server)** cannot inject skills — the external server owns its skill configuration. Declared skill paths are ignored with a warning in this mode.
 
 Paths to a skill *file* and paths to a skill *directory* are both accepted. Opencode `skills.urls` and name-based skill references are not supported.
