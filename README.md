@@ -62,7 +62,7 @@ pnpm test
 
 ### Run a concert from the CLI
 
-Orchestron looks for score files (`*.score.yaml`) in two places
+Orchestron looks for score files (`*.score.yaml`, `*.score.yml`, and `*.score.json`) in two places
 by default:
 
 1. `./.orchestron/scores/` — project-local scores, checked first
@@ -79,6 +79,9 @@ cp examples/opencode-demo.score.yaml ./.orchestron/scores/
 # Or use the global directory
 mkdir -p ~/.orchestron/scores
 cp examples/opencode-demo.score.yaml ~/.orchestron/scores/
+
+# JSON score files are supported too (same schema, stricter syntax)
+cp examples/simple-plan-review.score.json ./.orchestron/scores/
 
 # Start a concert
 pnpm orchestron start opencode-demo --context.topic='Obsidian plugins'

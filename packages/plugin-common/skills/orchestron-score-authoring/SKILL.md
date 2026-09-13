@@ -119,7 +119,7 @@ movements:
 
 ## Detailed Reference
 
-See [references/yaml-reference.md](references/yaml-reference.md) for the complete field-by-field schema, prompt templating rules, output modes, transitions, subscores, and validation rules.
+See [references/yaml-reference.md](references/yaml-reference.md) for the complete field-by-field schema (YAML and JSON), prompt templating rules, output modes, transitions, subscores, and validation rules.
 
 See [references/examples.md](references/examples.md) for detailed YAML examples including structured output, loop-back reviews, budget controls, retries, and subscore delegation.
 

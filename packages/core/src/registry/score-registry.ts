@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import yaml from 'js-yaml';
 import type { Score, Movement, ScoreID, MovementID, HarnessModelConfig } from '../types/score.js';
 import { ScoreValidationError } from '../types/errors.js';
+import { safeJsonParse } from '../json-utils.js';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -56,10 +57,17 @@ export class ScoreRegistry {
       );
     }
     const content = readFileSync(path, 'utf-8');
-    const raw = yaml.load(content);
+    const isJson = /\.score\.json$/i.test(path);
+    const raw = isJson ? safeJsonParse(content) : yaml.load(content);
+    if (isJson && raw === undefined) {
+      throw new ScoreValidationError(
+        `Invalid score JSON in: ${path}`,
+        'INVALID_SCORE',
+      );
+    }
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       throw new ScoreValidationError(
-        `Invalid score YAML in: ${path}`,
+        `Invalid score ${isJson ? 'JSON' : 'YAML'} in: ${path}`,
         'INVALID_SCORE',
       );
     }

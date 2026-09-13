@@ -6,7 +6,7 @@ import {
   type RequiredContextItem,
 } from '@orchestron/core';
 
-const SCORE_FILE_PATTERN = /\.score\.(ya?ml)$/i;
+const SCORE_FILE_PATTERN = /\.score\.(ya?ml|json)$/i;
 
 /**
  * Load the required-context keys of a score directly from the configured
@@ -14,7 +14,8 @@ const SCORE_FILE_PATTERN = /\.score\.(ya?ml)$/i;
  * full Orchestron stack (store, adapters, harness servers).
  *
  * Each score file is loaded under its own try/catch: a single invalid or
- * unreadable `.score.yaml` must not mask a valid score in the same directory.
+ * unreadable score file (`.score.yaml`, `.score.yml`, or `.score.json`) must
+ * not mask a valid score in the same directory.
  *
  * Returns `undefined` when the score cannot be found in any directory.
  */

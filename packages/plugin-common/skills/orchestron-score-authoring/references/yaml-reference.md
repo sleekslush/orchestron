@@ -1,6 +1,45 @@
-# YAML Reference
+# YAML & JSON Reference
 
-Complete field-by-field reference for Orchestron score YAML.
+Complete field-by-field reference for Orchestron score files. Scores may be written
+as YAML (`.score.yaml`, `.score.yml`) or JSON (`.score.json`); both formats use the
+same schema.
+
+## JSON Score Files
+
+A `.score.json` file contains the same document as the equivalent YAML score. The
+file extension decides how the file is parsed: `ScoreRegistry.loadFrom()` parses
+`.score.json` files with `JSON.parse()` and everything else as YAML.
+
+JSON is stricter than YAML:
+
+- Keys and strings must use double quotes.
+- Comments and trailing commas are not allowed.
+- Block scalars (`>` / `|`) are unavailable — use `\n` escapes for multi-line
+  prompts instead.
+
+Minimal valid JSON score:
+
+```json
+{
+  "id": "hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "startMovement": "greet",
+  "movements": [
+    {
+      "id": "greet",
+      "name": "Greet",
+      "section": "delivery",
+      "prompt": "Say hello to the user.",
+      "goal": { "description": "Greeting is friendly", "strategy": "llm_judge" },
+      "transitions": [{ "to": "__end__", "on": "success" }]
+    }
+  ]
+}
+```
+
+See `examples/simple-plan-review.score.json` for a complete JSON score. Every
+field described below applies to both formats.
 
 ## Minimal Required Fields
 

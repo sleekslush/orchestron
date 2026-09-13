@@ -1,0 +1,81 @@
+{
+  "id": "simple-plan-review",
+  "name": "Simple Plan & Review",
+  "description": "Creates a plan, reviews it, then either revises or finalizes.",
+  "version": "1.0.0",
+  "evaluator": {
+    "harness": "pi",
+    "model": "pi-4-mini"
+  },
+  "program": {
+    "maxMovements": 10
+  },
+  "startMovement": "plan",
+  "movements": [
+    {
+      "id": "plan",
+      "name": "Create Plan",
+      "section": "planning",
+      "harness": "pi",
+      "prompt": {
+        "initial": "Create a detailed implementation plan for:\n{{context.task}}\n\nInclude:\n- Approach overview\n- Key steps\n- Estimated effort",
+        "subsequent": "Revisit this plan in light of the latest context:\n{{context.previousOutputs.review}}\n\nProduce an updated plan incorporating any new information."
+      },
+      "output": {
+        "mode": "structured",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "approach": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "effort": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "goal": {
+        "description": "Plan is detailed and actionable",
+        "strategy": "llm_judge"
+      },
+      "transitions": [
+        {
+          "to": "review",
+          "on": "success"
+        },
+        {
+          "to": "__fail__",
+          "on": "failure"
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "name": "Review Plan",
+      "section": "review",
+      "harness": "pi",
+      "prompt": "Review this plan:\n\n{{context.previousOutputs.plan}}\n\nCheck for:\n- Completeness\n- Feasibility\n- Potential issues",
+      "goal": {
+        "description": "Plan is approved or needs revision",
+        "strategy": "llm_judge"
+      },
+      "transitions": [
+        {
+          "to": "__end__",
+          "on": "success"
+        },
+        {
+          "to": "plan",
+          "on": "failure"
+        }
+      ]
+    }
+  ]
+}

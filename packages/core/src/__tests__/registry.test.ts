@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ScoreRegistry } from '../registry/score-registry.js';
+import { loadScoresFromDir } from '../fs-utils.js';
 import type { Score } from '../types/score.js';
 
 const validScore = (overrides: Partial<Score> = {}): Score => ({
@@ -385,6 +386,89 @@ program: {}
   it('should throw when loading from a nonexistent file', () => {
     const registry = new ScoreRegistry();
     expect(() => registry.loadFrom('/nonexistent/path.yaml')).toThrow('not found');
+  });
+
+  it('should load a score from a JSON file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orchestron-test-'));
+    const path = join(dir, 'test-score.score.json');
+    writeFileSync(path, JSON.stringify({
+      id: 'json-score',
+      name: 'JSON Score',
+      description: 'Loaded from JSON',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'pi',
+          prompt: 'Do step A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    }), 'utf-8');
+
+    const registry = new ScoreRegistry();
+    registry.loadFrom(path);
+    const score = registry.get('json-score');
+    expect(score.name).toBe('JSON Score');
+    expect(score.movements).toHaveLength(1);
+  });
+
+  it('should load the committed JSON example', () => {
+    const registry = new ScoreRegistry();
+    registry.loadFrom(join(process.cwd(), 'examples', 'simple-plan-review.score.json'));
+    expect(registry.get('simple-plan-review').movements).toHaveLength(2);
+  });
+
+  it('should throw a clear error when loading malformed JSON', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orchestron-test-'));
+    const path = join(dir, 'broken.score.json');
+    writeFileSync(path, '{ "id": "broken", "movements": [ }', 'utf-8');
+
+    const registry = new ScoreRegistry();
+    expect(() => registry.loadFrom(path)).toThrow(/Invalid score JSON in: .*broken\.score\.json/);
+    expect(registry.list()).toHaveLength(0);
+  });
+
+  it('should reject JSON that is not an object', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orchestron-test-'));
+    const path = join(dir, 'array.score.json');
+    writeFileSync(path, '["not", "a", "score"]', 'utf-8');
+
+    const registry = new ScoreRegistry();
+    expect(() => registry.loadFrom(path)).toThrow(/Invalid score JSON in: .*array\.score\.json/);
+  });
+
+  it('should load .score.json files from a scores directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orchestron-test-'));
+    writeFileSync(join(dir, 'a.score.json'), JSON.stringify({
+      id: 'json-dir-score',
+      name: 'JSON Directory Score',
+      description: 'Loaded from a scores directory',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'pi',
+          prompt: 'Do step A',
+          goal: { description: 'done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    }), 'utf-8');
+    writeFileSync(join(dir, 'notes.txt'), 'not a score', 'utf-8');
+
+    const registry = new ScoreRegistry();
+    loadScoresFromDir(dir, registry);
+    expect(registry.get('json-dir-score').name).toBe('JSON Directory Score');
   });
 
   it('should throw when loading a YAML score with a malformed requiredContext key', () => {
