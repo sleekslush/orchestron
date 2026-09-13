@@ -87,6 +87,11 @@ export class ScoreRegistry {
 
     const movementIds = new Set(score.movements.map((m) => m.id));
 
+    this.validateSkills(score.skills, 'score', score.id, errors);
+    if (score.evaluator !== undefined) {
+      this.validateSkills(score.evaluator.skills, 'evaluator', score.id, errors);
+    }
+
     if (score.requiredContext !== undefined) {
       if (!Array.isArray(score.requiredContext)) {
         errors.push(
@@ -188,6 +193,8 @@ export class ScoreRegistry {
     }
 
     for (const m of score.movements) {
+      this.validateSkills(m.skills, `movement '${m.id}'`, score.id, errors);
+
       if (m.prompt && typeof m.prompt === 'object') {
         if (typeof m.prompt.initial !== 'string' || typeof m.prompt.subsequent !== 'string' || !m.prompt.initial || !m.prompt.subsequent) {
           errors.push(
@@ -236,6 +243,47 @@ export class ScoreRegistry {
     }
 
     return errors;
+  }
+
+  /**
+   * Validate an optional `skills` list: it must be an array of non-empty
+   * strings when present. An empty array is valid (it explicitly specifies no
+   * skills). Non-array values, non-string entries, and empty-string entries are
+   * rejected.
+   */
+  private validateSkills(
+    value: unknown,
+    scope: string,
+    scoreId: ScoreID,
+    errors: ScoreValidationError[],
+  ): void {
+    if (value === undefined) return;
+    if (!Array.isArray(value)) {
+      errors.push(
+        new ScoreValidationError(
+          `Score '${scoreId}': ${scope} 'skills' must be an array of non-empty strings`,
+          'INVALID_SCORE',
+        ),
+      );
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (typeof entry !== 'string') {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${scoreId}': ${scope} skills[${index}] must be a string`,
+            'INVALID_SCORE',
+          ),
+        );
+      } else if (entry.trim() === '') {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${scoreId}': ${scope} skills[${index}] must be a non-empty string`,
+            'INVALID_SCORE',
+          ),
+        );
+      }
+    });
   }
 
   /** All per-harness model entries in a score, with a scope label for errors. */

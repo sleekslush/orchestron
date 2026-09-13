@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpencodeAdapter } from './opencode-adapter.js';
 import type { HarnessResponse, SessionRecording } from '@orchestron/core';
 
 const mockModelList = vi.fn();
+
+const mockConfigState = { skillsPaths: [] as string[] };
 
 const mockClient = {
   session: {
@@ -19,9 +21,16 @@ const mockClient = {
   event: {
     subscribe: vi.fn(),
   },
+  config: {
+    get: vi.fn(),
+    update: vi.fn(),
+  },
   v2: {
     model: {
       list: (...args: unknown[]) => mockModelList(...args),
+    },
+    skill: {
+      list: vi.fn(),
     },
   },
 };
@@ -104,6 +113,17 @@ describe('OpencodeAdapter', () => {
         ],
       },
     });
+    mockConfigState.skillsPaths = [];
+    mockClient.config.get.mockResolvedValue({ data: { skills: { paths: [] } } });
+    mockClient.config.update.mockImplementation(async (params: { config?: { skills?: { paths?: string[] } } }) => {
+      mockConfigState.skillsPaths = params?.config?.skills?.paths ?? [];
+      return { data: { skills: { paths: mockConfigState.skillsPaths } } };
+    });
+    mockClient.v2.skill.list.mockImplementation(async () => ({
+      data: {
+        data: mockConfigState.skillsPaths.map((path) => ({ name: path, location: path })),
+      },
+    }));
   });
 
   it('executes a prompt without sessionId using a fresh session', async () => {
@@ -722,6 +742,85 @@ describe('OpencodeAdapter', () => {
       code: 'HARNESS_FAILURE',
       message: expect.stringContaining('errored'),
     });
+  });
+
+  it('registers declared skills on the embedded server at execute time', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'opencode-skills-'));
+    const skillPath = join(base, 'my-skill');
+    mkdirSync(skillPath, { recursive: true });
+    writeFileSync(
+      join(skillPath, 'SKILL.md'),
+      '---\nname: my-skill\ndescription: A test skill.\n---\n\nDo the thing.\n',
+    );
+
+    const adapter = new OpencodeAdapter({ embedded: {} });
+    await adapter.execute('hi', { shared: {} }, { skills: ['my-skill'], cwd: base });
+
+    // Applied through the native server config surface (not prompt text).
+    expect(mockClient.config.update).toHaveBeenCalledWith({
+      config: { skills: { paths: [skillPath] } },
+    });
+    // And observable in the server's registered-skill list.
+    const list = await mockClient.v2.skill.list();
+    expect((list.data.data as Array<{ location: string }>).map((s) => s.location)).toContain(skillPath);
+
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('merges declared skills additively with existing server paths', async () => {
+    mockClient.config.get.mockResolvedValue({ data: { skills: { paths: ['/existing'] } } });
+    const base = mkdtempSync(join(tmpdir(), 'opencode-skills-merge-'));
+    const skillPath = join(base, 'merged');
+    mkdirSync(skillPath, { recursive: true });
+    writeFileSync(join(skillPath, 'SKILL.md'), '---\nname: merged\ndescription: x\n---\n');
+
+    const adapter = new OpencodeAdapter({ embedded: {} });
+    await adapter.execute('hi', { shared: {} }, { skills: ['merged'], cwd: base });
+
+    expect(mockClient.config.update).toHaveBeenCalledWith({
+      config: { skills: { paths: ['/existing', skillPath] } },
+    });
+
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('does not touch server config when no skills are declared', async () => {
+    const adapter = new OpencodeAdapter({ embedded: {} });
+
+    await adapter.execute('hi', { shared: {} });
+    await adapter.execute('hi again', { shared: {} }, { skills: [] });
+
+    expect(mockClient.config.update).not.toHaveBeenCalled();
+  });
+
+  it('warns that connected-server mode cannot inject declared skills', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const base = mkdtempSync(join(tmpdir(), 'opencode-skills-connected-'));
+    const skillPath = join(base, 'my-skill');
+    mkdirSync(skillPath, { recursive: true });
+    writeFileSync(join(skillPath, 'SKILL.md'), '---\nname: my-skill\ndescription: x\n---\n');
+
+    const adapter = new OpencodeAdapter({ baseUrl: 'http://custom:1234' });
+    await adapter.execute('hi', { shared: {} }, { skills: ['my-skill'], cwd: base });
+
+    expect(mockClient.config.update).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('connected-server mode'));
+
+    warnSpy.mockRestore();
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('fails fast naming a declared skill path that does not exist', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'opencode-skills-missing-'));
+    const adapter = new OpencodeAdapter({ embedded: {} });
+
+    await expect(
+      adapter.execute('hi', { shared: {} }, { skills: ['nope'], cwd: base }),
+    ).rejects.toThrow(`Declared skill path does not exist: '${join(base, 'nope')}'`);
+    expect(mockClient.config.update).not.toHaveBeenCalled();
+    expect(mockClient.session.create).not.toHaveBeenCalled();
+
+    rmSync(base, { recursive: true, force: true });
   });
 });
 

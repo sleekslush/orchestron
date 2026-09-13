@@ -104,9 +104,20 @@ export class ConcertHall implements ChildConcertFactory {
         promptTemplate: score.evaluator?.prompt,
         model: score.evaluator?.model,
         provider: score.evaluator?.provider,
+        // Evaluator skills follow the same precedence rule as movements:
+        // the evaluator-level list wins, otherwise the score-level default.
+        skills: score.evaluator?.skills ?? score.skills,
         defaultOnParseFailure: score.evaluator?.defaultOnParseFailure,
         maxRepairAttempts: score.evaluator?.maxRepairAttempts,
       });
+    }
+    // No explicit evaluator harness: the host-provided default evaluator is
+    // used. When it is a HarnessEvaluator (i.e. it starts a harness session),
+    // apply the score's resolved skills so score-level `skills` reaches the
+    // default evaluator session too. `withSkills` clones rather than mutates.
+    const defaultSkills = score.evaluator?.skills ?? score.skills;
+    if (defaultSkills !== undefined && this.evaluator instanceof HarnessEvaluator) {
+      return this.evaluator.withSkills(defaultSkills);
     }
     return this.evaluator;
   }

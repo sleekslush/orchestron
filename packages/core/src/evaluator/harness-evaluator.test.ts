@@ -337,4 +337,85 @@ describe('HarnessEvaluator', () => {
     expect(options?.model).toBeUndefined();
     expect(options?.provider).toBeUndefined();
   });
+
+  it('forwards configured skills to the main judge call', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"OK"}',
+        structured: { achieved: true, confidence: 1, summary: 'OK' },
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const evaluator = new HarnessEvaluator({ adapter, skills: ['skills/eval'] });
+
+    await evaluator.evaluate(goal, 'output', context);
+
+    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['skills/eval']);
+  });
+
+  it('forwards configured skills to the self-repair call', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: { output: 'not valid json', summary: 'E', usage: {} },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    let call = 0;
+    executeSpy.mockImplementation(async () => {
+      call++;
+      if (call === 2) {
+        return {
+          output: '{"achieved":true,"confidence":0.9,"summary":"Repaired"}',
+          summary: 'E',
+          usage: {},
+        };
+      }
+      return { output: 'not valid json', summary: 'E', usage: {} };
+    });
+    const evaluator = new HarnessEvaluator({ adapter, skills: ['skills/eval'] });
+
+    const result = await evaluator.evaluate(goal, 'output', context);
+
+    expect(result.achieved).toBe(true);
+    expect(executeSpy).toHaveBeenCalledTimes(2);
+    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['skills/eval']);
+    expect(executeSpy.mock.calls[1][2]?.skills).toEqual(['skills/eval']);
+  });
+
+  it('forwards an explicit empty skills array (opt-out) to the adapter', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"OK"}',
+        structured: { achieved: true, confidence: 1, summary: 'OK' },
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const evaluator = new HarnessEvaluator({ adapter, skills: [] });
+
+    await evaluator.evaluate(goal, 'output', context);
+
+    expect(executeSpy.mock.calls[0][2]?.skills).toEqual([]);
+  });
+
+  it('withSkills returns a skills-carrying clone without mutating the original', async () => {
+    const adapter = new FakeHarnessAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"OK"}',
+        structured: { achieved: true, confidence: 1, summary: 'OK' },
+        summary: 'Evaluated',
+        usage: {},
+      },
+    });
+    const executeSpy = vi.spyOn(adapter, 'execute');
+    const original = new HarnessEvaluator({ adapter });
+    const derived = original.withSkills(['skills/x']);
+
+    await derived.evaluate(goal, 'output', context);
+    await original.evaluate(goal, 'output', context);
+
+    expect(executeSpy.mock.calls[0][2]?.skills).toEqual(['skills/x']);
+    expect(executeSpy.mock.calls[1][2]?.skills).toBeUndefined();
+  });
 });

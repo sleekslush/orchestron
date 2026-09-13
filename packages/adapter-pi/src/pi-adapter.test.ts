@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PiAdapter } from './pi-adapter.js';
@@ -28,9 +28,32 @@ const mockModelRuntime = {
 const modelRuntimeCreateMock = vi.fn() as Mock<() => Promise<unknown>>;
 modelRuntimeCreateMock.mockResolvedValue(mockModelRuntime);
 
+const { MockResourceLoader, resourceLoaderInstances } = vi.hoisted(() => {
+  const instances: Array<{ options: Record<string, unknown> }> = [];
+  class MockResourceLoader {
+    options: Record<string, unknown>;
+    constructor(options: Record<string, unknown>) {
+      this.options = options;
+      instances.push(this);
+    }
+    async reload(): Promise<void> {}
+    getSkills() {
+      const paths = (this.options.additionalSkillPaths as string[] | undefined) ?? [];
+      return {
+        skills: paths.map((path) => ({ name: path.split('/').pop(), filePath: path })),
+        diagnostics: [],
+      };
+    }
+  }
+  return { MockResourceLoader, resourceLoaderInstances: instances };
+});
+
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   ModelRuntime: { create: (...args: unknown[]) => modelRuntimeCreateMock(...args as Parameters<typeof modelRuntimeCreateMock>) },
   SessionManager: { inMemory: vi.fn(() => ({ id: 'manager' })) },
+  SettingsManager: { create: vi.fn(() => ({ id: 'settings' })) },
+  getAgentDir: vi.fn(() => '/tmp/pi-agent'),
+  DefaultResourceLoader: MockResourceLoader,
   createAgentSession: (...args: unknown[]) => createAgentSessionMock(...args as Parameters<typeof createAgentSessionMock>),
 }));
 
@@ -560,5 +583,76 @@ describe('PiAdapter cwd', () => {
     expect(recording.sessionId).toBeUndefined(); // export is mocked; no header id to read
 
     rmSync(attemptDir, { recursive: true, force: true });
+  });
+});
+
+describe('PiAdapter skills', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createAgentSessionMock.mockResolvedValue({ session: mockSession, extensionsResult: {} });
+    modelRuntimeCreateMock.mockResolvedValue(mockModelRuntime);
+  });
+
+  function makeSkillDir(): { base: string; skillPath: string } {
+    const base = mkdtempSync(join(tmpdir(), 'pi-skills-'));
+    const skillPath = join(base, 'my-skill');
+    mkdirSync(skillPath, { recursive: true });
+    writeFileSync(
+      join(skillPath, 'SKILL.md'),
+      '---\nname: my-skill\ndescription: A test skill.\n---\n\nDo the thing.\n',
+    );
+    return { base, skillPath };
+  }
+
+  it('injects a resource loader carrying the declared skills into createAgentSession', async () => {
+    resourceLoaderInstances.length = 0;
+    mockSession.prompt.mockResolvedValue(undefined);
+    const { base, skillPath } = makeSkillDir();
+    const adapter = new PiAdapter();
+
+    await adapter.execute('do it', { shared: {} }, { skills: ['my-skill'], cwd: base });
+
+    const options = createAgentSessionMock.mock.calls[0][0] as { resourceLoader?: { getSkills(): { skills: Array<{ filePath: string }> }; options: Record<string, unknown> } };
+    expect(options.resourceLoader).toBeInstanceOf(MockResourceLoader);
+    const loaded = options.resourceLoader!.getSkills();
+    expect(loaded.skills.some((s) => s.filePath === skillPath)).toBe(true);
+    expect(options.resourceLoader!.options.additionalSkillPaths).toEqual([skillPath]);
+
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('does not inject a resource loader when skills are absent', async () => {
+    resourceLoaderInstances.length = 0;
+    mockSession.prompt.mockResolvedValue(undefined);
+    const adapter = new PiAdapter();
+
+    await adapter.execute('do it', { shared: {} });
+
+    const options = createAgentSessionMock.mock.calls[0][0] as { resourceLoader?: unknown };
+    expect(options.resourceLoader).toBeUndefined();
+    expect(resourceLoaderInstances).toHaveLength(0);
+  });
+
+  it('does not inject a resource loader for an explicit empty skills array', async () => {
+    resourceLoaderInstances.length = 0;
+    mockSession.prompt.mockResolvedValue(undefined);
+    const adapter = new PiAdapter();
+
+    await adapter.execute('do it', { shared: {} }, { skills: [] });
+
+    const options = createAgentSessionMock.mock.calls[0][0] as { resourceLoader?: unknown };
+    expect(options.resourceLoader).toBeUndefined();
+  });
+
+  it('fails fast naming a declared skill path that does not exist', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'pi-skills-missing-'));
+    const adapter = new PiAdapter();
+
+    await expect(
+      adapter.execute('do it', { shared: {} }, { skills: ['nope'], cwd: base }),
+    ).rejects.toThrow(`Declared skill path does not exist: '${join(base, 'nope')}'`);
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
+
+    rmSync(base, { recursive: true, force: true });
   });
 });

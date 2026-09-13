@@ -464,6 +464,9 @@ export class Conductor implements IConductor {
 
       harnessAdapter = await this.resolveAdapter(movement);
       const modelConfig = this.resolveModelConfig(movement, harnessAdapter.type);
+      // Skills precedence mirrors model precedence: a movement-level list wins
+      // over the score-level default; an empty array explicitly specifies none.
+      const skills = movement.skills ?? this.score.skills;
       const prompt = this.promptBuilder.buildPrompt(
         movement,
         previousOutputs,
@@ -573,6 +576,7 @@ export class Conductor implements IConductor {
           model: modelConfig.model,
           provider: modelConfig.provider,
           options: modelConfig.options,
+          skills,
           onProgress,
           cwd: this.cwd,
           recording,

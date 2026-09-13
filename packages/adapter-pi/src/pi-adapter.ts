@@ -11,11 +11,16 @@ import {
 } from '@orchestron/core';
 import {
   createAgentSession,
+  DefaultResourceLoader,
+  getAgentDir,
   ModelRuntime,
   SessionManager,
+  SettingsManager,
 } from '@earendil-works/pi-coding-agent';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage, Model, Usage, Api } from '@earendil-works/pi-ai';
+import { existsSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -51,6 +56,8 @@ export class PiAdapter implements HarnessAdapter {
   private modelRuntime: ModelRuntime | undefined;
   /** Working directory per persistent session id (from execute options). */
   private sessionCwds = new Map<string, string>();
+  /** Resolved (absolute) skill paths per persistent session id. */
+  private sessionSkills = new Map<string, string[]>();
 
   constructor(config: PiAdapterConfig = {}) {
     this.provider = config.provider;
@@ -58,7 +65,12 @@ export class PiAdapter implements HarnessAdapter {
     this.tools = config.tools;
     this.excludeTools = config.excludeTools;
     this.sessionPool = new SessionPool(
-      (sessionId) => this.createPiSession(undefined, this.sessionCwds.get(sessionId)),
+      (sessionId) =>
+        this.createPiSession(
+          undefined,
+          this.sessionCwds.get(sessionId),
+          this.sessionSkills.get(sessionId),
+        ),
       (data) => Promise.resolve(data.session.dispose()),
     );
   }
@@ -70,6 +82,9 @@ export class PiAdapter implements HarnessAdapter {
   ): Promise<HarnessResponse> {
     const startedAt = new Date();
     const recording = options?.recording;
+    // Resolve and validate declared skill paths before any session is created
+    // or model resolved, so a missing path fails fast and names the path.
+    const skillPaths = this.resolveSkillPaths(options?.skills, options?.cwd);
     let finalPrompt = prompt;
     if (options?.output?.mode === 'structured' && options.output.schema) {
       finalPrompt =
@@ -96,6 +111,7 @@ export class PiAdapter implements HarnessAdapter {
     try {
       if (options?.sessionId) {
         if (options.cwd) this.sessionCwds.set(options.sessionId, options.cwd);
+        if (skillPaths) this.sessionSkills.set(options.sessionId, skillPaths);
         const existing = await this.sessionPool.getOrCreate(options.sessionId);
         session = existing.session;
         if (thinkingLevel) {
@@ -103,7 +119,7 @@ export class PiAdapter implements HarnessAdapter {
         }
       } else {
         ownSession = true;
-        const fresh = await this.createPiSession(thinkingLevel, options?.cwd);
+        const fresh = await this.createPiSession(thinkingLevel, options?.cwd, skillPaths);
         session = fresh.session;
       }
 
@@ -315,6 +331,7 @@ export class PiAdapter implements HarnessAdapter {
 
   async disposeSession(sessionId: string): Promise<void> {
     this.sessionCwds.delete(sessionId);
+    this.sessionSkills.delete(sessionId);
     await this.sessionPool.disposeSession(sessionId);
   }
 
@@ -367,7 +384,11 @@ export class PiAdapter implements HarnessAdapter {
     return value;
   }
 
-  private async createPiSession(thinkingLevel?: ThinkingLevel, cwd?: string): Promise<PiSessionData> {
+  private async createPiSession(
+    thinkingLevel?: ThinkingLevel,
+    cwd?: string,
+    skillPaths?: string[],
+  ): Promise<PiSessionData> {
     const modelRuntime = await this.ensureModelRuntime();
 
     const sessionOptions: Parameters<typeof createAgentSession>[0] = {
@@ -388,9 +409,65 @@ export class PiAdapter implements HarnessAdapter {
     if (this.excludeTools !== undefined) {
       sessionOptions.excludeTools = this.excludeTools;
     }
+    if (skillPaths !== undefined && skillPaths.length > 0) {
+      sessionOptions.resourceLoader = await this.createSkillResourceLoader(cwd, skillPaths);
+    }
 
     const { session } = await createAgentSession(sessionOptions);
     return { session, modelRuntime };
+  }
+
+  /**
+   * Build the native pi resource loader that loads the declared skill paths in
+   * addition to pi's auto-discovered skills. Pi owns discovery/formatting; the
+   * adapter only hands over paths. Pi's own diagnostics (e.g. a skill missing a
+   * `description`) are surfaced here rather than re-validated.
+   */
+  private async createSkillResourceLoader(
+    cwd: string | undefined,
+    skillPaths: string[],
+  ): Promise<DefaultResourceLoader> {
+    const resolvedCwd = cwd ?? process.cwd();
+    const agentDir = getAgentDir();
+    const loader = new DefaultResourceLoader({
+      cwd: resolvedCwd,
+      agentDir,
+      settingsManager: SettingsManager.create(resolvedCwd, agentDir),
+      additionalSkillPaths: skillPaths,
+    });
+    await loader.reload();
+    for (const diagnostic of loader.getSkills().diagnostics) {
+      const message =
+        typeof diagnostic.message === 'string' ? diagnostic.message : String(diagnostic);
+      const path = typeof diagnostic.path === 'string' ? ` [${diagnostic.path}]` : '';
+      console.error(`Pi skill diagnostic${path}: ${message}`);
+    }
+    return loader;
+  }
+
+  /**
+   * Resolve declared skill paths relative to the concert working directory and
+   * fail loudly, naming the path, when one does not exist on disk. Path
+   * resolution only — pi performs discovery and content validation natively.
+   * `skills: []` means "no declared skills" and resolves to `undefined`,
+   * leaving session setup byte-identical to the no-skills path.
+   */
+  private resolveSkillPaths(
+    skills: string[] | undefined,
+    cwd: string | undefined,
+  ): string[] | undefined {
+    if (skills === undefined || skills.length === 0) return undefined;
+    const base = cwd ?? process.cwd();
+    return skills.map((skill) => {
+      const resolved = isAbsolute(skill) ? skill : resolve(base, skill);
+      if (!existsSync(resolved)) {
+        throw new HarnessError(
+          `Declared skill path does not exist: '${resolved}'`,
+          'HARNESS_FAILURE',
+        );
+      }
+      return resolved;
+    });
   }
 
   private toResourceUsage(finalUsage: Usage | undefined) {

@@ -617,4 +617,95 @@ program: {}
       ),
     ).not.toThrow();
   });
+
+  it('should accept skills on the score, movements, and evaluator', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          skills: ['skills/dev'],
+          evaluator: { harness: 'pi', skills: ['skills/eval'] },
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              harness: 'pi',
+              prompt: 'Do step A',
+              skills: ['skills/a', 'skills/shared.md'],
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it('should accept an empty skills array (explicitly no skills)', () => {
+    const registry = new ScoreRegistry();
+    expect(() => registry.register(validScore({ skills: [] }))).not.toThrow();
+    expect(() =>
+      registry.register(
+        validScore({
+          id: 'eval-empty',
+          evaluator: { harness: 'pi', skills: [] },
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it('should reject a non-array score-level skills value', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ skills: 'skills/dev' as unknown as string[] })),
+    ).toThrow("'skills' must be an array of non-empty strings");
+  });
+
+  it('should reject non-string skill entries', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(validScore({ skills: [123 as unknown as string] })),
+    ).toThrow('skills[0] must be a string');
+  });
+
+  it('should reject empty-string skill entries', () => {
+    const registry = new ScoreRegistry();
+    expect(() => registry.register(validScore({ skills: ['  '] }))).toThrow(
+      'skills[0] must be a non-empty string',
+    );
+  });
+
+  it('should reject invalid movement-level skills', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({
+          movements: [
+            {
+              id: 'step_a',
+              name: 'Step A',
+              section: 'default',
+              harness: 'pi',
+              prompt: 'Do step A',
+              skills: ['ok', ''] as string[],
+              goal: { description: 'Step A complete', strategy: 'llm_judge' },
+              transitions: [{ to: '__end__', on: 'success' }],
+            },
+          ],
+          startMovement: 'step_a',
+        }),
+      ),
+    ).toThrow("movement 'step_a' skills[1] must be a non-empty string");
+  });
+
+  it('should reject invalid evaluator-level skills', () => {
+    const registry = new ScoreRegistry();
+    expect(() =>
+      registry.register(
+        validScore({ evaluator: { harness: 'pi', skills: [true as unknown as string] } }),
+      ),
+    ).toThrow('evaluator skills[0] must be a string');
+  });
 });

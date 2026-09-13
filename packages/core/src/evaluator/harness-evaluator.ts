@@ -47,10 +47,26 @@ export interface HarnessEvaluatorConfig {
    * the failure path only. Default `1`; `0` disables the repair pass entirely.
    */
   maxRepairAttempts?: number;
+  /**
+   * Skill paths to load into the evaluator session (both the main judge call
+   * and the bounded self-repair call), resolved relative to the concert `cwd`.
+   * Loading is additive; an empty array specifies no skills.
+   */
+  skills?: string[];
 }
 
 export class HarnessEvaluator implements Evaluator {
   constructor(private config: HarnessEvaluatorConfig) {}
+
+  /**
+   * Return an evaluator with the same configuration but the given skill paths.
+   * Used by the concert hall to apply a score's shared `skills` default to a
+   * host-provided default evaluator without mutating it (and without leaking
+   * skills between concurrent concerts).
+   */
+  withSkills(skills: string[] | undefined): HarnessEvaluator {
+    return new HarnessEvaluator({ ...this.config, skills });
+  }
 
   async evaluate(
     goal: Goal,
@@ -67,6 +83,7 @@ export class HarnessEvaluator implements Evaluator {
       },
       model: this.config.model,
       provider: this.config.provider,
+      skills: this.config.skills,
     });
 
     // 1. Direct parse of the judge's own output.
@@ -285,6 +302,7 @@ Return a JSON object with:
           },
           model: this.config.model,
           provider: this.config.provider,
+          skills: this.config.skills,
         },
       );
       const parsed = this.tryParse(repairResponse);
