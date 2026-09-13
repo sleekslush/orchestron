@@ -35,6 +35,7 @@ A valid score requires only:
 | `program` | No | object | Execution constraints and global settings. All sub-fields are optional. Omit entirely to use defaults. |
 | `evaluator` | No | object | Configures the evaluator that judges whether movement goals are achieved. All sub-fields are optional. |
 | `models` | No | object | Score-level model defaults keyed by harness type (e.g., `pi`, `opencode`). Each entry is `{ provider: string, model: string, options?: object }`. Movements inherit these unless they specify their own `model`. See [Per-Harness Model Configuration](#per-harness-model-configuration). |
+| `skills` | No | array | Score-level default skill paths loaded by every session (movements and the evaluator) that does not declare its own `skills`. See [Skills](#skills). |
 | `movements` | Yes | array | Non-empty list of movements. |
 | `metadata` | No | object | Arbitrary key-value data attached to the score. |
 
@@ -46,6 +47,7 @@ A valid score requires only:
 | `model` | string | Model to use for evaluation (e.g., `pi-4-mini`). |
 | `provider` | string | Provider to use for evaluation. |
 | `prompt` | string | Optional custom prompt for the evaluator. |
+| `skills` | array | Skill paths the evaluator session loads. Overrides the score-level `skills` default when present; `[]` specifies none. See [Skills](#skills). |
 
 ## Movement Fields
 
@@ -58,6 +60,7 @@ A valid score requires only:
 | `harness` | No | string | Harness to execute the movement. Defaults to the plugin's `defaultHarness` (usually `pi`). |
 | `model` | No | string \| object | Model to use for this movement. **Flat string** (backward-compatible): used for all harnesses. **Per-harness map**: keyed by harness type (e.g., `pi`, `opencode`), each with `provider`, `model`, and optional `options` fields. The conductor selects the entry matching the movement's resolved harness. |
 | `provider` | No | string | Provider name. Only used when `model` is a flat string. |
+| `skills` | No | array | Skill paths this movement's session loads. Overrides the score-level `skills` default when present; `[]` specifies none. See [Skills](#skills). |
 | `prompt` | No | string \| object | The prompt text. Supports templating. Optional when the movement does not need a prompt (e.g., subscores). |
 | `output` | No | object | Output configuration. Defaults to `{ mode: "text" }`. Use `structured` with a JSON Schema when downstream movements need predictable, machine-readable output. |
 | `goal` | Yes | object | `{ description: string, strategy: "llm_judge" }`. The evaluator uses this to judge success. |
@@ -149,6 +152,47 @@ When both a movement-level entry and a score-level `models` entry apply, the mov
 - **Pi**: `orchestron models pi` (equivalent to `pi --list-models`). Provider IDs are Pi built-in names (`openai`, `anthropic`, `google`, `deepseek`, etc.). Model IDs are Pi built-in model names (`gpt-5`, `claude-sonnet-4.5`, etc.).
 - **Opencode**: `orchestron models opencode` (equivalent to `opencode models`). Provider and model IDs come from the Opencode server's registry.
 
+## Skills
+
+A score can declare which skills its sessions need, making the dependency explicit and reviewable instead of relying on whatever the harness happens to auto-discover from the operator's environment. `skills` is a list of **paths** (not names) to skill directories (containing `SKILL.md`) or skill files.
+
+```yaml
+skills:              # score-level default for every session
+  - /opt/orchestron/skills/review
+
+evaluator:
+  skills:            # overrides the score default for the evaluator session only
+    - /opt/orchestron/skills/judging
+
+movements:
+  - id: implement
+    # ...
+    skills:          # overrides the score default for this movement's session
+      - /opt/orchestron/skills/coding
+  - id: lint
+    # ...
+    skills: []       # explicitly load no declared skills (opts out of the score default)
+```
+
+**Resolution and precedence.** Each session-start site uses its own list when present, otherwise the score-level default:
+
+- movement session: `movement.skills ?? score.skills`
+- evaluator session: `evaluator.skills ?? score.skills`
+
+This mirrors model resolution. `skills: []` at a movement or evaluator level means "specify none" and opts that session out of the score default; at the score level it means no sessions get declared skills.
+
+**Path resolution.** Each entry must be an **absolute path** to a skill directory (containing `SKILL.md`) or a skill file. Relative paths are rejected — both by the score registry at load time and by the adapters at execution. A declared path that does not exist on disk fails the session immediately with an error naming the missing path. Paths relative to the score file or the concert `cwd` are not supported.
+
+**Additive semantics.** Declared skills *augment* whatever the harness auto-discovers; they do not replace it. There is no "load only these" mode (Pi has `includeDefaults`/`noSkills` but Opencode does not, so restrictive scoping is not portable). Orchestron is a pure pass-through: each harness loads the paths through its own native skill loader and owns discovery, formatting, and diagnostics.
+
+**Harness notes.**
+- **Pi** loads declared paths through its native `DefaultResourceLoader` (`additionalSkillPaths`). Pi's own skill diagnostics are surfaced.
+- **Opencode (embedded)** merges declared paths into the server's `config.skills.paths` at execute time. Skills are server-global, not per-session: concurrent sessions with different skill lists against one embedded server can affect each other. Prefer one skill list per embedded server where it matters.
+  - **`skills: []` caveat:** because skills are server-global and the merge is additive, `skills: []` cannot *unload* paths that an earlier session or concert already applied to a shared embedded server — those paths stay registered for the server's lifetime. `[]` only means "declare no additional skills for this session", not "remove previously registered skills". Use a fresh embedded server (or avoid sharing one) when a clean skill set matters.
+- **Opencode (connected server)** cannot inject skills — the external server owns its skill configuration. Declared skill paths are ignored with a warning in this mode.
+
+Paths to a skill *file* and paths to a skill *directory* are both accepted. Opencode `skills.urls` and name-based skill references are not supported.
+
 ## Prompt Templating
 
 Movement prompts can reference:
@@ -230,3 +274,4 @@ The `contextMapping` maps keys in the child score's context to dot-paths in the 
 - All transition targets must be valid movement ids, `__end__`, or `__fail__`.
 - The movement graph must not have cycles that cannot reach a terminal state (`__end__` or `__fail__`).
 - `maxNestingDepth` controls how many levels of subscores are allowed.
+- Optional `skills` (on the score, a movement, or the evaluator) must be an array of absolute, non-empty strings. An empty array is valid. A path that is relative or does not exist is rejected (the registry rejects relative paths; adapters reject both relative and missing paths).

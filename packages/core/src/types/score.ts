@@ -93,6 +93,12 @@ export interface Movement {
   model?: string | Record<string, HarnessModelConfig>;
   /** Provider name. Only used when \`model\` is a flat string. */
   provider?: string;
+  /**
+   * Absolute skill paths this movement's session needs. When omitted, the
+   * score-level \`skills\` default applies. An empty array explicitly specifies
+   * no skills for this movement. Relative paths are rejected.
+   */
+  skills?: string[];
 }
 
 export interface MovementBudget {
@@ -136,6 +142,14 @@ export interface Score {
    * Movements inherit these unless they specify their own \`model\`.
    */
   models?: Record<string, HarnessModelConfig>;
+  /**
+   * Absolute skill paths every session in this score loads by default. Movement
+   * and evaluator sessions use their own \`skills\` list when present, otherwise
+   * this shared default. An empty array specifies no skills. Loading is
+   * additive — the harness still auto-discovers its own skills. Relative paths
+   * are rejected.
+   */
+  skills?: string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -159,4 +173,10 @@ export interface EvaluatorConfig {
    * Default `1`; `0` disables the repair pass entirely.
    */
   maxRepairAttempts?: number;
+  /**
+   * Absolute skill paths the evaluator session needs. When omitted, the
+   * score-level \`skills\` default applies. An empty array explicitly specifies
+   * no skills for the evaluator session. Relative paths are rejected.
+   */
+  skills?: string[];
 }

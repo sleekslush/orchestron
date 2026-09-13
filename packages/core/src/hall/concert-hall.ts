@@ -89,7 +89,10 @@ export class ConcertHall implements ChildConcertFactory {
     }
   }
 
-  private async resolveEvaluator(score: Score, explicitHarness?: string): Promise<Evaluator> {
+  private async resolveEvaluator(
+    score: Score,
+    explicitHarness?: string,
+  ): Promise<Evaluator> {
     const harness = score.evaluator?.harness ?? explicitHarness;
     if (harness) {
       const adapter = await this.adapterResolver.get(harness);
@@ -104,9 +107,26 @@ export class ConcertHall implements ChildConcertFactory {
         promptTemplate: score.evaluator?.prompt,
         model: score.evaluator?.model,
         provider: score.evaluator?.provider,
+        // Evaluator skills follow the same precedence rule as movements:
+        // the evaluator-level list wins, otherwise the score-level default.
+        skills: score.evaluator?.skills ?? score.skills,
         defaultOnParseFailure: score.evaluator?.defaultOnParseFailure,
         maxRepairAttempts: score.evaluator?.maxRepairAttempts,
       });
+    }
+    // No explicit evaluator harness: the host-provided default evaluator is
+    // used. When it is a HarnessEvaluator (i.e. it starts a harness session),
+    // apply the score's resolved skills so score-level `skills` reaches the
+    // default evaluator session too. The host evaluator's own skills count as
+    // an explicit evaluator-level declaration (`evaluator.skills`) and win over
+    // the score-level default; `withSkills` clones rather than mutates, so the
+    // shared default evaluator is never modified.
+    if (this.evaluator instanceof HarnessEvaluator) {
+      const hostSkills = this.evaluator.skills;
+      const resolvedSkills = score.evaluator?.skills ?? hostSkills ?? score.skills;
+      if (resolvedSkills !== hostSkills) {
+        return this.evaluator.withSkills(resolvedSkills);
+      }
     }
     return this.evaluator;
   }

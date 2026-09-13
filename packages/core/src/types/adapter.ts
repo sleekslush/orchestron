@@ -81,6 +81,15 @@ export interface HarnessAdapterExecuteOptions {
    *  Default: process.cwd(). */
   cwd?: string;
   /**
+   * Skill paths to load into this harness session through the harness's own
+   * native skill loader. Each entry must be an absolute path to a skill
+   * directory (containing `SKILL.md`) or a skill file. Loading is additive:
+   * declared skills augment whatever the harness auto-discovers. An empty array
+   * specifies no skills (and does not disable auto-discovery). Declared paths
+   * that are relative or do not exist on disk fail the session loudly.
+   */
+  skills?: string[];
+  /**
    * Per-attempt recording context, present when the conductor is writing
    * traces for this attempt. The adapter records raw SDK events through
    * `recording.events` and writes its native session export into

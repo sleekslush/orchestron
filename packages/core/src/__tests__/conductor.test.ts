@@ -8,6 +8,7 @@ import { ConcertHall } from '../hall/concert-hall.js';
 import { Conductor } from '../conductor/conductor.js';
 import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
 import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
+import { HarnessEvaluator } from '../evaluator/harness-evaluator.js';
 import type { Score, MovementID, RequiredContext } from '../types/score.js';
 import type { Concert, ConcertID } from '../types/concert.js';
 import type { ConcertEvent } from '../types/events.js';
@@ -2952,5 +2953,265 @@ describe('model resolution', () => {
 
     expect(conductor.status).toBe('completed');
     expect(adapter.prompts[0].options).toBeUndefined();
+  });
+});
+
+describe('conductor skill resolution', () => {
+  class SkillCapturingAdapter extends FakeHarnessAdapter {
+    calls: { skills: string[] | undefined; structured: boolean }[] = [];
+    async execute(prompt: string, context: any, options?: any) {
+      this.calls.push({
+        skills: options?.skills,
+        structured: options?.output?.mode === 'structured',
+      });
+      return super.execute(prompt, context, options);
+    }
+
+    get skills(): (string[] | undefined)[] {
+      return this.calls.map((c) => c.skills);
+    }
+
+    evaluatorSkills(): string[] | undefined {
+      return this.calls.find((c) => c.structured)?.skills;
+    }
+  }
+
+  function skillScore(overrides: Partial<Score> = {}): Score {
+    return {
+      id: 'skills-test',
+      name: 'Skills Test',
+      version: '1.0.0',
+      startMovement: 'step_a',
+      movements: [
+        {
+          id: 'step_a',
+          name: 'Step A',
+          section: 'default',
+          harness: 'fake',
+          prompt: 'Do step A',
+          goal: { description: 'Done', strategy: 'llm_judge' },
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+      ...overrides,
+    };
+  }
+
+  it('passes the score-level skills default to a movement without its own list', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(skillScore({ skills: ['/abs/skills/score-default'] }));
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.skills).toEqual([['/abs/skills/score-default']]);
+  });
+
+  it('prefers movement-level skills over the score default', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(
+      skillScore({
+        skills: ['/abs/skills/score-default'],
+        movements: [
+          {
+            id: 'step_a',
+            name: 'Step A',
+            section: 'default',
+            harness: 'fake',
+            prompt: 'Do step A',
+            skills: ['/abs/skills/movement'],
+            goal: { description: 'Done', strategy: 'llm_judge' },
+            transitions: [{ to: '__end__', on: 'success' }],
+          },
+        ],
+      }),
+    );
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.skills).toEqual([['/abs/skills/movement']]);
+  });
+
+  it('treats movement skills: [] as an explicit opt-out of the score default', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(
+      skillScore({
+        skills: ['/abs/skills/score-default'],
+        movements: [
+          {
+            id: 'step_a',
+            name: 'Step A',
+            section: 'default',
+            harness: 'fake',
+            prompt: 'Do step A',
+            skills: [],
+            goal: { description: 'Done', strategy: 'llm_judge' },
+            transitions: [{ to: '__end__', on: 'success' }],
+          },
+        ],
+      }),
+    );
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.skills).toEqual([[]]);
+  });
+
+  it('passes no skills when neither the movement nor the score declares any', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(skillScore());
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: { output: 'ok', summary: 'ok' },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.skills).toEqual([undefined]);
+  });
+
+  it('passes the score-level skills default to the evaluator session', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(skillScore({ skills: ['/abs/skills/score-default'], evaluator: { harness: 'fake' } }));
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"ok"}',
+        structured: { achieved: true, confidence: 1, summary: 'ok' },
+        summary: 'ok',
+      },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.evaluatorSkills()).toEqual(['/abs/skills/score-default']);
+    expect(conductor.status).toBe('completed');
+  });
+
+  it('prefers evaluator-level skills over the score default', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(
+      skillScore({
+        skills: ['/abs/skills/score-default'],
+        evaluator: { harness: 'fake', skills: ['/abs/skills/eval'] },
+      }),
+    );
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"ok"}',
+        structured: { achieved: true, confidence: 1, summary: 'ok' },
+        summary: 'ok',
+      },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.evaluatorSkills()).toEqual(['/abs/skills/eval']);
+  });
+
+  it('treats evaluator skills: [] as an explicit opt-out of the score default', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(
+      skillScore({
+        skills: ['/abs/skills/score-default'],
+        evaluator: { harness: 'fake', skills: [] },
+      }),
+    );
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"ok"}',
+        structured: { achieved: true, confidence: 1, summary: 'ok' },
+        summary: 'ok',
+      },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.evaluatorSkills()).toEqual([]);
+  });
+
+  it('applies the score-level skills default to a default HarnessEvaluator', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(skillScore({ skills: ['/abs/skills/default-evaluator'] }));
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"ok"}',
+        structured: { achieved: true, confidence: 1, summary: 'ok' },
+        summary: 'ok',
+      },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new HarnessEvaluator({ adapter }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.evaluatorSkills()).toEqual(['/abs/skills/default-evaluator']);
+    expect(conductor.status).toBe('completed');
+  });
+
+  it('preserves a host evaluator\'s own skills over the score-level default', async () => {
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register(skillScore({ skills: ['/abs/skills/score-default'] }));
+    const adapter = new SkillCapturingAdapter({
+      defaultResponse: {
+        output: '{"achieved":true,"confidence":1,"summary":"ok"}',
+        structured: { achieved: true, confidence: 1, summary: 'ok' },
+        summary: 'ok',
+      },
+    });
+    const hall = createHall({
+      store, scoreRegistry: registry, adapters: new Map([['fake', adapter]]),
+      evaluator: new HarnessEvaluator({ adapter, skills: ['/abs/judge-skills'] }),
+    });
+    const conductor = await hall.createConcert('skills-test');
+    await conductor.start();
+
+    expect(adapter.evaluatorSkills()).toEqual(['/abs/judge-skills']);
   });
 });
