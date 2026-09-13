@@ -796,15 +796,14 @@ describe('OpencodeAdapter', () => {
     expect(mockClient.config.update).not.toHaveBeenCalled();
   });
 
-  it('warns that connected-server mode cannot inject declared skills', async () => {
+  it('warns (without validating) that connected-server mode cannot inject declared skills', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const base = mkdtempSync(join(tmpdir(), 'opencode-skills-connected-'));
-    const skillPath = join(base, 'my-skill');
-    mkdirSync(skillPath, { recursive: true });
-    writeFileSync(join(skillPath, 'SKILL.md'), '---\nname: my-skill\ndescription: x\n---\n');
-
     const adapter = new OpencodeAdapter({ baseUrl: 'http://custom:1234' });
-    await adapter.execute('hi', { shared: {} }, { skills: ['my-skill'], cwd: base });
+
+    // A missing path must NOT fail here: connected mode ignores declared skills,
+    // so there is nothing to load and the session should still run.
+    await adapter.execute('hi', { shared: {} }, { skills: ['does-not-exist'], cwd: base });
 
     expect(mockClient.config.update).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('connected-server mode'));

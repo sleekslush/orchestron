@@ -123,10 +123,17 @@ export class OpencodeAdapter implements HarnessAdapter {
     // Resolve and validate declared skill paths before creating a session, so a
     // missing path fails fast and names the path. Opencode loads skills from
     // server-global config (`config.skills.paths`), applied at execute time
-    // because the embedded server has already started.
-    const skillPaths = this.resolveSkillPaths(options?.skills, options?.cwd);
-    if (skillPaths) {
-      await this.applySkills(skillPaths);
+    // because the embedded server has already started. A connected server owns
+    // its own skill config, so declared paths are ignored (with a warning) and
+    // deliberately not validated there — nothing would be loaded either way.
+    if (options?.skills && options.skills.length > 0) {
+      if (this.ownsServer) {
+        await this.applySkills(this.resolveSkillPaths(options.skills, options.cwd));
+      } else {
+        console.warn(
+          'Opencode connected-server mode cannot inject declared skills: the server owns its skill configuration. Declared skill paths are ignored.',
+        );
+      }
     }
 
     // Use model/provider from options (per-movement) if provided, otherwise fall back to config
@@ -465,7 +472,7 @@ export class OpencodeAdapter implements HarnessAdapter {
    * Opencode resolves skills from server-global `config.skills.paths`, not per
    * session, so this is a global mutation applied at execute time. Declared
    * paths are merged additively with the server's current paths. Connected-server
-   * mode cannot inject skills and logs a warning instead.
+   * mode never reaches here (it warns instead).
    *
    * Caveat: because paths accumulate globally, a session declaring `skills: []`
    * (which skips this method) cannot unload paths registered by an earlier
@@ -475,12 +482,6 @@ export class OpencodeAdapter implements HarnessAdapter {
    */
   private async applySkills(skillPaths: string[]): Promise<void> {
     if (!this.client) return;
-    if (!this.ownsServer) {
-      console.warn(
-        'Opencode connected-server mode cannot inject declared skills: the server owns its skill configuration. Declared skill paths are ignored.',
-      );
-      return;
-    }
 
     let existing: string[] = [];
     try {
@@ -510,10 +511,9 @@ export class OpencodeAdapter implements HarnessAdapter {
    * natively. `skills: []` means "no declared skills".
    */
   private resolveSkillPaths(
-    skills: string[] | undefined,
+    skills: string[],
     cwd: string | undefined,
-  ): string[] | undefined {
-    if (skills === undefined || skills.length === 0) return undefined;
+  ): string[] {
     const base = cwd ?? process.cwd();
     return skills.map((skill) => {
       const resolved = isAbsolute(skill) ? skill : resolve(base, skill);
