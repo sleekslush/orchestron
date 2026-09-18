@@ -2,13 +2,13 @@ id: opencode-demo
 name: "Opencode Demo"
 description: |
   A two-movement score demonstrating the opencode harness with native
-  structured output and session persistence.
+  structured output and in-concert session reuse.
 version: "1.0.0"
 evaluator:
   harness: opencode
 program:
   maxMovements: 10
-  persistSession: true
+  reuseSession: true
 startMovement: analyze
 
 movements:

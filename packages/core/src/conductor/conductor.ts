@@ -48,6 +48,7 @@ import {
 import { PromptBuilder } from './prompt-builder.js';
 import { ConstraintChecker } from './constraint-checker.js';
 import { matchTransition } from './transition-resolver.js';
+import { resolveSessionMode, type SessionMode } from './session-mode.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
 import { findMissingRequiredContext } from '../required-context.js';
@@ -80,6 +81,8 @@ export class Conductor implements IConductor {
   private movementHarness = new Map<MovementID, string>();
   /** Per-movement session mode, set at each attempt start. */
   private movementMode = new Map<MovementID, 'cumulative' | 'fresh'>();
+  /** Score-level session mode, resolved once per concert. */
+  private sessionMode: SessionMode;
   /** Per-movement attempt summaries (grows as attempts execute). */
   private movementAttempts = new Map<MovementID, MovementIndex['attempts']>();
   /** Per-movement resolved final session file path (movement dir-relative). */
@@ -101,6 +104,14 @@ export class Conductor implements IConductor {
     this._status = concert.status;
     this.nestingDepth = concert.nestingDepth ?? 0;
     this.constraintChecker = new ConstraintChecker(this.score.program);
+    const sessionMode = resolveSessionMode(this.score.program);
+    this.sessionMode = sessionMode.mode;
+    if (sessionMode.deprecatedUsed) {
+      const ignored = sessionMode.bothSet ? ' (ignored; reuseSession takes precedence)' : '';
+      console.warn(
+        `[orchestron] Score '${this.score.id}': program option 'persistSession' is deprecated — rename it to 'reuseSession' (same behavior)${ignored}.`,
+      );
+    }
     if (tracesDir) {
       this.traceService = new TraceService(tracesDir, store);
     }
@@ -473,9 +484,8 @@ export class Conductor implements IConductor {
         this.concert.context.shared,
       );
       this.promptBuilder.recordVisit(movement.id);
-      const persistSession = this.score.program?.persistSession !== false;
-      sessionId = persistSession ? `${this.concert.id}:${movement.id}` : undefined;
-      const mode: 'cumulative' | 'fresh' = persistSession ? 'cumulative' : 'fresh';
+      const mode = this.sessionMode;
+      sessionId = mode === 'cumulative' ? `${this.concert.id}:${movement.id}` : undefined;
 
       if (sessionId) {
         this.activeSessions.set(sessionId, harnessAdapter);
@@ -1434,7 +1444,7 @@ export class Conductor implements IConductor {
   private async writeConcertIndex(status: ConcertStatus): Promise<void> {
     if (!this.tracesDir || !this.concertStream) return;
 
-    const defaultMode = this.score.program?.persistSession !== false ? 'cumulative' : 'fresh';
+    const defaultMode = this.sessionMode;
     const movements: ConcertIndexMovement[] = this.concert.history.map((record) => {
       const mid = record.movementId;
       const attemptCount = this.attemptCounters.get(mid) ?? 0;
