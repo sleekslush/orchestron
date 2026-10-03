@@ -371,6 +371,7 @@ transcripts are recorded to disk in both modes (see below).
 > never restored across concerts). The legacy `persistSession` key is still
 > read with a deprecation warning; `reuseSession` wins when both are set.
 > Existing scores can migrate by renaming the key — the behavior is identical.
+> The alias is scheduled for removal in 0.2.0.
 
 ## Recording & Reopening Sessions
 

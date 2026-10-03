@@ -14,7 +14,7 @@ export class TraceService {
 
   /**
    * Record a per-attempt session trace row. Always recorded, regardless of
-   * whether the attempt's session was persistent (cumulative) or fresh; the
+   * whether the attempt reused a prior session (cumulative) or ran fresh; the
    * on-disk attempt dir + metadata.json remain the authoritative index.
    */
   async recordAttempt(input: {

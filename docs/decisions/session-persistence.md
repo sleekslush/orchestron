@@ -71,6 +71,17 @@ Migration: legacy scores may keep using `persistSession` — the Conductor still
 reads it as a deprecated alias and emits a warning. `reuseSession` wins when
 both keys are present. Renaming the key is behavior-identical.
 
+Removal milestone: the `persistSession` alias is **not** removed in the 0.1.0
+release. It is scheduled for removal in **0.2.0**, the next minor after 0.1.0,
+so the misleading name does not become permanent.
+
+Filename note: this ADR's filename retains the historical slug
+`session-persistence.md` even though the title and decision now use reuse
+framing. The filename is a stable historical identifier and the inbound
+references from `child-concert-lifecycle.md` and `opencode-adapter.md` point at
+it; it is deliberately not renamed to keep those links valid. Do not "fix" the
+slug without updating every inbound reference.
+
 ## Consequences
 
 - Default session reuse means re-visited movements keep context automatically.

@@ -24,7 +24,8 @@ export interface Program {
   /**
    * @deprecated Legacy alias for `reuseSession`. Still read (with a deprecation
    * warning) for backward compatibility with existing scores; new scores
-   * should use `reuseSession`. When both are set, `reuseSession` wins.
+   * should use `reuseSession`. When both are set, `reuseSession` wins. Scheduled
+   * for removal in 0.2.0 so the misleading name does not become permanent.
    */
   persistSession?: boolean;
   perSection?: Record<SectionID, SectionBudget>;

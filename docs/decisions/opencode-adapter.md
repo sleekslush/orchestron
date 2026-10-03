@@ -2,7 +2,7 @@
 
 **Status:** Decided
 **Date:** 2026-07-12
-**Related:** Phase 4 (Opencode Harness Adapter), `docs/decisions/session-persistence.md`
+**Related:** Phase 4 (Opencode Harness Adapter), `docs/decisions/session-persistence.md` (session reuse)
 
 ## Context
 
@@ -11,7 +11,7 @@ that Orchestron's core is genuinely harness-agnostic. The opencode adapter must:
 
 - Reuse the same `HarnessAdapter` interface as Pi.
 - Support native structured output.
-- Support session persistence across movement re-executions.
+- Support session reuse across movement re-executions within a concert.
 - Handle cancellation, usage tracking, and graceful cleanup.
 - Keep all opencode-specific code inside `packages/adapter-opencode/`.
 
@@ -38,7 +38,7 @@ The adapter supports two connection modes, controlled by config:
 
 This mirrors the SDK's own entry points while leaving the caller in control.
 
-### Session persistence
+### Session reuse
 
 The adapter follows the same pattern established in `session-persistence.md`:
 
