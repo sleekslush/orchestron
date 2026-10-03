@@ -300,6 +300,60 @@ describe('Conductor recording artifacts', () => {
   });
 
   it.each([
+    { program: {}, label: 'cumulative default', reuse: true },
+    { program: { reuseSession: false }, label: 'fresh', reuse: false },
+  ] as Array<{ program: Score['program']; label: string; reuse: boolean }>)(
+    'passes the movement session key to the Musician on every attempt of a re-visited movement ($label)',
+    async ({ program, reuse }) => {
+      const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-sessionid-'));
+      const store = new SqliteLoge(':memory:');
+      const registry = new ScoreRegistry();
+      // Force a retry so movement 'a' is executed twice in one concert.
+      registry.register(score(program, { retryOnFailure: true, maxRetries: 1 }));
+      const seen: Array<string | undefined> = [];
+      const adapter = new (class extends FakeHarnessAdapter {
+        calls = 0;
+        async execute(
+          prompt: string,
+          context: unknown,
+          options?: Parameters<FakeHarnessAdapter['execute']>[2],
+        ) {
+          seen.push(options?.sessionId);
+          if (this.calls++ === 0) {
+            const err = new Error('transient harness failure');
+            (err as { code?: string }).code = 'HARNESS_FAILURE';
+            throw err;
+          }
+          return super.execute(prompt, context as never, options);
+        }
+      })({
+        defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+      });
+      const hall = new ConcertHall({
+        store,
+        scoreRegistry: registry,
+        adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+        evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+        tracesDir,
+      });
+      try {
+        const conductor = await hall.createConcert('recording-test');
+        await conductor.start();
+        expect(conductor.status).toBe('completed');
+        expect(seen).toHaveLength(2);
+        if (reuse) {
+          const movementKey = `${conductor.concertId}:a`;
+          expect(seen).toEqual([movementKey, movementKey]);
+        } else {
+          expect(seen).toEqual([undefined, undefined]);
+        }
+      } finally {
+        rmSync(tracesDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
     { program: {}, label: 'reuseSession default (cumulative)' },
     { program: { reuseSession: true }, label: 'reuseSession: true (cumulative)' },
     { program: { reuseSession: false }, label: 'reuseSession: false (fresh)' },
