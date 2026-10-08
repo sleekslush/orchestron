@@ -11,7 +11,7 @@ Use this skill when the user wants to create, edit, run, or manage an Orchestron
 
 - **Score** — A YAML workflow definition. Describes movements, transitions, goals, and execution constraints.
 - **Concert** — One running instance of a Score.
-- **Movement** — A single step in a workflow. Each movement runs a prompt through a harness and is evaluated against a goal.
+- **Movement** — A single step in a workflow. A **harness movement** (`type: harness`, the default) runs a prompt through a harness session and is evaluated against a goal. A **run movement** (`type: run`) executes a bounded argv command and maps its exit code to an outcome — no LLM session, no evaluator.
 - **Transition** — Rules that decide which movement runs next based on the current movement's result.
 
 ## Complete Tool Reference
@@ -75,7 +75,8 @@ Model names differ between harnesses. When authoring scores:
 
 ## Score YAML at a Glance
 
-Required fields only. All others are optional.
+A harness movement requires `goal`; a run movement requires `command` and rejects
+harness-only fields. All other fields are optional.
 
 ```yaml
 id: my-score                # must match scoreId param
@@ -116,6 +117,27 @@ movements:
       - to: plan
         on: failure
 ```
+
+Deterministic step:
+
+```yaml
+  - id: claim
+    name: "Claim Issue"
+    section: setup
+    type: run
+    command: ["bash", "-lc", "labels.sh claim {{context.issue}}"]
+    outcomes: { 0: success, 3: rejection, default: failure }
+    transitions:
+      - to: implement
+        on: success
+      - to: __end__
+        on: rejection
+      - to: fail_cleanup
+        on: failure
+```
+
+> Run steps execute commands with the host user's privileges. Score files are
+executable code; only run scores you trust.
 
 ## Detailed Reference
 
