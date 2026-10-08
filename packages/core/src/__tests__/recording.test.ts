@@ -10,7 +10,7 @@ import { ConcertHall } from '../hall/concert-hall.js';
 import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
 import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
 import { NATIVE_SESSION_FILE, writeAttemptMetadata, attemptDirName, movementDirName } from '../recording/artifacts.js';
-import type { Score } from '../types/score.js';
+import type { Movement, Score } from '../types/score.js';
 import type { SessionRecording } from '../types/adapter.js';
 import type { StreamRecord } from '../store/concert-stream.js';
 
@@ -94,6 +94,48 @@ function score(
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, 'utf-8')) as T;
+}
+
+/**
+ * Two-movement score for session-mode precedence tests: `a` (optionally with a
+ * movement-level `reuseSession` override and a forced first-attempt retry) runs
+ * first and hands off to sibling `b`, which never declares an override.
+ */
+function twoMovementScore(
+  program: Score['program'],
+  aOverride: boolean | undefined,
+  aRetry = false,
+): Score {
+  return {
+    id: 'recording-test',
+    name: 'Recording Test',
+    version: '1.0.0',
+    startMovement: 'a',
+    movements: [
+      {
+        id: 'a',
+        name: 'A',
+        section: 'x',
+        harness: 'pi',
+        prompt: 'do a',
+        reuseSession: aOverride,
+        retryOnFailure: aRetry,
+        budget: aRetry ? { maxRetries: 1 } : undefined,
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: 'b', on: 'success' as const }],
+      },
+      {
+        id: 'b',
+        name: 'B',
+        section: 'x',
+        harness: 'pi',
+        prompt: 'do b',
+        goal: { description: 'done', strategy: 'llm_judge' as const },
+        transitions: [{ to: '__end__', on: 'success' as const }],
+      },
+    ],
+    program,
+  };
 }
 
 describe('Conductor recording artifacts', () => {
@@ -481,6 +523,278 @@ describe('Conductor recording artifacts', () => {
       // But the healthy records still landed.
       const prompts = stream.filter((r) => r.source === 'sdk' && r.type === 'user.prompt');
       expect(prompts).toHaveLength(1);
+    } finally {
+      rmSync(tracesDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      label: 'movement override false on a cumulative-default score',
+      program: {} as Score['program'],
+      override: false,
+      expectedA: 'fresh' as const,
+      expectedB: 'cumulative' as const,
+    },
+    {
+      label: 'movement override true on a fresh-default score',
+      program: { reuseSession: false } as Score['program'],
+      override: true,
+      expectedA: 'cumulative' as const,
+      expectedB: 'fresh' as const,
+    },
+  ])(
+    'resolves the effective session mode per movement ($label)',
+    async ({ program, override, expectedA, expectedB }) => {
+      const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-override-'));
+      const store = new SqliteLoge(':memory:');
+      const registry = new ScoreRegistry();
+      registry.register(twoMovementScore(program, override, true));
+      const seen: Array<{ movementId?: string; sessionId?: string }> = [];
+      const adapter = new (class extends RecordingPiFake {
+        calls = 0;
+        async execute(
+          prompt: string,
+          context: unknown,
+          options?: Parameters<RecordingPiFake['execute']>[2],
+        ) {
+          seen.push({ movementId: options?.movementId, sessionId: options?.sessionId as string | undefined });
+          // Force movement 'a' to be re-visited, recording its first attempt
+          // before failing so the retry exercises the cumulative path.
+          if (options?.movementId === 'a' && this.calls++ === 0) {
+            const recording = options?.recording;
+            if (recording) {
+              recording.recordSynthetic('user.prompt', { prompt });
+              await recording.events.flush();
+              const { writeFile } = await import('node:fs/promises');
+              await writeFile(
+                join(recording.attemptDir, NATIVE_SESSION_FILE.pi),
+                '{"type":"session","version":3}\n',
+              );
+            }
+            const err = new Error('transient harness failure');
+            (err as { code?: string }).code = 'HARNESS_FAILURE';
+            throw err;
+          }
+          return super.execute(prompt, context, options);
+        }
+      })({
+        defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+      });
+      const hall = new ConcertHall({
+        store,
+        scoreRegistry: registry,
+        adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+        evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+        tracesDir,
+      });
+      try {
+        const conductor = await hall.createConcert('recording-test');
+        await conductor.start();
+        expect(conductor.status).toBe('completed');
+        const cid = conductor.concertId;
+
+        // Session identifier: only the overriding movement diverges from the
+        // score default; the sibling keeps it. Movement 'a' is re-visited.
+        const aSessions = seen
+          .filter((s) => s.movementId === 'a')
+          .map((s) => s.sessionId);
+        const bSessions = seen
+          .filter((s) => s.movementId === 'b')
+          .map((s) => s.sessionId);
+        const expectedAKey = expectedA === 'cumulative' ? `${cid}:a` : undefined;
+        const expectedBKey = expectedB === 'cumulative' ? `${cid}:b` : undefined;
+        expect(aSessions).toEqual([expectedAKey, expectedAKey]);
+        expect(bSessions).toEqual([expectedBKey]);
+
+        // Movement index records the effective mode.
+        const aIndex = await readJson<{ mode: string; finalSessionFile: string }>(
+          join(tracesDir, cid, 'movements', 'a', 'index.json'),
+        );
+        expect(aIndex.mode).toBe(expectedA);
+        const bIndex = await readJson<{ mode: string }>(
+          join(tracesDir, cid, 'movements', 'b', 'index.json'),
+        );
+        expect(bIndex.mode).toBe(expectedB);
+
+        // Cumulative movements aggregate a final copy; fresh ones do not.
+        expect(existsSync(join(tracesDir, cid, 'movements', 'a', 'final-pi-session.jsonl'))).toBe(
+          expectedA === 'cumulative',
+        );
+        expect(existsSync(join(tracesDir, cid, 'movements', 'b', 'final-pi-session.jsonl'))).toBe(
+          expectedB === 'cumulative',
+        );
+
+        // Concert index reports the effective per-movement mode.
+        const concertIndex = await readJson<{
+          movements: Array<{ id: string; mode: string }>;
+        }>(join(tracesDir, cid, 'index.json'));
+        expect(concertIndex.movements.find((m) => m.id === 'a')?.mode).toBe(expectedA);
+        expect(concertIndex.movements.find((m) => m.id === 'b')?.mode).toBe(expectedB);
+
+        // Per-attempt session_traces rows report the effective mode.
+        const traces = await store.getSessionTracesForConcert(cid);
+        expect(traces.filter((t) => t.movementId === 'a').map((t) => t.mode)).toEqual([
+          expectedA,
+          expectedA,
+        ]);
+        expect(traces.filter((t) => t.movementId === 'b').map((t) => t.mode)).toEqual([
+          expectedB,
+        ]);
+      } finally {
+        rmSync(tracesDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('movement override wins while the score-level persistSession warning still fires', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-alias-override-'));
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    // Legacy score-level alias resolves to cumulative; the movement forces fresh.
+    registry.register(twoMovementScore({ persistSession: true }, false));
+    const adapter = new RecordingPiFake({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+    });
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      tracesDir,
+    });
+    try {
+      const conductor = await hall.createConcert('recording-test');
+      await conductor.start();
+      expect(conductor.status).toBe('completed');
+
+      const warnings = warn.mock.calls
+        .map((args) => String(args[0]))
+        .filter((msg) => msg.includes('persistSession') && msg.includes('deprecated'));
+      expect(warnings).toHaveLength(1);
+
+      // The override determines movement 'a'; sibling 'b' inherits the alias value.
+      const aIndex = await readJson<{ mode: string }>(
+        join(tracesDir, conductor.concertId, 'movements', 'a', 'index.json'),
+      );
+      expect(aIndex.mode).toBe('fresh');
+      const bIndex = await readJson<{ mode: string }>(
+        join(tracesDir, conductor.concertId, 'movements', 'b', 'index.json'),
+      );
+      expect(bIndex.mode).toBe('cumulative');
+    } finally {
+      warn.mockRestore();
+      rmSync(tracesDir, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores an unrecognized movement-level persistSession key', async () => {
+    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-movement-alias-'));
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    const scoreWithMovementAlias = twoMovementScore({ reuseSession: false }, undefined);
+    // Not a recognized Movement field: it must have no effect.
+    (scoreWithMovementAlias.movements[0] as Movement & { persistSession?: boolean }).persistSession =
+      true;
+    registry.register(scoreWithMovementAlias);
+    const adapter = new RecordingPiFake({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+    });
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      tracesDir,
+    });
+    try {
+      const conductor = await hall.createConcert('recording-test');
+      await conductor.start();
+      const aIndex = await readJson<{ mode: string }>(
+        join(tracesDir, conductor.concertId, 'movements', 'a', 'index.json'),
+      );
+      // Movement inherits the fresh score default; the bogus alias is inert.
+      expect(aIndex.mode).toBe('fresh');
+    } finally {
+      rmSync(tracesDir, { recursive: true, force: true });
+    }
+  });
+
+  it('subscore movements create no parent session and the movement-level field is inert', async () => {
+    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-subscore-mode-'));
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    registry.register({
+      id: 'sub-parent',
+      name: 'Sub Parent',
+      version: '1.0.0',
+      startMovement: 'p',
+      movements: [
+        {
+          id: 'p',
+          name: 'P',
+          section: 'x',
+          // The parent movement-level field must not affect the child score.
+          reuseSession: false,
+          subscore: { scoreId: 'sub-child', contextMapping: {} },
+          goal: { description: 'done', strategy: 'llm_judge' as const },
+          transitions: [{ to: '__end__', on: 'success' as const }],
+        },
+      ],
+      program: {},
+    });
+    registry.register({
+      id: 'sub-child',
+      name: 'Sub Child',
+      version: '1.0.0',
+      startMovement: 'c',
+      movements: [
+        {
+          id: 'c',
+          name: 'C',
+          section: 'x',
+          harness: 'pi',
+          prompt: 'do c',
+          goal: { description: 'done', strategy: 'llm_judge' as const },
+          transitions: [{ to: '__end__', on: 'success' as const }],
+        },
+      ],
+      program: {},
+    });
+    const seen: Array<{ movementId?: string; sessionId?: string }> = [];
+    const adapter = new (class extends FakeHarnessAdapter {
+      async execute(
+        prompt: string,
+        context: unknown,
+        options?: Parameters<FakeHarnessAdapter['execute']>[2],
+      ) {
+        seen.push({ movementId: options?.movementId, sessionId: options?.sessionId as string | undefined });
+        return super.execute(prompt, context as never, options);
+      }
+    })({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+    });
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      tracesDir,
+    });
+    try {
+      const conductor = await hall.createConcert('sub-parent');
+      await conductor.start();
+      expect(conductor.status).toBe('completed');
+
+      // Only the child movement executed; the parent's subscore movement never
+      // resolved a session. The child score governs nested session behavior, so
+      // the parent movement-level `reuseSession: false` is inert here and the
+      // child keeps its cumulative default.
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.movementId).toBe('c');
+      expect(seen[0]!.sessionId).toMatch(/:c$/);
+      expect(seen[0]!.sessionId).not.toBe(`${conductor.concertId}:p`);
     } finally {
       rmSync(tracesDir, { recursive: true, force: true });
     }

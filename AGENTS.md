@@ -59,8 +59,9 @@ Harness resolution priority: movement-level > explicit CLI arg > config default.
    events to `concerts/<id>/stream.jsonl`. ConcertHall only creates and indexes.
 3. **Evaluators are separate harness sessions** — `FakeEvaluator` (deterministic)
    or `HarnessEvaluator` (LLM-based).
-4. **Session reuse** per movement (`concertId:movementId` key) unless
-   `reuseSession: false`.
+4. **Session reuse** per movement (`concertId:movementId` key) unless the
+   score program sets `reuseSession: false`; a movement-level `reuseSession`
+   overrides the score-resolved mode for that movement only.
 5. **Plugin packages** (`plugin-pi`, `plugin-opencode`) provide harness-specific
    session plugins. `plugin-common` has shared tool infrastructure.
 6. **CLI** lives in `packages/cli`.

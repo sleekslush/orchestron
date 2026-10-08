@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveSessionMode } from '../conductor/session-mode.js';
+import { resolveMovementSessionMode, resolveSessionMode } from '../conductor/session-mode.js';
 import type { Program } from '../types/score.js';
 
 describe('resolveSessionMode', () => {
@@ -54,5 +54,29 @@ describe('resolveSessionMode', () => {
 
     const bothFalse = resolveSessionMode({ reuseSession: false, persistSession: true } as Program);
     expect(bothFalse).toEqual({ mode: 'fresh', deprecatedUsed: true, bothSet: true });
+  });
+});
+
+describe('resolveMovementSessionMode', () => {
+  it('inherits the score-resolved mode when the movement override is omitted', () => {
+    expect(resolveMovementSessionMode('cumulative', undefined)).toBe('cumulative');
+    expect(resolveMovementSessionMode('fresh', undefined)).toBe('fresh');
+  });
+
+  it('forces cumulative when the movement override is true', () => {
+    expect(resolveMovementSessionMode('fresh', true)).toBe('cumulative');
+    expect(resolveMovementSessionMode('cumulative', true)).toBe('cumulative');
+  });
+
+  it('forces fresh when the movement override is false', () => {
+    expect(resolveMovementSessionMode('cumulative', false)).toBe('fresh');
+    expect(resolveMovementSessionMode('fresh', false)).toBe('fresh');
+  });
+
+  it('does not mutate the score-resolved mode', () => {
+    const scoreMode = 'fresh' as const;
+    const resolved = resolveMovementSessionMode(scoreMode, true);
+    expect(resolved).toBe('cumulative');
+    expect(scoreMode).toBe('fresh');
   });
 });

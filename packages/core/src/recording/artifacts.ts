@@ -18,7 +18,8 @@ import type { ConcertID, MovementID } from '../types/concert.js';
  *         metadata.json            attempt metadata (sessionKey + sessionId + files)
  *
  * Attempts are 0-indexed (`attempt-0` = first execute call, retries follow).
- * `final-*` files exist only for cumulative (reuseSession) movements: a
+ * `final-*` files exist only for movements whose effective mode is cumulative
+ * (the score-level `reuseSession` default or a movement-level override): a
  * fresh movement is N independent sessions enumerated by its index.json.
  */
 

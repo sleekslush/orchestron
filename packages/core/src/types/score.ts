@@ -119,6 +119,25 @@ export interface Movement {
    * no skills for this movement. Relative paths are rejected.
    */
   skills?: string[];
+  /**
+   * Per-movement override of the score-level `reuseSession` setting.
+   *
+   * - Omitted: inherit the score-resolved value.
+   * - `true`: this movement's re-visits reuse its prior session
+   *   (`cumulative`), regardless of the score default.
+   * - `false`: every execution of this movement starts a brand-new session
+   *   (`fresh`), regardless of the score default.
+   *
+   * The override applies to this movement and its re-visits only; sibling and
+   * other movements are unaffected. Like the score-level setting, reuse is
+   * scoped to one concert and held in memory only, and it does not control
+   * disk recording. The deprecated `persistSession` alias does **not** apply
+   * at the movement level.
+   *
+   * Subscore movements delegate to a child concert and create no parent
+   * session, so this field is a no-op for them.
+   */
+  reuseSession?: boolean;
 }
 
 export interface MovementBudget {
