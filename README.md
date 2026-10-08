@@ -213,7 +213,7 @@ name: "Opencode Demo"
 version: "1.0.0"
 program:
   maxMovements: 10
-  persistSession: true
+  reuseSession: true
 startMovement: analyze
 
 movements:
@@ -284,7 +284,7 @@ program:
   maxMovements: 100
   maxDurationMs: 600000
   maxNestingDepth: 5
-  persistSession: true
+  reuseSession: true
 ```
 
 ## Architecture
@@ -353,12 +353,25 @@ const embedded = new OpencodeAdapter({
 });
 ```
 
-## Session Persistence
+## Session Reuse
 
 By default, each movement retains its own harness session keyed by
-`concertId:movementId`. Re-visited movements keep their prior context, while
-movement A cannot see movement B's conversation history. Set
-`persistSession: false` in the score program to disable.
+`concertId:movementId`. Re-visited movements reuse their prior session, so the
+agent sees its own previous turns as context (a retry, or a transition that
+loops back), while movement A cannot see movement B's conversation history. Set
+`reuseSession: false` in the score program to run every execution of a movement
+in a brand-new session.
+
+Reuse is scoped to a single concert run and held in memory only; it is not
+shared across concerts. It does **not** control disk recording — session
+transcripts are recorded to disk in both modes (see below).
+
+> **Migration:** `reuseSession` replaces the old `persistSession` option, whose
+> name misdescribed the behavior (transcripts are always recorded; sessions are
+> never restored across concerts). The legacy `persistSession` key is still
+> read with a deprecation warning; `reuseSession` wins when both are set.
+> Existing scores can migrate by renaming the key — the behavior is identical.
+> The alias is scheduled for removal in 0.2.0.
 
 ## Recording & Reopening Sessions
 
@@ -381,9 +394,9 @@ normalization — into a unified raw envelope stream per concert:
 
 - `source: "sdk"` envelopes carry raw `data`; `source: "concert"` envelopes are
   conductor lifecycle events. Line order is event order; there is no `seq` field.
-- Cumulative (`persistSession: true`, default) movements keep each attempt's
+- Cumulative (`reuseSession: true`, default) movements keep each attempt's
   snapshot and a final aggregated copy (`final-pi-session.jsonl` /
-  `final-opencode-session.json`). Fresh movements (`persistSession: false`)
+  `final-opencode-session.json`). Fresh movements (`reuseSession: false`)
   write independent per-attempt sessions only, referenced as `attempt-<n>/…`.
 - Retries increment the attempt index (`attempt-0` = first attempt); each
   attempt gets its own snapshot + `session_traces` row in Loge.

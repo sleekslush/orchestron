@@ -172,7 +172,7 @@ export class OpencodeAdapter implements HarnessAdapter {
 
       // Determine the message boundary for this turn so per-turn usage (cost +
       // tokens) can be aggregated across every assistant message in the turn
-      // without double-counting prior turns in a persistent (reused) session.
+      // without double-counting prior turns in a reused session.
       // A fresh/ephemeral session always starts at index 0.
       let turnStartIndex = 0;
       if (options?.sessionId) {

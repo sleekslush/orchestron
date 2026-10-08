@@ -54,9 +54,9 @@ export class PiAdapter implements HarnessAdapter {
   private excludeTools: string[] | undefined;
   private sessionPool: SessionPool<PiSessionData>;
   private modelRuntime: ModelRuntime | undefined;
-  /** Working directory per persistent session id (from execute options). */
+  /** Working directory per reused session id (from execute options). */
   private sessionCwds = new Map<string, string>();
-  /** Resolved (absolute) skill paths per persistent session id. */
+  /** Resolved (absolute) skill paths per reused session id. */
   private sessionSkills = new Map<string, string[]>();
 
   constructor(config: PiAdapterConfig = {}) {

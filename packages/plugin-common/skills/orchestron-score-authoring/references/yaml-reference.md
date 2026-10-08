@@ -20,7 +20,8 @@ A valid score requires only:
 | `maxMovements` | number | Maximum number of movements that may execute across the entire concert. |
 | `maxDurationMs` | number | Maximum total duration in milliseconds. |
 | `maxNestingDepth` | number | Maximum depth of subscore nesting. Default is `5`. |
-| `persistSession` | boolean | Whether to persist harness sessions across movements. Default is `true`. |
+| `reuseSession` | boolean | Whether a re-visited movement reuses its prior harness session within a single concert (retries and loop-back transitions). `true` (default): the agent sees its own previous turns as context on re-visits. `false`: every execution runs in a brand-new session. Does **not** control disk recording — session transcripts are recorded in both modes. |
+| `persistSession` | boolean | **Deprecated alias for `reuseSession`.** Read with a warning for backward compatibility; `reuseSession` wins when both are set. Rename to `reuseSession`; the alias is scheduled for removal in 0.2.0. |
 | `perSection` | object | Per-section budget overrides keyed by `section` ID. Each entry can specify `maxSpendDollars` and `maxMovements`. The `*` wildcard key sets a base budget for all sections; explicit section keys merge on top of it, overriding individual fields. |
 
 ## Top-level Fields

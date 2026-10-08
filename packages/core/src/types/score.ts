@@ -7,6 +7,26 @@ export interface Program {
   maxMovements?: number;
   maxDurationMs?: number;
   maxNestingDepth?: number;
+  /**
+   * Whether a re-visited movement reuses its prior harness session within a
+   * single concert (a retry, or a transition that loops back). `true`
+   * (default): the agent sees its own previous turns as context on re-visits.
+   * `false`: every execution of the movement runs in a brand-new session with
+   * no memory of prior turns.
+   *
+   * Reuse is scoped to one concert run and held in memory only; it is not
+   * shared across concerts, and it does not control disk recording. Session
+   * transcripts are recorded to disk in both modes: fresh movements keep a
+   * per-attempt snapshot, cumulative movements additionally aggregate a final
+   * copy.
+   */
+  reuseSession?: boolean;
+  /**
+   * @deprecated Legacy alias for `reuseSession`. Still read (with a deprecation
+   * warning) for backward compatibility with existing scores; new scores
+   * should use `reuseSession`. When both are set, `reuseSession` wins. Scheduled
+   * for removal in 0.2.0 so the misleading name does not become permanent.
+   */
   persistSession?: boolean;
   perSection?: Record<SectionID, SectionBudget>;
 }

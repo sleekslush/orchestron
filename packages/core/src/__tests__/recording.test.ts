@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -66,9 +66,10 @@ class RecordingPiFake extends FakeHarnessAdapter {
 function score(
   program: Score['program'],
   retry: { retryOnFailure?: boolean; maxRetries?: number } = {},
+  id = 'recording-test',
 ): Score {
   return {
-    id: 'recording-test',
+    id,
     name: 'Recording Test',
     description: 'records everything',
     version: '1.0.0',
@@ -199,7 +200,7 @@ describe('Conductor recording artifacts', () => {
     const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-fresh-'));
     const store = new SqliteLoge(':memory:');
     const registry = new ScoreRegistry();
-    registry.register(score({ persistSession: false }));
+    registry.register(score({ reuseSession: false }));
     const adapter = new RecordingPiFake({
       defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
     });
@@ -294,6 +295,152 @@ describe('Conductor recording artifacts', () => {
       const traces = await store.getSessionTracesForConcert(conductor.concertId);
       expect(traces.map((t) => t.attemptIndex).sort()).toEqual([0, 1]);
     } finally {
+      rmSync(tracesDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { program: {}, label: 'cumulative default', reuse: true },
+    { program: { reuseSession: false }, label: 'fresh', reuse: false },
+  ] as Array<{ program: Score['program']; label: string; reuse: boolean }>)(
+    'passes the movement session key to the Musician on every attempt of a re-visited movement ($label)',
+    async ({ program, reuse }) => {
+      const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-sessionid-'));
+      const store = new SqliteLoge(':memory:');
+      const registry = new ScoreRegistry();
+      // Force a retry so movement 'a' is executed twice in one concert.
+      registry.register(score(program, { retryOnFailure: true, maxRetries: 1 }));
+      const seen: Array<string | undefined> = [];
+      const adapter = new (class extends FakeHarnessAdapter {
+        calls = 0;
+        async execute(
+          prompt: string,
+          context: unknown,
+          options?: Parameters<FakeHarnessAdapter['execute']>[2],
+        ) {
+          seen.push(options?.sessionId);
+          if (this.calls++ === 0) {
+            const err = new Error('transient harness failure');
+            (err as { code?: string }).code = 'HARNESS_FAILURE';
+            throw err;
+          }
+          return super.execute(prompt, context as never, options);
+        }
+      })({
+        defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+      });
+      const hall = new ConcertHall({
+        store,
+        scoreRegistry: registry,
+        adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+        evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+        tracesDir,
+      });
+      try {
+        const conductor = await hall.createConcert('recording-test');
+        await conductor.start();
+        expect(conductor.status).toBe('completed');
+        expect(seen).toHaveLength(2);
+        if (reuse) {
+          const movementKey = `${conductor.concertId}:a`;
+          expect(seen).toEqual([movementKey, movementKey]);
+        } else {
+          expect(seen).toEqual([undefined, undefined]);
+        }
+      } finally {
+        rmSync(tracesDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    { program: {}, label: 'reuseSession default (cumulative)' },
+    { program: { reuseSession: true }, label: 'reuseSession: true (cumulative)' },
+    { program: { reuseSession: false }, label: 'reuseSession: false (fresh)' },
+  ] as Array<{ program: Score['program']; label: string }>)(
+    'pins recording semantics: per-attempt transcript always on disk, aggregated final copy only when cumulative ($label)',
+    async ({ program }) => {
+      const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-pin-'));
+      const store = new SqliteLoge(':memory:');
+      const registry = new ScoreRegistry();
+      registry.register(score(program));
+      const adapter = new RecordingPiFake({
+        defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+      });
+      const hall = new ConcertHall({
+        store,
+        scoreRegistry: registry,
+        adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+        evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+        tracesDir,
+      });
+      try {
+        const conductor = await hall.createConcert('recording-test');
+        await conductor.start();
+        expect(conductor.status).toBe('completed');
+
+        const moveDir = join(tracesDir, conductor.concertId, 'movements', 'a');
+        const expectedMode = program?.reuseSession === false ? 'fresh' : 'cumulative';
+        const movementIndex = await readJson<{ mode: string }>(join(moveDir, 'index.json'));
+        expect(movementIndex.mode).toBe(expectedMode);
+
+        // Both modes record the per-attempt native transcript to disk.
+        expect(existsSync(join(moveDir, 'attempt-0', 'pi-session.jsonl'))).toBe(true);
+
+        // Only cumulative additionally produces the aggregated final copy.
+        const finalCopy = join(moveDir, 'final-pi-session.jsonl');
+        if (expectedMode === 'cumulative') {
+          expect(existsSync(finalCopy)).toBe(true);
+        } else {
+          expect(existsSync(finalCopy)).toBe(false);
+        }
+      } finally {
+        rmSync(tracesDir, { recursive: true, force: true });
+      }
+    });
+
+  it('legacy persistSession alias still works, warns, and yields when reuseSession is set', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-alias-'));
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    // Legacy key only: honored as a deprecated alias.
+    registry.register(score({ persistSession: false }));
+    // New key wins when both are set (legacy alias ignored).
+    registry.register(score({ reuseSession: false, persistSession: true }, {}, 'preferred-win'));
+    const adapter = new RecordingPiFake({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+    });
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      tracesDir,
+    });
+    try {
+      const legacy = await hall.createConcert('recording-test');
+      await legacy.start();
+      const legacyIndex = await readJson<{ mode: string }>(
+        join(tracesDir, legacy.concertId, 'movements', 'a', 'index.json'),
+      );
+      expect(legacyIndex.mode).toBe('fresh');
+
+      const preferred = await hall.createConcert('preferred-win');
+      await preferred.start();
+      const preferredIndex = await readJson<{ mode: string }>(
+        join(tracesDir, preferred.concertId, 'movements', 'a', 'index.json'),
+      );
+      expect(preferredIndex.mode).toBe('fresh'); // reuseSession: false wins
+
+      const deprecationWarnings = warn.mock.calls
+        .map((args) => String(args[0]))
+        .filter((msg) => msg.includes('persistSession') && msg.includes('deprecated'));
+      expect(deprecationWarnings.length).toBe(2);
+      expect(deprecationWarnings[0]).toContain('rename it to \'reuseSession\'');
+      expect(deprecationWarnings[1]).toContain('reuseSession takes precedence');
+    } finally {
+      warn.mockRestore();
       rmSync(tracesDir, { recursive: true, force: true });
     }
   });

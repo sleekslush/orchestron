@@ -48,7 +48,7 @@ export interface SessionRecording {
   /** Directory for this attempt's native session artifacts
    *  (`concerts/<concertId>/movements/<movementId>/attempt-<n>/`). */
   attemptDir: string;
-  /** Pool key for the session (`<concertId>:<movementId>`), when persistent. */
+  /** Pool key for the session (`<concertId>:<movementId>`) when it is reused. */
   sessionKey: string | undefined;
   /** Cumulative (retries share one session) or fresh (each attempt gets its own). */
   mode: 'cumulative' | 'fresh';

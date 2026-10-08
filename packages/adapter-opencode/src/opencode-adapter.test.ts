@@ -370,7 +370,7 @@ describe('OpencodeAdapter', () => {
     expect(result.usage.tokens).toBe(15);
   });
 
-  it('aggregates only the current turn when reusing a persistent session', async () => {
+  it('aggregates only the current turn when reusing a session', async () => {
     const prior = makeAssistantMessage({ cost: 0.01, tokens: { input: 100, output: 50, total: 150 } });
     const current = makeAssistantMessage({ cost: 0.0001, tokens: { input: 5, output: 3, total: 8 } });
 
