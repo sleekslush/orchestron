@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { PromptBuilder } from '../conductor/prompt-builder.js';
 import { SqliteLoge } from '../store/sqlite-loge.js';
@@ -34,6 +35,23 @@ function runMovement(overrides: Partial<Movement> = {}): Movement {
 }
 
 describe('run movement registry validation', () => {
+  it('loads and validates the deterministic-claim example fixture', () => {
+    const registry = new ScoreRegistry();
+    const path = fileURLToPath(
+      new URL('../../../../examples/deterministic-claim.score.yaml', import.meta.url),
+    );
+    expect(() => registry.loadFrom(path)).not.toThrow();
+    const score = registry.get('deterministic-claim');
+    const ids = score.movements.map((m) => m.id);
+    expect(ids).toEqual(
+      expect.arrayContaining(['claim', 'check_branch', 'create_branch', 'reuse_branch', 'fail_cleanup']),
+    );
+    expect(score.movements.every((m) => m.type === 'run')).toBe(true);
+    expect(score.movements.every((m) => m.goal === undefined)).toBe(true);
+    const check = score.movements.find((m) => m.id === 'check_branch')!;
+    expect(check.outcomes).toEqual({ 0: 'success', 1: 'rejection', default: 'failure' });
+  });
+
   it('accepts a well-formed run movement', () => {
     const registry = new ScoreRegistry();
     expect(() => registry.register(baseScore([runMovement()]))).not.toThrow();

@@ -72,9 +72,9 @@ describe('CLI run movements', () => {
     });
   }
 
-  it('surfaces the exit code in start JSON output', async () => {
+  it('surfaces the exit code in start JSON output and renders run progress', async () => {
     const orchestron = await setup();
-    const { logs, restore } = captureOutput();
+    const { logs, errs, restore } = captureOutput();
     try {
       await startCommandHandler(orchestron, 'run-cli', {}, true);
     } finally {
@@ -84,6 +84,9 @@ describe('CLI run movements', () => {
     const output = JSON.parse(logs[logs.length - 1]);
     expect(output.movements[0].exitCode).toBe(0);
     expect(output.movements[0].status).toBe('completed');
+    // start's live renderer prints the run-start command and the exit line.
+    expect(errs.some((l) => l.includes('$ '))).toBe(true);
+    expect(errs.some((l) => l.includes('exit 0'))).toBe(true);
   });
 
   it('shows the exit code in human status output', async () => {
