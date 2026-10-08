@@ -68,6 +68,7 @@ export async function waitForConcert(
     durationMs: number;
     goalAchieved: boolean;
     goalSummary: string;
+    exitCode?: number;
   }>;
 }> {
   const initial = await orchestron.store.getConcert(input.concertId);
@@ -147,6 +148,15 @@ export async function waitForConcert(
       if (event.progressType === 'text_delta' && typeof payload.delta === 'string') {
         text += ` ${payload.delta}`;
       }
+      if (event.progressType === 'run_start' && Array.isArray(payload.command)) {
+        text = `Running: ${(payload.command as string[]).join(' ')}`;
+      } else if (event.progressType === 'run_stdout' && typeof payload.chunk === 'string') {
+        text = payload.chunk;
+      } else if (event.progressType === 'run_stderr' && typeof payload.chunk === 'string') {
+        text = `[stderr] ${payload.chunk}`;
+      } else if (event.progressType === 'run_exit') {
+        text = `Run exited with code ${String(payload.exitCode ?? '?')}`;
+      }
       onUpdate?.(text);
       lastTimestamp = event.timestamp;
     }
@@ -203,6 +213,7 @@ function buildResult(
     goalEvaluation: { achieved: boolean; summary: string };
     model?: string;
     provider?: string;
+    exitCode?: number;
   }>,
 ) {
   return {
@@ -223,6 +234,7 @@ function buildResult(
       goalSummary: h.goalEvaluation.summary,
       model: h.model,
       provider: h.provider,
+      exitCode: h.exitCode,
     })),
   };
 }

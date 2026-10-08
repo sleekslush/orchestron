@@ -600,4 +600,31 @@ program: {}
     const score = orchestron.registry.get('linear-test');
     expect(score.version).toBe('2.0.0');
   });
+
+  it('surfaces run movement exit codes through get-status and wait-for-concert', async () => {
+    const score: Score = {
+      id: 'run-plugin',
+      name: 'Run Plugin',
+      version: '1.0.0',
+      startMovement: 'run',
+      movements: [
+        {
+          id: 'run',
+          name: 'Run',
+          section: 'default',
+          type: 'run',
+          command: [process.execPath, '-e', 'process.exit(0)'],
+          transitions: [{ to: '__end__', on: 'success' }],
+        },
+      ],
+      program: {},
+    };
+    const orchestron = await createTestOrchestron(score);
+    const started = await startConcert(orchestron, { scoreId: 'run-plugin' });
+    const waited = await waitForConcert(orchestron, { concertId: started.concertId });
+    expect(waited.movements[0].exitCode).toBe(0);
+
+    const status = await getConcertStatus(orchestron, { concertId: started.concertId });
+    expect(status.movements[0].exitCode).toBe(0);
+  });
 });

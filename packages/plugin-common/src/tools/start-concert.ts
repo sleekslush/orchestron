@@ -35,6 +35,15 @@ function progressText(event: ConcertEvent): string | undefined {
   if (event.progressType === 'text_delta' && typeof payload.delta === 'string') {
     text += ` ${payload.delta}`;
   }
+  if (event.progressType === 'run_start' && Array.isArray(payload.command)) {
+    text = `Running: ${(payload.command as string[]).join(' ')}`;
+  } else if (event.progressType === 'run_stdout' && typeof payload.chunk === 'string') {
+    text = payload.chunk;
+  } else if (event.progressType === 'run_stderr' && typeof payload.chunk === 'string') {
+    text = `[stderr] ${payload.chunk}`;
+  } else if (event.progressType === 'run_exit') {
+    text = `Run exited with code ${String(payload.exitCode ?? '?')}`;
+  }
   return text;
 }
 

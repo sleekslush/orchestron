@@ -84,6 +84,7 @@ export function movementToOutput(
     error?: { code: string; message: string; retryable: boolean } | undefined;
     model?: string;
     provider?: string;
+    exitCode?: number;
   },
 ) {
   return {
@@ -97,6 +98,7 @@ export function movementToOutput(
     error: h.error,
     model: h.model,
     provider: h.provider,
+    exitCode: h.exitCode,
   };
 }
 
@@ -120,6 +122,7 @@ export function formatConcertHuman(
     error?: { code: string; message: string; retryable: boolean } | undefined;
     model?: string;
     provider?: string;
+    exitCode?: number;
   }>,
   events: ConcertEvent[],
   verbose = false,
@@ -176,10 +179,11 @@ export function formatConcertHuman(
   lines.push('Movements:');
   for (const h of history) {
     const goal = h.goalEvaluation.achieved ? '✓' : '✗';
+    const exit = h.exitCode !== undefined ? ` exit ${h.exitCode}` : '';
     lines.push(
       `  [${h.status.toUpperCase()}] ${goal} ${h.movementName} (${h.movementId}) — ${formatDuration(
         h.durationMs,
-      )}`,
+      )}${exit}`,
     );
     if (!verbose) continue;
     if (h.summary) {
