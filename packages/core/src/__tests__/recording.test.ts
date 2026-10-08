@@ -7,6 +7,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { SqliteLoge } from '../store/sqlite-loge.js';
 import { ScoreRegistry } from '../registry/score-registry.js';
 import { ConcertHall } from '../hall/concert-hall.js';
+import { Conductor } from '../conductor/conductor.js';
 import { FakeHarnessAdapter } from '../conductor/fake-harness.js';
 import { FakeEvaluator } from '../evaluator/fake-evaluator.js';
 import { NATIVE_SESSION_FILE, writeAttemptMetadata, attemptDirName, movementDirName } from '../recording/artifacts.js';
@@ -795,6 +796,86 @@ describe('Conductor recording artifacts', () => {
       expect(seen[0]!.movementId).toBe('c');
       expect(seen[0]!.sessionId).toMatch(/:c$/);
       expect(seen[0]!.sessionId).not.toBe(`${conductor.concertId}:p`);
+    } finally {
+      rmSync(tracesDir, { recursive: true, force: true });
+    }
+  });
+
+  it('history-only never-executed movements fall back to the score-level mode in the concert index', async () => {
+    const tracesDir = mkdtempSync(join(tmpdir(), 'orchestron-rec-recover-mode-'));
+    const store = new SqliteLoge(':memory:');
+    const registry = new ScoreRegistry();
+    // Score default is fresh; the crashed movement overrides to cumulative. It
+    // is pushed to history during crash recovery without ever executing, so the
+    // concert index must fall back to the score-level `fresh`, never the
+    // movement override.
+    registry.register({
+      id: 'recovery-recording',
+      name: 'Recovery Recording',
+      version: '1.0.0',
+      startMovement: 'a',
+      movements: [
+        {
+          id: 'a',
+          name: 'A',
+          section: 'x',
+          harness: 'pi',
+          prompt: 'do a',
+          reuseSession: true,
+          goal: { description: 'done', strategy: 'llm_judge' as const },
+          transitions: [
+            { to: 'b', on: 'success' as const },
+            { to: 'b', on: 'failure' as const },
+          ],
+        },
+        {
+          id: 'b',
+          name: 'B',
+          section: 'x',
+          harness: 'pi',
+          prompt: 'do b',
+          goal: { description: 'done', strategy: 'llm_judge' as const },
+          transitions: [{ to: '__end__', on: 'success' as const }],
+        },
+      ],
+      program: { reuseSession: false },
+    });
+    const adapter = new RecordingPiFake({
+      defaultResponse: { output: 'o', summary: 's', usage: { spend: 0, tokens: 1 } },
+    });
+    const hall = new ConcertHall({
+      store,
+      scoreRegistry: registry,
+      adapters: new Map([['pi', adapter as unknown as FakeHarnessAdapter]]),
+      evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      tracesDir,
+    });
+    try {
+      const created = await hall.createConcert('recovery-recording');
+      const concertId = created.concertId;
+      // Simulate a crash mid-'a': the persisted concert points at the crashed
+      // movement, which is recovered without a movement-mode-map entry.
+      await store.updateConcert({ id: concertId, status: 'running', currentMovement: 'a' });
+      const stored = await store.getConcert(concertId);
+      const recovered = new Conductor(
+        stored!,
+        registry.get('recovery-recording')!,
+        store,
+        hall,
+        new Map([['pi', adapter]]),
+        new FakeEvaluator({ alwaysSucceed: true }),
+        tracesDir,
+      );
+      await recovered.recover();
+      expect(recovered.status).toBe('completed');
+
+      const concertIndex = await readJson<{
+        movements: Array<{ id: string; mode: string }>;
+      }>(join(tracesDir, concertId, 'index.json'));
+      // 'a' never executed: score-level fallback, not the movement-level override.
+      expect(concertIndex.movements.find((m) => m.id === 'a')?.mode).toBe('fresh');
+      // 'b' executed under the fresh score default.
+      expect(concertIndex.movements.find((m) => m.id === 'b')?.mode).toBe('fresh');
     } finally {
       rmSync(tracesDir, { recursive: true, force: true });
     }

@@ -382,7 +382,8 @@ reuse-default score, and `true` makes one movement cumulative on a
 fresh-default score. It applies only to that movement and its re-visits;
 siblings and other movements keep the score default. The deprecated
 `persistSession` alias remains score-level only and is ignored at the movement
-level.
+level. The field is optional, so existing scores and example scores remain
+valid unchanged — a movement that omits it simply inherits the score default.
 
 Reuse is scoped to a single concert run and held in memory only; it is not
 shared across concerts. It does **not** control disk recording — session
