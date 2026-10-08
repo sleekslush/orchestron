@@ -72,8 +72,14 @@ export class PromptBuilder {
 
       result = result.replace(regex, (_match: string, dotPath: string | undefined) => {
         if (!dotPath) {
-          // Simple {{context.previousOutputs.<id>}} — full text output
-          return record.output;
+          // Simple {{context.previousOutputs.<id>}} — full text output. For a
+          // `run` movement, normalize per POSIX command-substitution semantics:
+          // strip a single trailing line terminator so raw stdout can be safely
+          // embedded in a later argv element or env value. Harness output is
+          // left untouched.
+          return record.kind === 'run'
+            ? record.output.replace(/\r?\n$/, '')
+            : record.output;
         }
 
         // Dot-notation: traverse into structured data

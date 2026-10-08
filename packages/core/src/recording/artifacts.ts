@@ -64,15 +64,21 @@ export interface AttemptMetadata {
   concertId: ConcertID;
   movementId: MovementID;
   attempt: number;
-  harness: string;
-  mode: 'cumulative' | 'fresh';
-  sessionKey: string | undefined;
-  sessionId: string | undefined;
+  harness?: string;
+  mode?: 'cumulative' | 'fresh';
+  sessionKey?: string | undefined;
+  sessionId?: string | undefined;
   startedAt: string;
   endedAt: string;
   status: 'completed' | 'failed' | 'rejected';
   eventCount: number;
-  files: { native?: string; sizeBytes?: number };
+  /** Movement kind. Absent means `harness`. */
+  kind?: 'harness' | 'run';
+  /** Command argv for a `run` attempt. */
+  command?: string[];
+  /** Process exit code for a `run` attempt. */
+  exitCode?: number;
+  files: { native?: string; sizeBytes?: number; stdout?: string; stderr?: string };
 }
 
 /** Write the attempt's metadata.json (adapter side; adapter knows sessionId/files). */
@@ -96,7 +102,9 @@ export interface MovementIndex {
   movementId: MovementID;
   movementName: string;
   harness: string | undefined;
-  mode: 'cumulative' | 'fresh';
+  mode: 'cumulative' | 'fresh' | undefined;
+  /** Movement kind. Absent means `harness`. */
+  kind?: 'harness' | 'run';
   finalAttempt: number | undefined;
   finalStatus: string | undefined;
   /** Path relative to the movement dir; the final-* copy when cumulative. */
@@ -116,7 +124,9 @@ export interface ConcertIndexMovement {
   id: MovementID;
   name: string;
   harness: string | undefined;
-  mode: 'cumulative' | 'fresh';
+  mode: 'cumulative' | 'fresh' | undefined;
+  /** Movement kind. Absent means `harness`. */
+  kind?: 'harness' | 'run';
   attempts: number;
   finalStatus: string | undefined;
   /** Path relative to the concert dir (movements/.../...). */

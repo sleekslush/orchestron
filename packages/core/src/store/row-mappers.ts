@@ -88,6 +88,8 @@ export interface MovementRow {
   trace_id: string | null;
   model: string | null;
   provider: string | null;
+  exit_code: number | null;
+  kind: string | null;
 }
 
 export interface SessionTraceRow {
@@ -154,6 +156,8 @@ export function rowToMovementRecord(row: MovementRow): MovementRecord {
     traceId: row.trace_id ?? undefined,
     model: row.model ?? undefined,
     provider: row.provider ?? undefined,
+    exitCode: typeof row.exit_code === 'number' ? row.exit_code : undefined,
+    kind: row.kind === 'run' ? 'run' : row.kind === 'harness' ? 'harness' : undefined,
   };
 }
 

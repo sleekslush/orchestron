@@ -1,0 +1,87 @@
+id: deterministic-claim
+name: "Deterministic Claim"
+description: >
+  Demonstrates deterministic `type: run` movements: a claim step whose exit
+  codes drive transitions, a structured base-branch resolution, and a
+  deterministic failure cleanup. No LLM session is started for any step.
+version: "1.0.0"
+startMovement: claim
+
+program:
+  maxMovements: 20
+
+movements:
+  - id: claim
+    name: "Claim Issue"
+    section: setup
+    type: run
+    command: ["bash", "-lc", "echo claiming {{context.issue}}"]
+    outcomes:
+      0: success
+      3: rejection
+      default: failure
+    transitions:
+      - to: resolve_base
+        on: success
+      - to: __end__
+        on: rejection
+      - to: fail_cleanup
+        on: failure
+
+  - id: resolve_base
+    name: "Resolve Default Branch"
+    section: setup
+    type: run
+    command: ["bash", "-lc", "echo '{\"defaultBranchRef\":{\"name\":\"main\"}}'"]
+    output:
+      mode: structured
+    transitions:
+      - to: create_branch
+        on: success
+      - to: fail_cleanup
+        on: failure
+
+  - id: create_branch
+    name: "Create Branch"
+    section: setup
+    type: run
+    command:
+      - git
+      - checkout
+      - -b
+      - "orchestron/issue-{{context.issue}}"
+      - "origin/{{context.previousOutputs.resolve_base.defaultBranchRef.name}}"
+    outcomes:
+      0: success
+      default: failure
+    transitions:
+      - to: build
+        on: success
+      - to: fail_cleanup
+        on: failure
+
+  - id: build
+    name: "Build"
+    section: execution
+    type: run
+    command: ["bash", "-lc", "test -f package.json"]
+    outcomes:
+      0: success
+      default: failure
+    transitions:
+      - to: __end__
+        on: success
+      - to: fail_cleanup
+        on: failure
+
+  - id: fail_cleanup
+    name: "Mark Failed"
+    section: cleanup
+    type: run
+    command: ["bash", "-lc", "echo failed {{context.issue}}"]
+    outcomes:
+      0: success
+      default: success
+    transitions:
+      - to: __fail__
+        on: any

@@ -196,6 +196,38 @@ export class ScoreRegistry {
     for (const m of score.movements) {
       this.validateSkills(m.skills, `movement '${m.id}'`, score.id, errors);
 
+      if (m.type !== undefined && m.type !== 'harness' && m.type !== 'run') {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${score.id}': movement '${m.id}' has invalid type '${String(m.type)}' (expected 'harness' or 'run')`,
+            'INVALID_SCORE',
+          ),
+        );
+      }
+
+      if ((m.type ?? 'harness') === 'run') {
+        this.validateRunMovement(m, score.id, errors);
+      } else {
+        if (!m.goal) {
+          errors.push(
+            new ScoreValidationError(
+              `Score '${score.id}': movement '${m.id}' must have a goal`,
+              'INVALID_SCORE',
+            ),
+          );
+        }
+        for (const field of ['command', 'outcomes', 'cwd', 'env'] as const) {
+          if (m[field] !== undefined) {
+            errors.push(
+              new ScoreValidationError(
+                `Score '${score.id}': movement '${m.id}' is a harness movement and cannot have '${field}'`,
+                'INVALID_SCORE',
+              ),
+            );
+          }
+        }
+      }
+
       if (m.prompt && typeof m.prompt === 'object') {
         if (typeof m.prompt.initial !== 'string' || typeof m.prompt.subsequent !== 'string' || !m.prompt.initial || !m.prompt.subsequent) {
           errors.push(
@@ -244,6 +276,119 @@ export class ScoreRegistry {
     }
 
     return errors;
+  }
+
+  /**
+   * Validate the shape of a `run` movement: a non-empty argv array, a
+   * well-formed outcomes map when present, and rejection of harness-only
+   * fields (a run step has no goal, session, model, or harness).
+   */
+  private validateRunMovement(
+    m: Movement,
+    scoreId: ScoreID,
+    errors: ScoreValidationError[],
+  ): void {
+    if (!m.command || !Array.isArray(m.command) || m.command.length === 0) {
+      errors.push(
+        new ScoreValidationError(
+          `Score '${scoreId}': run movement '${m.id}' must have a non-empty 'command' array`,
+          'INVALID_SCORE',
+        ),
+      );
+    } else {
+      m.command.forEach((arg, index) => {
+        if (typeof arg !== 'string' || arg.trim() === '') {
+          errors.push(
+            new ScoreValidationError(
+              `Score '${scoreId}': run movement '${m.id}' command[${index}] must be a non-empty string`,
+              'INVALID_SCORE',
+            ),
+          );
+        }
+      });
+    }
+
+    const rejectedFields = [
+      'goal',
+      'harness',
+      'model',
+      'provider',
+      'skills',
+      'retryOnRejection',
+      'prompt',
+      'subscore',
+    ] as const;
+    for (const field of rejectedFields) {
+      if (m[field] !== undefined) {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${scoreId}': run movement '${m.id}' cannot have '${field}'`,
+            'INVALID_SCORE',
+          ),
+        );
+      }
+    }
+
+    if (m.outcomes !== undefined) {
+      if (!isPlainObject(m.outcomes)) {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${scoreId}': run movement '${m.id}' 'outcomes' must be a plain object`,
+            'INVALID_SCORE',
+          ),
+        );
+      } else {
+        for (const [key, value] of Object.entries(m.outcomes)) {
+          if (key !== 'default' && !/^-?\d+$/.test(key)) {
+            errors.push(
+              new ScoreValidationError(
+                `Score '${scoreId}': run movement '${m.id}' outcomes key '${key}' must be a numeric exit code or 'default'`,
+                'INVALID_SCORE',
+              ),
+            );
+          }
+          if (value !== 'success' && value !== 'failure' && value !== 'rejection') {
+            errors.push(
+              new ScoreValidationError(
+                `Score '${scoreId}': run movement '${m.id}' outcomes['${key}'] must be 'success', 'failure', or 'rejection'`,
+                'INVALID_SCORE',
+              ),
+            );
+          }
+        }
+      }
+    }
+
+    if (m.cwd !== undefined && (typeof m.cwd !== 'string' || m.cwd.trim() === '')) {
+      errors.push(
+        new ScoreValidationError(
+          `Score '${scoreId}': run movement '${m.id}' 'cwd' must be a non-empty string`,
+          'INVALID_SCORE',
+        ),
+      );
+    }
+
+    if (m.env !== undefined) {
+      if (!isPlainObject(m.env)) {
+        errors.push(
+          new ScoreValidationError(
+            `Score '${scoreId}': run movement '${m.id}' 'env' must be a plain object of string values`,
+            'INVALID_SCORE',
+          ),
+        );
+      } else {
+        for (const [key, value] of Object.entries(m.env)) {
+          if (typeof value !== 'string') {
+            errors.push(
+              new ScoreValidationError(
+                `Score '${scoreId}': run movement '${m.id}' env['${key}'] must be a string`,
+                'INVALID_SCORE',
+              ),
+            );
+          }
+        }
+      }
+    }
   }
 
   /**
