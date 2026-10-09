@@ -713,6 +713,21 @@ export class Conductor implements IConductor {
       ? createWriteStream(join(attemptDir, 'stderr.log'), { flags: 'w' })
       : undefined;
 
+    // A write failure (e.g. the attempt dir was not writable) must not surface
+    // as an unhandled stream error; log it and keep the child running.
+    stdoutStream?.on('error', (err: Error) => {
+      console.error(
+        `Failed to write run stdout log for '${this.concert.id}/${movement.id}':`,
+        err,
+      );
+    });
+    stderrStream?.on('error', (err: Error) => {
+      console.error(
+        `Failed to write run stderr log for '${this.concert.id}/${movement.id}':`,
+        err,
+      );
+    });
+
     const [file, ...args] = command;
     const child = spawn(file, args, {
       cwd,
@@ -814,8 +829,16 @@ export class Conductor implements IConductor {
     // A run step is genuinely free: measured `$0`, never unmeasured/unknown.
     record.usage = { spend: 0, spendSource: 'measured' };
 
+    // Attempt-level status recorded in the index/metadata/trace. This differs
+    // from `record.status` for a mapped rejection: the Conductor keeps the
+    // record `completed` so `runLoop` can derive the `rejection` transition,
+    // but the attempt is honestly recorded as rejected for `session`/
+    // metadata consumers.
+    let attemptStatus: 'completed' | 'failed' | 'rejected' = 'failed';
+
     if (spawnError) {
       record.status = 'failed';
+      attemptStatus = 'failed';
       record.error = {
         code: 'SPAWN_FAILED',
         message: spawnError.message,
@@ -826,6 +849,7 @@ export class Conductor implements IConductor {
       record.summary = `Failed to spawn '${file}'`;
     } else if (aborted) {
       record.status = 'failed';
+      attemptStatus = 'failed';
       record.error = {
         code: 'MOVEMENT_ABORTED',
         message: 'Run command terminated by abort or timeout',
@@ -845,6 +869,8 @@ export class Conductor implements IConductor {
       }
       const firstStderrLine = stderr.split(/\r?\n/).find((line) => line.trim() !== '');
       record.status = outcome === 'failure' ? 'failed' : 'completed';
+      attemptStatus =
+        outcome === 'failure' ? 'failed' : outcome === 'rejection' ? 'rejected' : 'completed';
       record.goalEvaluation = {
         achieved: outcome === 'success',
         confidence: 1,
@@ -877,7 +903,7 @@ export class Conductor implements IConductor {
     const attempts = this.movementAttempts.get(movement.id) ?? [];
     attempts.push({
       attempt: attemptIndex,
-      status: record.status as MovementIndex['attempts'][number]['status'],
+      status: attemptStatus,
       sessionKey: undefined,
       path: attemptDirName(attemptIndex),
     });
@@ -891,7 +917,7 @@ export class Conductor implements IConductor {
         kind: 'run',
         startedAt: record.startedAt.toISOString(),
         endedAt: new Date().toISOString(),
-        status: record.status as 'completed' | 'failed' | 'rejected',
+        status: attemptStatus,
         eventCount: 0,
         command,
         exitCode: record.exitCode,
@@ -916,7 +942,7 @@ export class Conductor implements IConductor {
         harness: 'run',
         mode: 'fresh',
         filePath: `${movementDirName(movement.id)}/${attemptDirName(attemptIndex)}`,
-        status: record.status as 'completed' | 'failed' | 'rejected',
+        status: attemptStatus,
         eventCount: 0,
         startedAt: record.startedAt,
         endedAt: record.completedAt ?? new Date(),

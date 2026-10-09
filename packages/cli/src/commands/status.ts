@@ -44,12 +44,26 @@ function latestProgressEvent(
 /** Derive the currently running command from the latest run-start progress payload. */
 function runningCommandFromRunStart(
   events: ConcertEvent[],
+  currentMovement: string | null,
 ): string | undefined {
+  if (!currentMovement) return undefined;
   const started = [...events].reverse().find(
     (e): e is ConcertEvent & { type: 'movement:progress' } =>
-      e.type === 'movement:progress' && e.progressType === 'run_start',
+      e.type === 'movement:progress' &&
+      e.progressType === 'run_start' &&
+      e.movementId === currentMovement,
   );
-  const command = started?.payload.command;
+  if (!started) return undefined;
+  // A `run_exit` for the current movement means the command is no longer running.
+  const exited = events.some(
+    (e) =>
+      e.type === 'movement:progress' &&
+      e.progressType === 'run_exit' &&
+      e.movementId === currentMovement &&
+      e.timestamp.getTime() >= started.timestamp.getTime(),
+  );
+  if (exited) return undefined;
+  const command = started.payload.command;
   if (Array.isArray(command) && command.every((c) => typeof c === 'string')) {
     return command.join(' ');
   }
@@ -221,7 +235,8 @@ async function renderStatus(
   const progress = latestProgressEvent(events);
   const started = latestStartedEvent(events);
   const currentCommand =
-    currentCommandFromProgress(progress) ?? runningCommandFromRunStart(events);
+    currentCommandFromProgress(progress) ??
+    runningCommandFromRunStart(events, state.currentMovement);
   const currentPrompt = started?.prompt;
 
   const output = {

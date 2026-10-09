@@ -107,6 +107,8 @@ describe('CLI run movements', () => {
       orchestron.store.close();
     }
     expect(logs.some((l) => l.includes('exit 0'))).toBe(true);
+    // A finished run movement must not leave a stale "Running:" line.
+    expect(logs.some((l) => l.includes('Running:'))).toBe(false);
   });
 
   it('renders run stdout/stderr through session and rejects --open', async () => {

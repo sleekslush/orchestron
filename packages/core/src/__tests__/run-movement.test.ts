@@ -113,6 +113,14 @@ describe('run movements', () => {
     expect(history[0].exitCode).toBe(3);
     expect(history[0].error?.code).toBe('EXIT_NONZERO');
     expect(evaluator.calls).toBe(0);
+    // The per-attempt metadata records the mapped rejection honestly.
+    const meta = JSON.parse(
+      readFileSync(
+        join(tracesDir, conductor.concertId, 'movements', 'run', 'attempt-0', 'metadata.json'),
+        'utf-8',
+      ),
+    );
+    expect(meta.status).toBe('rejected');
   });
 
   it('defaults to 0 -> success, otherwise failure, and surfaces the first stderr line', async () => {
@@ -411,6 +419,28 @@ describe('run movements', () => {
     const history = await store.getMovementHistory(conductor.concertId);
     expect(history[0].status).toBe('failed');
     expect(history[0].error?.code).toBe('MOVEMENT_ABORTED');
+    expect(evaluator.calls).toBe(0);
+  });
+
+  it('ignores the program-level persistSession/reuseSession option for run movements', async () => {
+    const evaluator = new SpyEvaluator();
+    const tracesDir = tmp();
+    const score = runScore(
+      [movement({ id: 'run', type: 'run', command: [NODE, '-e', 'process.exit(0)'] })],
+      { program: { persistSession: true } },
+    );
+    const { hall, store } = makeHall(score, evaluator, tracesDir);
+    const conductor = await hall.createConcert('run-score');
+    await conductor.start();
+
+    expect(conductor.status).toBe('completed');
+    // A run step never resolves, creates, or reuses a harness session, so the
+    // program-level session option is inert for it: the only trace row is the
+    // run attempt itself, with no pool key / SDK session.
+    const traces = await store.getSessionTracesForConcert(conductor.concertId);
+    expect(traces).toHaveLength(1);
+    expect(traces[0].harness).toBe('run');
+    expect(traces[0].sessionKey).toBeUndefined();
     expect(evaluator.calls).toBe(0);
   });
 });
