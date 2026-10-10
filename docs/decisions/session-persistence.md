@@ -31,10 +31,20 @@ own prior conversation.
 **Default is `true`** — sessions are reused by default. Set `reuseSession: false`
 on a score to disable (each `execute()` call gets a fresh session).
 
+A movement may override the score-level value with its own
+`reuseSession: boolean` on the `Movement` interface. Omitted inherits the
+score-resolved mode; `true` forces cumulative and `false` forces fresh for that
+movement and its re-visits only. The override composes with the score-level
+resolution, so the deprecated `persistSession` alias remains score-level only:
+the movement override wins while the score-level deprecation warning still
+fires.
+
 Reuse is scoped to a single concert run and held in memory only; it is not
 shared across concerts, and it does not control disk recording. Session
 transcripts are recorded to disk in both modes: fresh movements keep a
 per-attempt snapshot, cumulative movements additionally aggregate a final copy.
+The effective per-movement mode — after any movement override — drives both the
+session key and the recorded mode.
 
 ### Interface changes
 
@@ -42,15 +52,24 @@ The generic `HarnessAdapter` interface gains two additive, optional fields so an
 adapter type can opt in:
 
 1. `sessionId?: string` added to the `execute()` options — the Conductor passes
-   `"${concertId}:${movement.id}"` when `reuseSession !== false`.
+   `"${concertId}:${movement.id}"` when the movement's effective mode is
+   cumulative.
 2. Optional method `disposeSession(sessionId: string): Promise<void>` — the
    Conductor calls this for each tracked session during `finalize()`.
 
 ### Conductor behavior
 
-- Always passes `sessionId` when `reuseSession !== false`.
+- Resolves the score-level mode once per concert from the score program,
+  including the deprecated `persistSession` alias.
+- Resolves the effective mode per non-subscore movement: the movement-level
+  `reuseSession` when present, otherwise the score-resolved mode.
+- Always passes `sessionId: "${concertId}:${movement.id}"` for a movement whose
+  effective mode is cumulative; passes none for a fresh movement.
 - Tracks `Map<sessionId, HarnessAdapter>` of active sessions.
 - On `finalize()`, iterates tracked sessions and calls `adapter.disposeSession()`.
+- Subscore movements return before session resolution, so the parent creates no
+  session for them and a movement-level `reuseSession` is a no-op; nested
+  session behavior is governed by the child score.
 
 ### PiAdapter behavior
 

@@ -57,7 +57,7 @@ import { ConstraintChecker } from './constraint-checker.js';
 import { matchTransition } from './transition-resolver.js';
 import { resolveRunOutcome } from './run-outcome.js';
 import { tryParseStructuredFromText } from '../structured-output.js';
-import { resolveSessionMode, type SessionMode } from './session-mode.js';
+import { resolveMovementSessionMode, resolveSessionMode, type SessionMode } from './session-mode.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
 import { findMissingRequiredContext } from '../required-context.js';
@@ -497,7 +497,7 @@ export class Conductor implements IConductor {
         this.concert.context.shared,
       );
       this.promptBuilder.recordVisit(movement.id);
-      const mode = this.sessionMode;
+      const mode = resolveMovementSessionMode(this.sessionMode, movement.reuseSession);
       sessionId = mode === 'cumulative' ? `${this.concert.id}:${movement.id}` : undefined;
 
       if (sessionId) {

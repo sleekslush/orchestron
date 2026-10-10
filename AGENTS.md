@@ -65,8 +65,9 @@ It does not apply to run movements, which resolve no adapter.
 3. **Evaluators are separate harness sessions** — `FakeEvaluator` (deterministic)
    or `HarnessEvaluator` (LLM-based). Run movements have no evaluator: their
    `outcomes` map is the evaluation.
-4. **Session reuse** per movement (`concertId:movementId` key) unless
-   `reuseSession: false`.
+4. **Session reuse** per movement (`concertId:movementId` key) unless the
+   score program sets `reuseSession: false`; a movement-level `reuseSession`
+   overrides the score-resolved mode for that movement only.
 5. **Plugin packages** (`plugin-pi`, `plugin-opencode`) provide harness-specific
    session plugins. `plugin-common` has shared tool infrastructure.
 6. **CLI** lives in `packages/cli`.

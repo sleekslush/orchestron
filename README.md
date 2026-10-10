@@ -415,6 +415,29 @@ loops back), while movement A cannot see movement B's conversation history. Set
 `reuseSession: false` in the score program to run every execution of a movement
 in a brand-new session.
 
+A single movement can diverge from the score default with a movement-level
+`reuseSession`. It follows the same movement-over-score precedence as `model`,
+`provider`, and `skills`:
+
+```yaml
+program:
+  reuseSession: true     # score default: cumulative
+movements:
+  - id: implement        # inherits the score default (cumulative)
+    …
+  - id: audit
+    reuseSession: false  # only this movement runs fresh, every attempt
+    …
+```
+
+The override works in both directions: `false` makes one movement fresh on a
+reuse-default score, and `true` makes one movement cumulative on a
+fresh-default score. It applies only to that movement and its re-visits;
+siblings and other movements keep the score default. The deprecated
+`persistSession` alias remains score-level only and is ignored at the movement
+level. The field is optional, so existing scores and example scores remain
+valid unchanged — a movement that omits it simply inherits the score default.
+
 Reuse is scoped to a single concert run and held in memory only; it is not
 shared across concerts. It does **not** control disk recording — session
 transcripts are recorded to disk in both modes (see below).
@@ -455,8 +478,10 @@ and no `harness`, and `orchestron session` renders the captured logs.
   conductor lifecycle events. Line order is event order; there is no `seq` field.
 - Cumulative (`reuseSession: true`, default) movements keep each attempt's
   snapshot and a final aggregated copy (`final-pi-session.jsonl` /
-  `final-opencode-session.json`). Fresh movements (`reuseSession: false`)
-  write independent per-attempt sessions only, referenced as `attempt-<n>/…`.
+  `final-opencode-session.json`). Fresh movements (`reuseSession: false`) write
+  independent per-attempt sessions only, referenced as `attempt-<n>/…`. The
+  effective mode is resolved per movement, so a movement-level `reuseSession`
+  override determines whether that movement's `final-*` copy exists.
 - Retries increment the attempt index (`attempt-0` = first attempt); each
   attempt gets its own snapshot + `session_traces` row in Loge.
 

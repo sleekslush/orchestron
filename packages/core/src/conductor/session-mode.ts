@@ -2,7 +2,7 @@ import type { Program } from '../types/score.js';
 
 /**
  * Recording mode for one movement, derived from the score-level session reuse
- * option:
+ * option composed with any movement-level override:
  *
  * - `cumulative` — a re-visited movement reuses its prior in-concert session.
  *   Recordings keep each attempt's snapshot plus an aggregated `final-*` copy.
@@ -46,4 +46,25 @@ export function resolveSessionMode(program: Program | undefined): SessionModeRes
     return { mode: legacy ? 'cumulative' : 'fresh', deprecatedUsed: true, bothSet: false };
   }
   return { mode: 'cumulative', deprecatedUsed: false, bothSet: false };
+}
+
+/**
+ * Compose the score-resolved session mode with an optional movement-level
+ * override.
+ *
+ * The score-level resolver owns all alias/deprecation handling; this composer
+ * only layers a movement value on top of its result:
+ *
+ * - `undefined` → the score-resolved mode (inherit)
+ * - `true` → `cumulative`
+ * - `false` → `fresh`
+ *
+ * The score mode is never mutated.
+ */
+export function resolveMovementSessionMode(
+  scoreMode: SessionMode,
+  override: boolean | undefined,
+): SessionMode {
+  if (override === undefined) return scoreMode;
+  return override ? 'cumulative' : 'fresh';
 }
