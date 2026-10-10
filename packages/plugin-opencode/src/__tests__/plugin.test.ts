@@ -94,13 +94,14 @@ describe('plugin-opencode tool functions', () => {
     expect(typeof OrchestronPlugin).toBe('function');
   });
 
-  it('starts a concert and returns initial status', async () => {
+  it('starts a concert and returns post-kickoff status', async () => {
     const orchestron = await createTestOrchestron(linearScore());
     const result = await startConcert(orchestron, { scoreId: 'linear-test' });
 
     expect(result.scoreId).toBe('linear-test');
     expect(result.concertId).toBeDefined();
-    expect(result.status).toMatch(/pending|running/);
+    expect(result.status).toBe('running');
+    expect(result.status).not.toBe('pending');
     expect(result.startedAt).toBeDefined();
   });
 

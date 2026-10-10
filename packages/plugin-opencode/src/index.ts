@@ -49,7 +49,7 @@ export const OrchestronPlugin: Plugin = async (_input, options) => {
     tool: {
       orchestron_start_concert: tool({
         description:
-          "Start a new Orchestron concert from a registered score. The concert runs in the background and can be monitored with orchestron_get_concert_status.",
+          "Create and kick off a new Orchestron concert from a registered score. Returns immediately with the concert id and post-kickoff status; the concert runs in the background. This tool does not stream or block — use orchestron_wait_for_concert to observe it.",
         args: {
           scoreId: tool.schema
             .string()
@@ -143,7 +143,7 @@ export const OrchestronPlugin: Plugin = async (_input, options) => {
 
       orchestron_wait_for_concert: tool({
         description:
-          "Block until an Orchestron concert reaches a terminal state. Returns the final concert status, movement history, and resource usage.",
+          "Block until an Orchestron concert reaches a terminal state. The sole streaming/observation tool: attaches to any concert id (created this session, by another process, or by the CLI), streams progress updates, and returns the final concert status, movement history, and resource usage.",
         args: {
           concertId: tool.schema
             .string()

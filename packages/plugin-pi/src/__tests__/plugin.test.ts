@@ -76,13 +76,14 @@ async function createTestOrchestron(score: Score): Promise<Orchestron> {
 }
 
 describe('Orchestron Pi plugin tools', () => {
-  it('starts a concert and returns its initial status', async () => {
+  it('starts a concert and returns its post-kickoff status', async () => {
     const orchestron = await createTestOrchestron(linearScore());
     const result = await startConcert(orchestron, { scoreId: 'linear-test' });
 
     expect(result.scoreId).toBe('linear-test');
     expect(result.concertId).toBeDefined();
-    expect(result.status).toMatch(/pending|running/);
+    expect(result.status).toBe('running');
+    expect(result.status).not.toBe('pending');
     expect(result.startedAt).toBeDefined();
   });
 
@@ -115,7 +116,7 @@ describe('Orchestron Pi plugin tools', () => {
     expect(status.usage.spend).toBe(0.00002);
   });
 
-  it('streams progress updates when starting a concert', async () => {
+  it('streams progress updates when waiting for a concert', async () => {
     const score: Score = {
       ...linearScore(),
       startMovement: 'slow',
@@ -158,12 +159,12 @@ describe('Orchestron Pi plugin tools', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
-    const onUpdate = vi.fn();
-    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' }, onUpdate);
+    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
     expect(concertId).toBeDefined();
-    expect(onUpdate).toHaveBeenCalledWith(
-      expect.stringContaining('Started concert'),
-    );
+
+    const onUpdate = vi.fn();
+    const result = await waitForConcert(orchestron, { concertId }, onUpdate);
+    expect(result.status).toBe('completed');
     expect(onUpdate).toHaveBeenCalledWith(
       expect.stringContaining('git_status'),
     );

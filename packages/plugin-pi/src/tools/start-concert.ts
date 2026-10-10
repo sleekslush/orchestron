@@ -1,6 +1,5 @@
 import { Type } from 'typebox';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { AgentToolUpdateCallback } from '@earendil-works/pi-coding-agent';
 import { startConcert } from '@orchestron/plugin-common';
 
 export function startConcertTool(getOrchestron: () => Promise<import('@orchestron/plugin-common').Orchestron>) {
@@ -8,7 +7,7 @@ export function startConcertTool(getOrchestron: () => Promise<import('@orchestro
     name: 'orchestron_start_concert',
     label: 'Start Orchestron Concert',
     description:
-      'Start a new Orchestron concert from a registered score. The concert runs in the background and can be monitored with orchestron_get_concert_status.',
+      'Create and kick off a new Orchestron concert from a registered score. Returns immediately with the concert id and post-kickoff status; the concert runs in the background. This tool does not stream or block — use orchestron_wait_for_concert to observe it.',
     parameters: Type.Object({
       scoreId: Type.String({ description: 'ID of the registered score to run' }),
       context: Type.Optional(
@@ -31,14 +30,12 @@ export function startConcertTool(getOrchestron: () => Promise<import('@orchestro
     promptGuidelines: [
       'Use orchestron_start_concert when the user asks to run a workflow, score, or concert.',
       'Pass the scoreId exactly as registered and any context values the score expects.',
+      'orchestron_start_concert creates the concert and returns immediately; it does not wait.',
     ],
-    async execute(_toolCallId, params, _signal, onUpdate: AgentToolUpdateCallback<unknown>, _ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const orchestron = await getOrchestron();
-      const piOnUpdate = onUpdate
-        ? (text: string) => onUpdate({ content: [{ type: 'text' as const, text }], details: {} })
-        : undefined;
       const { harness, ...rest } = params;
-      const result = await startConcert(orchestron, harness ? { ...rest, harness } : rest, piOnUpdate);
+      const result = await startConcert(orchestron, harness ? { ...rest, harness } : rest);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         details: result,

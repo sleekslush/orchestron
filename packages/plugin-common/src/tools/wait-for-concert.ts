@@ -1,6 +1,7 @@
 import type { Orchestron } from '../orchestron.js';
 import { toUsageView, type UsageView } from '../util.js';
-import type { ProgressCallback } from './start-concert.js';
+import type { ProgressCallback } from './progress.js';
+import { progressText } from './progress.js';
 import { microToDollars } from '@orchestron/core';
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -127,36 +128,8 @@ export async function waitForConcert(
     for (const event of events) {
       if (event.type !== 'movement:progress') continue;
       if (event.timestamp.getTime() <= lastTimestamp.getTime()) continue;
-      const payload = event.payload;
-      let text =
-        (payload.message as string | undefined) ??
-        `Progress: ${event.progressType}${payload.toolName ? ` (${payload.toolName as string})` : ''}`;
-      if (event.progressType === 'tool_execution_start' && payload.args) {
-        const args = payload.args as Record<string, unknown>;
-        const cmd =
-          (args.command as string | undefined) ??
-          (args.filePath as string | undefined) ??
-          (args.file as string | undefined) ??
-          (args.path as string | undefined);
-        if (cmd) {
-          text += ` → ${cmd}`;
-        }
-      }
-      if (event.progressType === 'tool_execution_end' && payload.isError) {
-        text += ` [error]`;
-      }
-      if (event.progressType === 'text_delta' && typeof payload.delta === 'string') {
-        text += ` ${payload.delta}`;
-      }
-      if (event.progressType === 'run_start' && Array.isArray(payload.command)) {
-        text = `Running: ${(payload.command as string[]).join(' ')}`;
-      } else if (event.progressType === 'run_stdout' && typeof payload.chunk === 'string') {
-        text = payload.chunk;
-      } else if (event.progressType === 'run_stderr' && typeof payload.chunk === 'string') {
-        text = `[stderr] ${payload.chunk}`;
-      } else if (event.progressType === 'run_exit') {
-        text = `Run exited with code ${String(payload.exitCode ?? '?')}`;
-      }
+      const text = progressText(event);
+      if (!text) continue;
       onUpdate?.(text);
       lastTimestamp = event.timestamp;
     }

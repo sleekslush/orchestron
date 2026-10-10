@@ -7,16 +7,19 @@ author Orchestron scores directly from an opencode session using natural languag
 
 ### Concerts
 
-- `orchestron_start_concert(scoreId, context?)` — Start a new concert from a
-  registered score. Runs in the background.
+- `orchestron_start_concert(scoreId, context?)` — Create and kick off a new
+  concert from a registered score. Returns immediately with the concert id and
+  post-kickoff status. Runs in the background; does not stream or block.
 - `orchestron_get_concert_status(concertId)` — Show status, movement history,
   and resource usage for a concert.
 - `orchestron_list_concerts(filter?)` — List concerts, optionally filtered by
   status.
 - `orchestron_pause_concert(concertId)` — Pause a running concert.
 - `orchestron_cancel_concert(concertId)` — Cancel a running or paused concert.
-- `orchestron_wait_for_concert(concertId)` — Block until a concert reaches a
-  terminal state. Returns the final status and movement history.
+- `orchestron_wait_for_concert(concertId)` — The sole observer: block until any
+  concert id (this session, another process, or the CLI) reaches a terminal
+  state, streaming progress updates and returning the final status and movement
+  history.
 
 ### Scores
 

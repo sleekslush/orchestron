@@ -1,7 +1,4 @@
 import type { Orchestron } from '../orchestron.js';
-import type { ConcertEvent } from '@orchestron/core';
-
-export type ProgressCallback = (text: string) => void;
 
 export interface StartConcertInput {
   scoreId: string;
@@ -12,45 +9,18 @@ export interface StartConcertInput {
   cwd?: string;
 }
 
-function progressText(event: ConcertEvent): string | undefined {
-  if (event.type !== 'movement:progress') return undefined;
-  const payload = event.payload;
-  let text =
-    (payload.message as string | undefined) ??
-    `Progress: ${event.progressType}${payload.toolName ? ` (${payload.toolName as string})` : ''}`;
-  if (event.progressType === 'tool_execution_start' && payload.args) {
-    const args = payload.args as Record<string, unknown>;
-    const cmd =
-      (args.command as string | undefined) ??
-      (args.filePath as string | undefined) ??
-      (args.file as string | undefined) ??
-      (args.path as string | undefined);
-    if (cmd) {
-      text += ` → ${cmd}`;
-    }
-  }
-  if (event.progressType === 'tool_execution_end' && payload.isError) {
-    text += ` [error]`;
-  }
-  if (event.progressType === 'text_delta' && typeof payload.delta === 'string') {
-    text += ` ${payload.delta}`;
-  }
-  if (event.progressType === 'run_start' && Array.isArray(payload.command)) {
-    text = `Running: ${(payload.command as string[]).join(' ')}`;
-  } else if (event.progressType === 'run_stdout' && typeof payload.chunk === 'string') {
-    text = payload.chunk;
-  } else if (event.progressType === 'run_stderr' && typeof payload.chunk === 'string') {
-    text = `[stderr] ${payload.chunk}`;
-  } else if (event.progressType === 'run_exit') {
-    text = `Run exited with code ${String(payload.exitCode ?? '?')}`;
-  }
-  return text;
-}
-
+/**
+ * Create and kick off a concert, returning immediately.
+ *
+ * The concert runs in the background. This operation never streams or blocks;
+ * observation is the job of `waitForConcert` (or the structured
+ * `getConcertStatus`). The returned `status` is the conductor's post-kickoff
+ * status: `running` normally, or a terminal status when the concert finalizes
+ * synchronously during kickoff (for example, a missing required context).
+ */
 export async function startConcert(
   orchestron: Orchestron,
   input: StartConcertInput,
-  onUpdate?: ProgressCallback,
 ): Promise<{
   concertId: string;
   scoreId: string;
@@ -64,56 +34,16 @@ export async function startConcert(
     cwd: input.cwd,
   });
 
+  // Kick off execution without awaiting terminal state. `Conductor.start()`
+  // applies its pre-run status transition synchronously, so the state read
+  // below reflects the post-kickoff status rather than the stale `pending`.
+  conductor.start().catch(() => {});
+
   const state = await conductor.getState();
-  const result = {
+  return {
     concertId: state.id,
     scoreId: state.scoreId,
     status: state.status,
     startedAt: state.startedAt.toISOString(),
   };
-
-  if (onUpdate) {
-    onUpdate(
-      `Started concert ${state.id}. Current movement: ${state.currentMovement ?? 'none'}.`,
-    );
-
-    // Stream live progress from the conductor bus for a bounded window (or until
-    // the concert reaches a terminal state), then return so the caller can act
-    // on the concertId while execution continues in the background.
-    const maxStreamingMs = 10000;
-    await new Promise<void>((resolve) => {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        conductor.offEvent(listener);
-        resolve();
-      };
-
-      const listener = (event: ConcertEvent) => {
-        if (event.type === 'movement:started') {
-          onUpdate(`Movement ${event.movementId} started.`);
-        } else if (event.type === 'movement:progress') {
-          const text = progressText(event);
-          if (text) onUpdate(text);
-        } else if (
-          event.type === 'concert:completed' ||
-          event.type === 'concert:failed' ||
-          event.type === 'concert:cancelled'
-        ) {
-          onUpdate(`Concert finished with status: ${event.type.replace('concert:', '')}.`);
-          finish();
-        }
-      };
-      conductor.onEvent(listener);
-
-      const timer = setTimeout(finish, maxStreamingMs);
-      conductor.start().catch(() => {});
-    });
-  } else {
-    conductor.start().catch(() => {});
-  }
-
-  return result;
 }

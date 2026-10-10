@@ -25,12 +25,12 @@ Use this skill when the user wants to create, edit, run, or manage an Orchestron
 
 ### Concert management
 
-- `orchestron_start_concert(scoreId, context?)` — Start a new concert from a registered score. Returns a `concertId`. The concert runs in the background.
+- `orchestron_start_concert(scoreId, context?)` — Create and kick off a new concert from a registered score. Returns immediately with the `concertId` and post-kickoff status; the concert runs in the background. This tool does not stream or block.
 - `orchestron_get_concert_status(concertId)` — Get current status, movement history, resource usage, and current movement progress.
 - `orchestron_list_concerts(status?, limit?, offset?)` — List concerts, optionally filtered by status (`pending`, `running`, `paused`, `completed`, `failed`, `cancelled`).
 - `orchestron_pause_concert(concertId)` — Pause a running concert.
 - `orchestron_cancel_concert(concertId)` — Cancel a running or paused concert.
-- `orchestron_wait_for_concert(concertId)` — Block until the concert reaches a terminal state (`completed`, `failed`, or `cancelled`). Streams progress updates in real time. Prefer this over polling `orchestron_get_concert_status`.
+- `orchestron_wait_for_concert(concertId)` — Block until the concert reaches a terminal state (`completed`, `failed`, or `cancelled`). The sole streaming/observation tool; it attaches to any concert id (created this turn, by another process, or by the CLI) and streams progress updates in real time. Prefer this over polling `orchestron_get_concert_status`.
 
 ## Workflow Guidelines
 
@@ -69,9 +69,9 @@ Model names differ between harnesses. When authoring scores:
 3. Only set `persist: true` when the user explicitly asks to save the change.
 
 ### Running a concert
-1. Call `orchestron_start_concert(scoreId, context)`.
-2. If you need to wait for completion, call `orchestron_wait_for_concert(concertId)`.
-3. If the user asks for status, call `orchestron_get_concert_status(concertId)`.
+1. Call `orchestron_start_concert(scoreId, context)` — this creates the concert and returns immediately (it does not wait).
+2. Optionally observe it by calling `orchestron_wait_for_concert(concertId)`, which blocks and streams progress until the concert finishes.
+3. If the user asks for status instead of blocking, call `orchestron_get_concert_status(concertId)`.
 
 ## Score YAML at a Glance
 

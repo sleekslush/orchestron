@@ -10,7 +10,7 @@ import {
   ConcertHall,
   ConcertStream,
 } from '@orchestron/core';
-import type { Score } from '@orchestron/core';
+import type { ConcertEvent, Score } from '@orchestron/core';
 
 const tracesDir = mkdtempSync(join(realpathSync(tmpdir()), 'orchestron-test-trace-'));
 const concertStream = new ConcertStream(tracesDir);
@@ -22,6 +22,7 @@ import { pauseConcert } from '../tools/pause-concert.js';
 import { cancelConcert } from '../tools/cancel-concert.js';
 import { listScores } from '../tools/list-scores.js';
 import { waitForConcert } from '../tools/wait-for-concert.js';
+import { progressText } from '../tools/progress.js';
 import { getScore } from '../tools/get-score.js';
 import { createScore } from '../tools/create-score.js';
 import { editScore } from '../tools/edit-score.js';
@@ -86,14 +87,28 @@ async function createTestOrchestron(score: Score): Promise<Orchestron> {
 }
 
 describe('plugin-common tool functions', () => {
-  it('starts a concert and returns initial status', async () => {
+  it('starts a concert and returns post-kickoff status', async () => {
     const orchestron = await createTestOrchestron(linearScore());
     const result = await startConcert(orchestron, { scoreId: 'linear-test' });
 
     expect(result.scoreId).toBe('linear-test');
     expect(result.concertId).toBeDefined();
-    expect(result.status).toMatch(/pending|running/);
+    expect(result.status).toBe('running');
+    expect(result.status).not.toBe('pending');
     expect(result.startedAt).toBeDefined();
+  });
+
+  it('returns a terminal status when kickoff fails synchronously', async () => {
+    const score: Score = {
+      ...linearScore(),
+      id: 'requires-context',
+      requiredContext: ['ticket'],
+    };
+    const orchestron = await createTestOrchestron(score);
+    const result = await startConcert(orchestron, { scoreId: 'requires-context' });
+
+    expect(result.status).toBe('failed');
+    expect(result.status).not.toBe('pending');
   });
 
   it('forwards cwd to the concert so adapter sessions run there', async () => {
@@ -304,7 +319,33 @@ describe('plugin-common tool functions', () => {
     expect(result.movements).toHaveLength(2);
   });
 
-  it('streams startConcert progress via onUpdate callback', async () => {
+  it('waitForConcert attaches to a concert it did not create', async () => {
+    const orchestron = await createTestOrchestron(linearScore());
+    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
+
+    // A second Orchestron sharing the same store/stream, with no in-memory hall
+    // entry for the concert, observes it purely through persistent state.
+    const observer: Orchestron = {
+      store: orchestron.store,
+      registry: orchestron.registry,
+      hall: new ConcertHall({
+        store: orchestron.store,
+        scoreRegistry: orchestron.registry,
+        adapters: new Map(),
+        evaluator: new FakeEvaluator({ alwaysSucceed: true }),
+      }),
+      scoresDirs: [],
+      tracesDir: orchestron.tracesDir,
+      concertStream: new ConcertStream(orchestron.tracesDir),
+    };
+
+    const result = await waitForConcert(observer, { concertId });
+    expect(result.concertId).toBe(concertId);
+    expect(result.status).toBe('completed');
+    expect(result.movements).toHaveLength(2);
+  });
+
+  it('streams progress via waitForConcert onUpdate callback', async () => {
     const score: Score = {
       ...linearScore(),
       startMovement: 'slow',
@@ -347,11 +388,13 @@ describe('plugin-common tool functions', () => {
       evaluator: new FakeEvaluator({ alwaysSucceed: true }),
     });
 
+    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' });
     const onUpdate = vi.fn();
-    const { concertId } = await startConcert(orchestron, { scoreId: 'linear-test' }, onUpdate);
-    expect(concertId).toBeDefined();
+    const result = await waitForConcert(orchestron, { concertId }, onUpdate);
+
+    expect(result.status).toBe('completed');
     expect(onUpdate).toHaveBeenCalledWith(
-      expect.stringContaining('Started concert'),
+      expect.stringContaining('Waiting for concert'),
     );
     expect(onUpdate).toHaveBeenCalledWith(
       expect.stringContaining('git_status'),
@@ -488,6 +531,96 @@ describe('plugin-common tool functions', () => {
     expect(status.currentMovementProgress).toBeDefined();
     expect(status.currentMovementProgress?.type).toBe('tool_execution_start');
     expect(status.currentMovementProgress?.toolName).toBe('git_status');
+  });
+});
+
+describe('shared progress formatter', () => {
+  const progressEvent = (
+    progressType: string,
+    payload: Record<string, unknown> = {},
+  ): ConcertEvent => ({
+    type: 'movement:progress',
+    concertId: 'c1',
+    movementId: 'm1',
+    progressType,
+    payload,
+    timestamp: new Date(),
+  });
+
+  it('returns undefined for non-progress events', () => {
+    const event: ConcertEvent = {
+      type: 'concert:started',
+      concertId: 'c1',
+      scoreId: 's1',
+      timestamp: new Date(),
+    };
+    expect(progressText(event)).toBeUndefined();
+  });
+
+  it('passes through an explicit message', () => {
+    expect(
+      progressText(progressEvent('tool_execution_start', { message: 'Doing a thing' })),
+    ).toBe('Doing a thing');
+  });
+
+  it('defaults to a progress label with a tool name', () => {
+    expect(progressText(progressEvent('tool_execution_start', { toolName: 'read' }))).toBe(
+      'Progress: tool_execution_start (read)',
+    );
+  });
+
+  it('defaults to a bare progress label without a tool name', () => {
+    expect(progressText(progressEvent('thinking'))).toBe('Progress: thinking');
+  });
+
+  it('appends tool start arguments in priority order', () => {
+    expect(
+      progressText(
+        progressEvent('tool_execution_start', {
+          toolName: 'bash',
+          args: { command: 'ls -la', filePath: '/tmp/file' },
+        }),
+      ),
+    ).toBe('Progress: tool_execution_start (bash) → ls -la');
+    expect(
+      progressText(
+        progressEvent('tool_execution_start', {
+          toolName: 'read',
+          args: { filePath: '/tmp/file' },
+        }),
+      ),
+    ).toBe('Progress: tool_execution_start (read) → /tmp/file');
+    expect(
+      progressText(
+        progressEvent('tool_execution_start', {
+          toolName: 'read',
+          args: { path: '/tmp/file' },
+        }),
+      ),
+    ).toBe('Progress: tool_execution_start (read) → /tmp/file');
+  });
+
+  it('marks failed tool executions', () => {
+    expect(
+      progressText(progressEvent('tool_execution_end', { toolName: 'bash', isError: true })),
+    ).toBe('Progress: tool_execution_end (bash) [error]');
+  });
+
+  it('appends text deltas', () => {
+    expect(progressText(progressEvent('text_delta', { delta: 'hello' }))).toBe(
+      'Progress: text_delta hello',
+    );
+  });
+
+  it('renders run-movement lifecycle events', () => {
+    expect(progressText(progressEvent('run_start', { command: ['echo', 'hi'] }))).toBe(
+      'Running: echo hi',
+    );
+    expect(progressText(progressEvent('run_stdout', { chunk: 'hello' }))).toBe('hello');
+    expect(progressText(progressEvent('run_stderr', { chunk: 'oops' }))).toBe('[stderr] oops');
+    expect(progressText(progressEvent('run_exit', { exitCode: 0 }))).toBe(
+      'Run exited with code 0',
+    );
   });
 });
 
@@ -628,28 +761,4 @@ program: {}
     expect(status.movements[0].exitCode).toBe(0);
   });
 
-  it('renders run progress through startConcert onUpdate', async () => {
-    const score: Score = {
-      id: 'run-progress',
-      name: 'Run Progress',
-      version: '1.0.0',
-      startMovement: 'run',
-      movements: [
-        {
-          id: 'run',
-          name: 'Run',
-          section: 'default',
-          type: 'run',
-          command: [process.execPath, '-e', 'process.stdout.write("hello")'],
-          transitions: [{ to: '__end__', on: 'success' }],
-        },
-      ],
-      program: {},
-    };
-    const orchestron = await createTestOrchestron(score);
-    const updates: string[] = [];
-    await startConcert(orchestron, { scoreId: 'run-progress' }, (text) => updates.push(text));
-    expect(updates.some((u) => u.startsWith('Running:'))).toBe(true);
-    expect(updates.some((u) => u.includes('Run exited with code 0'))).toBe(true);
-  });
 });

@@ -1,6 +1,6 @@
 export { createOrchestron, type Orchestron, type OrchestronOptions } from './orchestron.js';
 export { toUsageView, type UsageView } from './util.js';
-export type { ProgressCallback } from './tools/start-concert.js';
+export type { ProgressCallback } from './tools/progress.js';
 
 export { startConcert } from './tools/start-concert.js';
 export type { StartConcertInput } from './tools/start-concert.js';

@@ -8,15 +8,15 @@ export function waitForConcertTool(getOrchestron: () => Promise<import('@orchest
     name: 'orchestron_wait_for_concert',
     label: 'Wait for Orchestron Concert',
     description:
-      'Block until an Orchestron concert reaches a terminal state (completed, failed, or cancelled). Streams progress updates in real time and returns the final concert status, movement history, and resource usage.',
+      'Block until an Orchestron concert reaches a terminal state (completed, failed, or cancelled). The sole streaming/observation tool: it attaches to any concert id (created this session, by another process, or by the CLI), streams progress updates in real time, and returns the final concert status, movement history, and resource usage.',
     parameters: Type.Object({
       concertId: Type.String({ description: 'ID of the concert to wait for' }),
     }),
     promptSnippet: 'Wait for an Orchestron concert to finish',
     promptGuidelines: [
       'Use orchestron_wait_for_concert instead of repeatedly calling orchestron_get_concert_status when you need to wait for a concert to finish.',
-      'The concertId is returned by orchestron_start_concert.',
-      'This tool blocks until the concert is done, streaming progress updates.',
+      'The concertId is returned by orchestron_start_concert or listed by orchestron_list_concerts.',
+      'This tool blocks until the concert is done, streaming progress updates. It can attach to any existing concert.',
     ],
     async execute(_toolCallId, params, signal, onUpdate: AgentToolUpdateCallback<unknown>, _ctx) {
       const orchestron = await getOrchestron();
