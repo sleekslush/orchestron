@@ -103,7 +103,7 @@ movements:
 - Use `retryOnFailure: true` for movements that are inherently flaky, with a sensible `budget.maxRetries`.
 - Use the `initial`/`subsequent` prompt form for any movement that may be revisited in a loop.
 - When editing a score, always call `orchestron_get_score` first to avoid losing existing fields.
-- Use `orchestron_wait_for_concert` instead of polling `orchestron_get_concert_status` when you need to block until a concert finishes.
+- `orchestron_start_concert` only creates and kicks off a concert; it returns immediately. Use `orchestron_wait_for_concert` instead of polling `orchestron_get_concert_status` when you need to block and stream progress until a concert finishes.
 
 ## Common User Prompts
 

@@ -9,16 +9,19 @@ The plugin registers these Pi tools:
 
 ### Concerts
 
-- `orchestron_start_concert(scoreId, context?)` — Start a new concert from a
-  registered score. Runs in the background so the Pi session can continue.
+- `orchestron_start_concert(scoreId, context?)` — Create and kick off a new
+  concert from a registered score. Returns immediately with the concert id and
+  post-kickoff status; runs in the background so the Pi session can continue.
+  Does not stream or block.
 - `orchestron_get_concert_status(concertId)` — Show status, movement history,
   and resource usage for a concert.
 - `orchestron_list_concerts(filter?)` — List concerts, optionally filtered by
   status.
 - `orchestron_pause_concert(concertId)` — Pause a running concert.
 - `orchestron_cancel_concert(concertId)` — Cancel a running or paused concert.
-- `orchestron_wait_for_concert(concertId)` — Block until a concert reaches a
-  terminal state. Streams progress updates in real time.
+- `orchestron_wait_for_concert(concertId)` — The sole observer: block until any
+  concert id (this session, another process, or the CLI) reaches a terminal
+  state, streaming progress updates in real time.
 
 ### Scores
 
@@ -43,7 +46,7 @@ Typical workflow:
 1. User: *"Create a score that analyzes a topic and summarizes it."*
 2. Model generates YAML and calls `orchestron_create_score(scoreId, yaml, persist: false)`.
 3. User: *"Run it with topic='AI agents' to test."*
-4. Model calls `orchestron_start_concert(scoreId)`.
+4. Model calls `orchestron_start_concert(scoreId)` to create it, then (optionally) `orchestron_wait_for_concert(concertId)` to block until it finishes.
 5. User: *"Save it."*
 6. Model calls `orchestron_create_score(scoreId, yaml, persist: true)`.
 
