@@ -22,6 +22,10 @@ describe('formatUsage spend rendering', () => {
   it('renders zero spend', () => {
     expect(formatUsage({ spend: 0, tokens: 0, spendSource: 'estimated' })).toBe('~$0 / 0 tokens');
   });
+
+  it('renders measured zero spend as plain $0, never ~$0', () => {
+    expect(formatUsage({ spend: 0, tokens: 0, spendSource: 'measured' })).toBe('$0 / 0 tokens');
+  });
 });
 
 describe('formatDollars', () => {

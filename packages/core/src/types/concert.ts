@@ -1,4 +1,4 @@
-import type { ScoreID, MovementID } from './score.js';
+import type { ScoreID, MovementID, MovementKind } from './score.js';
 import type { SpendSource } from '../cost/types.js';
 export type { MovementID };
 
@@ -75,6 +75,10 @@ export interface MovementRecord {
   traceId?: string;
   model?: string;
   provider?: string;
+  /** Process exit code for a `run` movement; absent for harness movements. */
+  exitCode?: number;
+  /** Movement kind discriminator. Absent means `harness` (backward compatible). */
+  kind?: MovementKind;
 }
 
 export interface GoalEvaluation {

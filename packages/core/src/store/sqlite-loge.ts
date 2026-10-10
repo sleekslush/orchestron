@@ -60,7 +60,9 @@ const SCHEMA_SQL = `
         error TEXT,
         trace_id TEXT,
         model TEXT,
-        provider TEXT
+        provider TEXT,
+        exit_code INTEGER,
+        kind TEXT
       );
 
       CREATE TABLE IF NOT EXISTS events (
@@ -126,6 +128,12 @@ export class SqliteLoge implements ConcertStore {
     }
     if (!columnInfo.some((col) => col.name === 'provider')) {
       this.db.exec(`ALTER TABLE movements ADD COLUMN provider TEXT`);
+    }
+    if (!columnInfo.some((col) => col.name === 'exit_code')) {
+      this.db.exec(`ALTER TABLE movements ADD COLUMN exit_code INTEGER`);
+    }
+    if (!columnInfo.some((col) => col.name === 'kind')) {
+      this.db.exec(`ALTER TABLE movements ADD COLUMN kind TEXT`);
     }
     const concertColumns = this.db
       .prepare(`PRAGMA table_info(concerts)`)
@@ -299,8 +307,8 @@ export class SqliteLoge implements ConcertStore {
     const stmt = this.db.prepare(`
       INSERT INTO movements
         (concert_id, movement_id, movement_name, status, output, structured,
-         summary, goal_evaluation, usage, duration_ms, started_at, completed_at, error, trace_id, model, provider)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         summary, goal_evaluation, usage, duration_ms, started_at, completed_at, error, trace_id, model, provider, exit_code, kind)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       concertId,
@@ -319,6 +327,8 @@ export class SqliteLoge implements ConcertStore {
       record.traceId ?? null,
       record.model ?? null,
       record.provider ?? null,
+      record.exitCode ?? null,
+      record.kind ?? null,
     );
   }
 
@@ -376,6 +386,14 @@ export class SqliteLoge implements ConcertStore {
     if (record.provider !== undefined) {
       fields.push('provider = ?');
       values.push(record.provider ?? null);
+    }
+    if (record.exitCode !== undefined) {
+      fields.push('exit_code = ?');
+      values.push(record.exitCode ?? null);
+    }
+    if (record.kind !== undefined) {
+      fields.push('kind = ?');
+      values.push(record.kind ?? null);
     }
 
     if (fields.length === 0) return;

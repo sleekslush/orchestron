@@ -246,3 +246,69 @@ movements:
       - to: __fail__
         on: failure
 ```
+
+## Deterministic Run Movement (Claim + Branch Preparation)
+
+Mechanical steps use `type: run` and exit-code outcomes instead of an LLM
+session. The base branch is resolved as structured JSON and passed to the next
+step through a parsed leaf, so no trailing newline leaks into the argv.
+
+```yaml
+id: claim-and-branch
+name: "Claim and Branch"
+version: "1.0.0"
+startMovement: claim
+movements:
+  - id: claim
+    name: "Claim Issue"
+    section: setup
+    type: run
+    command: ["labels.sh", "claim", "{{context.issue}}"]
+    outcomes: { 0: success, 3: rejection, default: failure }
+    transitions:
+      - to: resolve_base
+        on: success
+      - to: __end__
+        on: rejection
+      - to: fail_cleanup
+        on: failure
+
+  - id: resolve_base
+    name: "Resolve Default Branch"
+    section: setup
+    type: run
+    command: ["gh", "repo", "view", "{{context.repo}}", "--json", "defaultBranchRef"]
+    output: { mode: structured }
+    transitions:
+      - to: create_branch
+        on: success
+      - to: fail_cleanup
+        on: failure
+
+  - id: create_branch
+    name: "Create Branch"
+    section: setup
+    type: run
+    command:
+      - git
+      - checkout
+      - -b
+      - "orchestron/issue-{{context.issue}}"
+      - "origin/{{context.previousOutputs.resolve_base.defaultBranchRef.name}}"
+    outcomes: { 0: success, default: failure }
+    transitions:
+      - to: __end__
+        on: success
+      - to: fail_cleanup
+        on: failure
+
+  - id: fail_cleanup
+    name: "Mark Failed"
+    section: cleanup
+    type: run
+    command: ["labels.sh", "set", "{{context.issue}}", "failed"]
+    outcomes: { 0: success, default: success }
+    transitions:
+      - to: __fail__
+        on: any
+```

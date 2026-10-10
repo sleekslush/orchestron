@@ -10,6 +10,7 @@ interface MoveIndex {
   movementName?: string;
   harness?: string;
   mode?: 'cumulative' | 'fresh';
+  kind?: 'harness' | 'run';
   finalAttempt?: number;
   finalStatus?: string;
   finalSessionFile?: string;
@@ -33,7 +34,10 @@ interface AttemptMeta {
   endedAt?: string;
   status?: string;
   eventCount?: number;
-  files?: { native?: string; sizeBytes?: number };
+  kind?: 'harness' | 'run';
+  command?: string[];
+  exitCode?: number;
+  files?: { native?: string; sizeBytes?: number; stdout?: string; stderr?: string };
 }
 
 async function readJson<T>(filePath: string): Promise<T | undefined> {
@@ -57,6 +61,87 @@ function reopenHint(harness: string | undefined, filePath: string): string | und
   return undefined;
 }
 
+/**
+ * Render a deterministic `run` movement's per-attempt logs. `--open` is
+ * rejected: a run step has no harness session to reopen.
+ */
+async function renderRunSession(
+  movementDir: string,
+  concertId: string,
+  movementId: string,
+  index: MoveIndex,
+  attempt: number | undefined,
+  json: boolean,
+  print: boolean,
+  open: boolean,
+): Promise<void> {
+  if (open) {
+    throw new Error('--open is not supported for run movements (no session to reopen)');
+  }
+
+  const sorted = [...(index.attempts ?? [])].sort((a, b) => b.attempt - a.attempt);
+  const chosen =
+    attempt !== undefined && attempt >= 0
+      ? { attempt, path: `attempt-${attempt}` }
+      : sorted[0] ??
+        (index.finalAttempt !== undefined
+          ? { attempt: index.finalAttempt, path: `attempt-${index.finalAttempt}` }
+          : undefined);
+  if (!chosen) {
+    throw new Error(
+      `No recorded run attempt found for concert '${concertId}' movement '${movementId}'.`,
+    );
+  }
+
+  const attemptDir = join(movementDir, chosen.path);
+  const meta = await readJson<AttemptMeta>(join(attemptDir, 'metadata.json'));
+  const stdout = await readFile(join(attemptDir, 'stdout.log'), 'utf-8').catch(() => '');
+  const stderr = await readFile(join(attemptDir, 'stderr.log'), 'utf-8').catch(() => '');
+
+  const output = {
+    concertId,
+    movementId,
+    attempt: chosen.attempt,
+    kind: 'run' as const,
+    movementStatus: index.finalStatus,
+    attemptStatus: meta?.status ?? sorted.find((a) => a.attempt === chosen.attempt)?.status,
+    command: meta?.command,
+    exitCode: meta?.exitCode,
+    stdoutPath: join(attemptDir, 'stdout.log'),
+    stderrPath: join(attemptDir, 'stderr.log'),
+    stdout,
+    stderr,
+  };
+
+  if (json) {
+    console.log(JSON.stringify(output, null, 2));
+    return;
+  }
+
+  if (print) {
+    if (stdout) process.stdout.write(stdout.endsWith('\n') ? stdout : `${stdout}\n`);
+    if (stderr) process.stderr.write(stderr.endsWith('\n') ? stderr : `${stderr}\n`);
+    return;
+  }
+
+  const lines: string[] = [];
+  lines.push(`Concert:  ${concertId}`);
+  lines.push(`Movement: ${movementId}${index.movementName ? ` (${index.movementName})` : ''}`);
+  lines.push(`Attempt:  ${chosen.attempt}${index.finalAttempt === chosen.attempt ? ' (final)' : ''}`);
+  lines.push('Kind:     run');
+  lines.push(`Status:   ${output.attemptStatus ?? index.finalStatus ?? '-'}`);
+  if (meta?.command) lines.push(`Command:  ${meta.command.join(' ')}`);
+  if (meta?.exitCode !== undefined) lines.push(`Exit:     ${meta.exitCode}`);
+  lines.push(`Stdout:   ${join(attemptDir, 'stdout.log')}`);
+  lines.push(`Stderr:   ${join(attemptDir, 'stderr.log')}`);
+  lines.push('');
+  lines.push('--- stdout ---');
+  lines.push(stdout.trimEnd());
+  lines.push('--- stderr ---');
+  lines.push(stderr.trimEnd());
+  console.log(lines.join('\n'));
+}
+
 export async function sessionCommandHandler(
   orchestron: Orchestron,
   concertId: string | undefined,
@@ -75,6 +160,11 @@ export async function sessionCommandHandler(
 
   const movementDir = join(orchestron.tracesDir, concertId, 'movements', movementId);
   const index = await readJson<MoveIndex>(join(movementDir, 'index.json'));
+
+  if (index?.kind === 'run') {
+    await renderRunSession(movementDir, concertId, movementId, index, attempt, json, print, open);
+    return;
+  }
 
   // Display metadata from the movement index when no explicit attempt is requested.
   let status: string | undefined;

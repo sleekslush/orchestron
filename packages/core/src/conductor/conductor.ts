@@ -2,6 +2,7 @@ import type {
   Concert,
   ConcertID,
   ConcertStatus,
+  GoalEvaluation,
   MovementRecord,
   SerializedError,
 } from '../types/concert.js';
@@ -12,7 +13,11 @@ import type {
   SectionBudget,
 } from '../types/score.js';
 import { EventEmitter } from 'node:events';
+import { spawn } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type {
   HarnessAdapter,
   ProgressUpdate,
@@ -31,8 +36,10 @@ import {
   copyFinalSession,
   movementDirName,
   movementDirPath,
+  writeAttemptMetadata,
   writeConcertIndex,
   writeMovementIndex,
+  type AttemptMetadata,
   type ConcertIndexMovement,
   type MovementIndex,
 } from '../recording/artifacts.js';
@@ -48,6 +55,8 @@ import {
 import { PromptBuilder } from './prompt-builder.js';
 import { ConstraintChecker } from './constraint-checker.js';
 import { matchTransition } from './transition-resolver.js';
+import { resolveRunOutcome } from './run-outcome.js';
+import { tryParseStructuredFromText } from '../structured-output.js';
 import { resolveSessionMode, type SessionMode } from './session-mode.js';
 import { dollarsToMicro, microToDollars } from '../money.js';
 import { createAdapterResolver } from '../adapter-resolver.js';
@@ -473,6 +482,10 @@ export class Conductor implements IConductor {
         return await this.executeSubscore(movement, previousOutputs, signal, record);
       }
 
+      if ((movement.type ?? 'harness') === 'run') {
+        return await this.executeRunMovement(movement, previousOutputs, signal, record);
+      }
+
       harnessAdapter = await this.resolveAdapter(movement);
       const modelConfig = this.resolveModelConfig(movement, harnessAdapter.type);
       // Skills precedence mirrors model precedence: a movement-level list wins
@@ -619,6 +632,334 @@ export class Conductor implements IConductor {
     return record;
   }
 
+  /**
+   * Execute a `run` movement: template argv/cwd/env, expand a leading `~/`,
+   * spawn the process directly with `execve` semantics, stream and capture
+   * stdout/stderr incrementally, and map the exit code to an outcome via the
+   * movement's `outcomes` map. No adapter, session, or evaluator is involved;
+   * spend is measured `$0`.
+   */
+  private async executeRunMovement(
+    movement: Movement,
+    previousOutputs: Map<MovementID, MovementRecord>,
+    signal: AbortSignal,
+    record: MovementRecord,
+  ): Promise<MovementRecord> {
+    record.kind = 'run';
+    // Run movements have no session: mark a deterministic "fresh" mode so the
+    // recording index has a defined value while `harness` stays undefined.
+    this.movementMode.set(movement.id, 'fresh');
+
+    const contextShared = this.concert.context.shared;
+    const template = (value: string) =>
+      this.promptBuilder.resolveTemplate(value, previousOutputs, contextShared);
+
+    const command = (movement.command ?? []).map((arg) => this.expandTilde(template(arg)));
+    const cwd = movement.cwd ? this.expandTilde(template(movement.cwd)) : this.cwd;
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (movement.env) {
+      // Env values are literal after templating: no `~/` expansion, because a
+      // leading `~/` in an arbitrary env string is not necessarily a path.
+      for (const [key, value] of Object.entries(movement.env)) {
+        env[key] = template(value);
+      }
+    }
+
+    const attemptIndex = this.nextAttemptIndex(movement.id);
+    let attemptDir: string | undefined;
+    if (this.tracesDir) {
+      attemptDir = attemptDirPath(this.tracesDir, this.concert.id, movement.id, attemptIndex);
+      await mkdir(attemptDir, { recursive: true }).catch((err) => {
+        console.error(
+          `Failed to create run attempt directory '${attemptDir}': ${(err as Error).message}`,
+        );
+      });
+    }
+
+    this.emit(
+      {
+        type: 'movement:started',
+        concertId: this.concert.id,
+        movementId: movement.id,
+        timestamp: record.startedAt,
+      },
+      { movementId: movement.id, attempt: attemptIndex },
+    );
+    this.emit(
+      {
+        type: 'movement:progress',
+        concertId: this.concert.id,
+        movementId: movement.id,
+        progressType: 'run_start',
+        payload: { command },
+        timestamp: new Date(),
+      },
+      { movementId: movement.id, attempt: attemptIndex },
+    );
+
+    const { movementSignal, onParentAbort, timeoutHandle, heartbeatHandle } =
+      this.setupMovementExecution(movement, record.startedAt, signal);
+
+    let stdout = '';
+    let stderr = '';
+    let exitCode: number | null = null;
+    let spawnError: Error | undefined;
+    let aborted = false;
+
+    const stdoutStream = attemptDir
+      ? createWriteStream(join(attemptDir, 'stdout.log'), { flags: 'w' })
+      : undefined;
+    const stderrStream = attemptDir
+      ? createWriteStream(join(attemptDir, 'stderr.log'), { flags: 'w' })
+      : undefined;
+
+    // A write failure (e.g. the attempt dir was not writable) must not surface
+    // as an unhandled stream error; log it and keep the child running.
+    stdoutStream?.on('error', (err: Error) => {
+      console.error(
+        `Failed to write run stdout log for '${this.concert.id}/${movement.id}':`,
+        err,
+      );
+    });
+    stderrStream?.on('error', (err: Error) => {
+      console.error(
+        `Failed to write run stderr log for '${this.concert.id}/${movement.id}':`,
+        err,
+      );
+    });
+
+    const [file, ...args] = command;
+    const child = spawn(file, args, {
+      cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let forceKill: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      aborted = true;
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // Child already exited.
+      }
+      forceKill = setTimeout(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Already gone.
+        }
+      }, 2000);
+    };
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+
+      if (movementSignal.aborted) onAbort();
+      else movementSignal.addEventListener('abort', onAbort, { once: true });
+
+      child.stdout?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        stdout += text;
+        stdoutStream?.write(chunk);
+        this.emit(
+          {
+            type: 'movement:progress',
+            concertId: this.concert.id,
+            movementId: movement.id,
+            progressType: 'run_stdout',
+            payload: { chunk: text },
+            timestamp: new Date(),
+          },
+          { movementId: movement.id, attempt: attemptIndex },
+        );
+      });
+      child.stderr?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        stderr += text;
+        stderrStream?.write(chunk);
+        this.emit(
+          {
+            type: 'movement:progress',
+            concertId: this.concert.id,
+            movementId: movement.id,
+            progressType: 'run_stderr',
+            payload: { chunk: text },
+            timestamp: new Date(),
+          },
+          { movementId: movement.id, attempt: attemptIndex },
+        );
+      });
+      // @types/node's ChildProcess uses `implements EventEmitter` rather than
+      // `extends`, so cast to the event emitter shape to attach listeners.
+      const childEmitter = child as unknown as import('node:events').EventEmitter;
+      childEmitter.on('error', (err: Error) => {
+        spawnError = err;
+        done();
+      });
+      childEmitter.on('close', (code: number | null) => {
+        exitCode = code;
+        if (forceKill) clearTimeout(forceKill);
+        done();
+      });
+    });
+
+    movementSignal.removeEventListener('abort', onAbort);
+    clearTimeout(timeoutHandle);
+    clearInterval(heartbeatHandle);
+    signal.removeEventListener('abort', onParentAbort);
+
+    await Promise.all([
+      new Promise<void>((resolve) => {
+        if (!stdoutStream) return resolve();
+        stdoutStream.end(() => resolve());
+      }),
+      new Promise<void>((resolve) => {
+        if (!stderrStream) return resolve();
+        stderrStream.end(() => resolve());
+      }),
+    ]);
+
+    record.durationMs = Date.now() - record.startedAt.getTime();
+    // A run step is genuinely free: measured `$0`, never unmeasured/unknown.
+    record.usage = { spend: 0, spendSource: 'measured' };
+
+    // Attempt-level status recorded in the index/metadata/trace. This differs
+    // from `record.status` for a mapped rejection: the Conductor keeps the
+    // record `completed` so `runLoop` can derive the `rejection` transition,
+    // but the attempt is honestly recorded as rejected for `session`/
+    // metadata consumers.
+    let attemptStatus: 'completed' | 'failed' | 'rejected' = 'failed';
+
+    if (spawnError) {
+      record.status = 'failed';
+      attemptStatus = 'failed';
+      record.error = {
+        code: 'SPAWN_FAILED',
+        message: spawnError.message,
+        retryable: false,
+        concertId: this.concert.id,
+        movementId: movement.id,
+      };
+      record.summary = `Failed to spawn '${file}'`;
+    } else if (aborted) {
+      record.status = 'failed';
+      attemptStatus = 'failed';
+      record.error = {
+        code: 'MOVEMENT_ABORTED',
+        message: 'Run command terminated by abort or timeout',
+        retryable: false,
+        concertId: this.concert.id,
+        movementId: movement.id,
+      };
+      record.summary = 'Run command terminated by abort or timeout';
+    } else {
+      const code = exitCode ?? 1;
+      const outcome = resolveRunOutcome(movement.outcomes, code);
+      record.exitCode = code;
+      record.output = stdout;
+      if (movement.output?.mode === 'structured') {
+        const parsed = tryParseStructuredFromText(stdout);
+        if (parsed) record.structured = parsed;
+      }
+      const firstStderrLine = stderr.split(/\r?\n/).find((line) => line.trim() !== '');
+      record.status = outcome === 'failure' ? 'failed' : 'completed';
+      attemptStatus =
+        outcome === 'failure' ? 'failed' : outcome === 'rejection' ? 'rejected' : 'completed';
+      record.goalEvaluation = {
+        achieved: outcome === 'success',
+        confidence: 1,
+        summary: `Exit code ${code} mapped to ${outcome}`,
+      };
+      record.summary = `Ran '${file ?? ''}' (exit ${code})`;
+      if (outcome !== 'success') {
+        record.error = {
+          code: 'EXIT_NONZERO',
+          message: firstStderrLine ?? `Command exited with code ${code}`,
+          retryable: false,
+          concertId: this.concert.id,
+          movementId: movement.id,
+        };
+      }
+    }
+
+    this.emit(
+      {
+        type: 'movement:progress',
+        concertId: this.concert.id,
+        movementId: movement.id,
+        progressType: 'run_exit',
+        payload: { exitCode: record.exitCode ?? null },
+        timestamp: new Date(),
+      },
+      { movementId: movement.id, attempt: attemptIndex },
+    );
+
+    const attempts = this.movementAttempts.get(movement.id) ?? [];
+    attempts.push({
+      attempt: attemptIndex,
+      status: attemptStatus,
+      sessionKey: undefined,
+      path: attemptDirName(attemptIndex),
+    });
+    this.movementAttempts.set(movement.id, attempts);
+
+    if (attemptDir) {
+      const metadata: AttemptMetadata = {
+        concertId: this.concert.id,
+        movementId: movement.id,
+        attempt: attemptIndex,
+        kind: 'run',
+        startedAt: record.startedAt.toISOString(),
+        endedAt: new Date().toISOString(),
+        status: attemptStatus,
+        eventCount: 0,
+        command,
+        exitCode: record.exitCode,
+        files: {
+          stdout: stdoutStream ? 'stdout.log' : undefined,
+          stderr: stderrStream ? 'stderr.log' : undefined,
+        },
+      };
+      await writeAttemptMetadata(attemptDir, metadata).catch((err) => {
+        console.error(
+          `Failed to write run attempt metadata for '${this.concert.id}/${movement.id}':`,
+          err,
+        );
+      });
+    }
+
+    if (this.traceService) {
+      await this.traceService.recordAttempt({
+        concertId: this.concert.id,
+        movementId: movement.id,
+        attemptIndex,
+        harness: 'run',
+        mode: 'fresh',
+        filePath: `${movementDirName(movement.id)}/${attemptDirName(attemptIndex)}`,
+        status: attemptStatus,
+        eventCount: 0,
+        startedAt: record.startedAt,
+        endedAt: record.completedAt ?? new Date(),
+      });
+    }
+
+    return record;
+  }
+
+  /** Expand a leading `~/` to the user's home directory (config-path precedent). */
+  private expandTilde(value: string): string {
+    if (value.startsWith('~/')) {
+      return join(homedir(), value.slice(2));
+    }
+    return value;
+  }
+
   /** Bump the per-movement attempt counter and return this call's index. */
   private nextAttemptIndex(movementId: MovementID): number {
     const index = this.attemptCounters.get(movementId) ?? 0;
@@ -664,6 +1005,7 @@ export class Conductor implements IConductor {
         movementName: movement.name,
         harness: this.movementHarness.get(movement.id),
         mode: this.movementMode.get(movement.id) ?? 'cumulative',
+        kind: movement.type ?? 'harness',
         finalAttempt: undefined,
         finalStatus: undefined,
         finalSessionFile: undefined,
@@ -744,6 +1086,7 @@ export class Conductor implements IConductor {
         movementName: movement.name,
         harness,
         mode,
+        kind: movement.type ?? 'harness',
         finalAttempt: lastAttempt,
         finalStatus: record.status,
         finalSessionFile,
@@ -1173,14 +1516,23 @@ export class Conductor implements IConductor {
         record.usage.tokens = totalTokens;
       }
 
-      const evaluation = await this.evaluator.evaluate(
-        movement.goal,
-        record.output,
-        this.concert.context,
-        movement.id,
-      );
-      record.goalEvaluation = evaluation;
-      record.completedAt = new Date();
+      const isRunMovement = (movement.type ?? 'harness') === 'run';
+      let evaluation: GoalEvaluation;
+      if (isRunMovement) {
+        // Run movements have no goal and never invoke the evaluator; the
+        // exit-code outcomes map already produced a synthesized goalEvaluation.
+        evaluation = record.goalEvaluation;
+        record.completedAt = new Date();
+      } else {
+        evaluation = await this.evaluator.evaluate(
+          movement.goal!,
+          record.output,
+          this.concert.context,
+          movement.id,
+        );
+        record.goalEvaluation = evaluation;
+        record.completedAt = new Date();
+      }
 
       // Goal rejection retries: the harness produced a valid output but the
       // evaluator judged it did not achieve the movement's goal. This is
@@ -1229,7 +1581,7 @@ export class Conductor implements IConductor {
             break;
           }
           const retryEvaluation = await this.evaluator.evaluate(
-            movement.goal,
+            movement.goal!,
             retryRecord.output,
             this.concert.context,
             movement.id,
@@ -1449,6 +1801,7 @@ export class Conductor implements IConductor {
       const mid = record.movementId;
       const attemptCount = this.attemptCounters.get(mid) ?? 0;
       const harness = this.movementHarness.get(mid);
+      const scoreMovement = this.score.movements.find((m) => m.id === mid);
       let finalSessionFile = this.movementFinalSessionFile.get(mid);
       if (finalSessionFile) {
         finalSessionFile = `${movementDirName(mid)}/${finalSessionFile}`;
@@ -1458,6 +1811,7 @@ export class Conductor implements IConductor {
         name: record.movementName,
         harness,
         mode: this.movementMode.get(mid) ?? defaultMode,
+        kind: scoreMovement?.type ?? 'harness',
         attempts: attemptCount,
         finalStatus: record.status,
         finalSessionFile,
