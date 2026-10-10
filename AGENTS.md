@@ -86,7 +86,7 @@ CLI flags > `ORCHESTRON_*` env vars > `~/.orchestron/config.json` > code default
 ## Pull Requests
 
 - One logical change per branch. Branch from `main`.
-- Reference the tracking issue in PR description (e.g. `Part of #48`).
+- Reference the tracking issue in the PR description.
 - Run `pnpm typecheck && pnpm test` locally before opening a PR.
 
 ## What Not To Do
