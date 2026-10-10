@@ -20,6 +20,7 @@ function latestProgressEvent(
   toolName?: string;
   args?: Record<string, unknown>;
   message?: string;
+  command?: string[];
 } | undefined {
   const progress = [...events].reverse().find(
     (e): e is ConcertEvent & { type: 'movement:progress' } => e.type === 'movement:progress',
@@ -34,7 +35,39 @@ function latestProgressEvent(
       ? (payload.args as Record<string, unknown>)
       : undefined,
     message: typeof payload.message === 'string' ? payload.message : undefined,
+    command: Array.isArray(payload.command)
+      ? (payload.command as unknown[]).filter((c): c is string => typeof c === 'string')
+      : undefined,
   };
+}
+
+/** Derive the currently running command from the latest run-start progress payload. */
+function runningCommandFromRunStart(
+  events: ConcertEvent[],
+  currentMovement: string | null,
+): string | undefined {
+  if (!currentMovement) return undefined;
+  const started = [...events].reverse().find(
+    (e): e is ConcertEvent & { type: 'movement:progress' } =>
+      e.type === 'movement:progress' &&
+      e.progressType === 'run_start' &&
+      e.movementId === currentMovement,
+  );
+  if (!started) return undefined;
+  // A `run_exit` for the current movement means the command is no longer running.
+  const exited = events.some(
+    (e) =>
+      e.type === 'movement:progress' &&
+      e.progressType === 'run_exit' &&
+      e.movementId === currentMovement &&
+      e.timestamp.getTime() >= started.timestamp.getTime(),
+  );
+  if (exited) return undefined;
+  const command = started.payload.command;
+  if (Array.isArray(command) && command.every((c) => typeof c === 'string')) {
+    return command.join(' ');
+  }
+  return undefined;
 }
 
 function latestStartedEvent(
@@ -48,6 +81,9 @@ function latestStartedEvent(
 
 function currentCommandFromProgress(progress: ReturnType<typeof latestProgressEvent>): string | undefined {
   if (!progress) return undefined;
+  if (progress.type === 'run_start' && progress.command) {
+    return progress.command.join(' ');
+  }
   if (progress.toolName) {
     return `${progress.toolName}${progress.args ? ` ${JSON.stringify(progress.args)}` : ''}`;
   }
@@ -78,7 +114,15 @@ function printLiveEvent(event: ConcertEvent): void {
       console.error('✗ Concert cancelled');
       break;
     case 'movement:progress':
-      if (event.progressType === 'tool_execution_start' && typeof event.payload?.toolName === 'string') {
+      if (event.progressType === 'run_start' && Array.isArray(event.payload?.command)) {
+        console.error(`→ [${event.movementId}] $ ${(event.payload.command as string[]).join(' ')}`);
+      } else if (event.progressType === 'run_stdout' && typeof event.payload?.chunk === 'string') {
+        process.stdout.write(event.payload.chunk);
+      } else if (event.progressType === 'run_stderr' && typeof event.payload?.chunk === 'string') {
+        process.stderr.write(event.payload.chunk);
+      } else if (event.progressType === 'run_exit') {
+        console.error(`  ↳ [${event.movementId}] exit ${String(event.payload?.exitCode ?? '?')}`);
+      } else if (event.progressType === 'tool_execution_start' && typeof event.payload?.toolName === 'string') {
         console.error(`  ↳ ${event.payload.toolName}...`);
       } else if (event.progressType === 'tool_execution_end' && typeof event.payload?.toolName === 'string') {
         const error = event.payload?.isError ? ` [error: ${event.payload.error ?? 'unknown'}]` : '';
@@ -190,7 +234,9 @@ async function renderStatus(
   const failure = extractFailure(events);
   const progress = latestProgressEvent(events);
   const started = latestStartedEvent(events);
-  const currentCommand = currentCommandFromProgress(progress);
+  const currentCommand =
+    currentCommandFromProgress(progress) ??
+    runningCommandFromRunStart(events, state.currentMovement);
   const currentPrompt = started?.prompt;
 
   const output = {

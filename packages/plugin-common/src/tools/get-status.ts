@@ -25,6 +25,9 @@ export async function getConcertStatus(
     args?: Record<string, unknown>;
     result?: unknown;
     error?: string;
+    command?: string[];
+    chunk?: string;
+    exitCode?: number;
   };
   usage: UsageView;
   movements: Array<{
@@ -37,6 +40,7 @@ export async function getConcertStatus(
     goalSummary: string;
     model?: string;
     provider?: string;
+    exitCode?: number;
   }>;
 }> {
   const state = await orchestron.store.getConcert(input.concertId);
@@ -72,6 +76,19 @@ export async function getConcertStatus(
           args: latestProgress.payload.args as Record<string, unknown> | undefined,
           result: latestProgress.payload.result,
           error: latestProgress.payload.error as string | undefined,
+          command: Array.isArray(latestProgress.payload.command)
+            ? (latestProgress.payload.command as unknown[]).filter(
+                (c): c is string => typeof c === 'string',
+              )
+            : undefined,
+          chunk:
+            typeof latestProgress.payload.chunk === 'string'
+              ? latestProgress.payload.chunk
+              : undefined,
+          exitCode:
+            typeof latestProgress.payload.exitCode === 'number'
+              ? latestProgress.payload.exitCode
+              : undefined,
         }
       : undefined;
 
@@ -94,6 +111,7 @@ export async function getConcertStatus(
       goalSummary: h.goalEvaluation.summary,
       model: h.model,
       provider: h.provider,
+      exitCode: h.exitCode,
     })),
   };
 }

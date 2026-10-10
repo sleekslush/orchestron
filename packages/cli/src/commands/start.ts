@@ -38,7 +38,15 @@ function printLiveEvent(event: ConcertEvent): void {
       console.error(`✗ [${event.movementId}] Rejected: ${event.result?.summary ?? 'Goal not achieved'}`);
       break;
     case 'movement:progress':
-      if (event.progressType === 'tool_execution_start') {
+      if (event.progressType === 'run_start' && Array.isArray(event.payload?.command)) {
+        console.error(`→ [${event.movementId}] $ ${(event.payload.command as string[]).join(' ')}`);
+      } else if (event.progressType === 'run_stdout' && typeof event.payload?.chunk === 'string') {
+        process.stdout.write(event.payload.chunk);
+      } else if (event.progressType === 'run_stderr' && typeof event.payload?.chunk === 'string') {
+        process.stderr.write(event.payload.chunk);
+      } else if (event.progressType === 'run_exit') {
+        console.error(`  ↳ [${event.movementId}] exit ${String(event.payload?.exitCode ?? '?')}`);
+      } else if (event.progressType === 'tool_execution_start') {
         console.error(renderToolLine(event.payload));
       } else if (event.progressType === 'text_delta' && typeof event.payload?.delta === 'string') {
         process.stderr.write(event.payload.delta);

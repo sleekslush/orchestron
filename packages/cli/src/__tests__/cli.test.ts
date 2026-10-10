@@ -50,8 +50,8 @@ function toYaml(score: Score): string {
     section: ${m.section}${m.harness ? `\n    harness: ${m.harness}` : ''}
     prompt: ${m.prompt}
     goal:
-      description: ${m.goal.description}
-      strategy: ${m.goal.strategy}
+      description: ${m.goal!.description}
+      strategy: ${m.goal!.strategy}
     transitions:
 ${m.transitions.map((t) => `      - to: ${t.to}\n        on: ${t.on}`).join('\n')}`,
     )

@@ -8,8 +8,10 @@ A valid score requires only:
 
 **Top-level:** `id`, `name`, `version`, `startMovement`, `movements` (≥1)
 
-**Per movement:** `id`, `name`, `section`, `goal`, `transitions`
+**Per movement:** `id`, `name`, `section`, `transitions`, plus:
 
+- **harness movement** (default): `goal`
+- **run movement** (`type: run`): non-empty `command` argv array
 
 
 ## `program` Fields
@@ -58,19 +60,82 @@ A valid score requires only:
 | `name` | Yes | string | Human-readable name. |
 | `section` | Yes | string | Logical grouping (e.g., `planning`, `execution`, `review`, `delivery`). |
 | `description` | No | string | Brief explanation of the movement's purpose. |
-| `harness` | No | string | Harness to execute the movement. Defaults to the plugin's `defaultHarness` (usually `pi`). |
-| `model` | No | string \| object | Model to use for this movement. **Flat string** (backward-compatible): used for all harnesses. **Per-harness map**: keyed by harness type (e.g., `pi`, `opencode`), each with `provider`, `model`, and optional `options` fields. The conductor selects the entry matching the movement's resolved harness. |
-| `provider` | No | string | Provider name. Only used when `model` is a flat string. |
-| `skills` | No | array | Skill paths this movement's session loads. Overrides the score-level `skills` default when present; `[]` specifies none. See [Skills](#skills). |
-| `reuseSession` | No | boolean | Per-movement override of the score-level `reuseSession`. Omitted inherits the score-resolved mode; `true` forces cumulative and `false` forces fresh for this movement and its re-visits only (siblings are unaffected). Does not control disk recording. The deprecated `persistSession` alias is score-level only and ignored here. No-op for `subscore` movements, which create no parent session. |
-| `prompt` | No | string \| object | The prompt text. Supports templating. Optional when the movement does not need a prompt (e.g., subscores). |
-| `output` | No | object | Output configuration. Defaults to `{ mode: "text" }`. Use `structured` with a JSON Schema when downstream movements need predictable, machine-readable output. |
-| `goal` | Yes | object | `{ description: string, strategy: "llm_judge" }`. The evaluator uses this to judge success. |
+| `type` | No | string | `harness` (default) or `run`. Omit for a harness movement. |
+| `harness` | No | string | Harness to execute the movement. Defaults to the plugin's `defaultHarness` (usually `pi`). Harness movements only. |
+| `model` | No | string \| object | Model to use for this movement. **Flat string** (backward-compatible): used for all harnesses. **Per-harness map**: keyed by harness type (e.g., `pi`, `opencode`), each with `provider`, `model`, and optional `options` fields. The conductor selects the entry matching the movement's resolved harness. Harness movements only. |
+| `provider` | No | string | Provider name. Only used when `model` is a flat string. Harness movements only. |
+| `skills` | No | array | Skill paths this movement's session loads. Overrides the score-level `skills` default when present; `[]` specifies none. See [Skills](#skills). Harness movements only. |
+| `reuseSession` | No | boolean | Per-movement override of the score-level `reuseSession`. Omitted inherits the score-resolved mode; `true` forces cumulative and `false` forces fresh for this movement and its re-visits only (siblings are unaffected). Does not control disk recording. The deprecated `persistSession` alias is score-level only and ignored here. No-op for `subscore` movements, which create no parent session; run movements resolve no session. |
+| `prompt` | No | string \| object | The prompt text. Supports templating. Optional when the movement does not need a prompt (e.g., subscores). Harness movements only. |
+| `output` | No | object | Output configuration. Defaults to `{ mode: "text" }`. Use `structured` with a JSON Schema when downstream movements need predictable, machine-readable output. For a run movement, `structured` means stdout is parsed by the structured-from-text parser. |
+| `goal` | Yes (harness) | object | `{ description: string, strategy: "llm_judge" }`. The evaluator uses this to judge success. Required for harness movements; rejected on run movements. |
+| `command` | Yes (run) | array | Non-empty argv array, executed with `execve` semantics. Run movements only. |
+| `outcomes` | No (run) | object | Exit-code → outcome map (`success`/`failure`/`rejection`), numeric keys or `default`. Run movements only. Omit for `0 → success`, otherwise `failure`. |
+| `cwd` | No (run) | string | Working directory override. Templated; leading `~/` expands. Run movements only. |
+| `env` | No (run) | object | Environment overrides layered over the Conductor environment. Values are templated but receive no `~/` expansion. Run movements only. |
 | `transitions` | Yes | array | Array of `{ to, on }` objects defining what happens next. |
 | `budget` | No | object | Movement-level budget overrides. `{ maxSpendDollars?, maxRetries?, timeoutMs? }`. |
-| `retryOnFailure` | No | boolean | If `true`, retry the movement on a technical execution failure (harness/adapter error, timeout, crash) up to `budget.maxRetries` (default `2`). Does **not** retry goal rejections. |
-| `retryOnRejection` | No | boolean | If `true`, retry the movement when the harness produced a valid output but the evaluator judged the goal was not achieved (a rejection) up to `budget.maxRetries` (default `2`). Independent of `retryOnFailure`. |
-| `subscore` | No | object | Run another score as a child concert. `{ scoreId: string, contextMapping: Record<string, string> }`. |
+| `retryOnFailure` | No | boolean | If `true`, retry the movement on a technical execution failure (harness/adapter error, timeout, crash) or a mapped run `failure` up to `budget.maxRetries` (default `2`). Does **not** retry goal rejections. |
+| `retryOnRejection` | No | boolean | If `true`, retry the movement when the harness produced a valid output but the evaluator judged the goal was not achieved (a rejection) up to `budget.maxRetries` (default `2`). Independent of `retryOnFailure`. Rejected on run movements. |
+| `subscore` | No | object | Run another score as a child concert. `{ scoreId: string, contextMapping: Record<string, string> }`. Harness movements only. |
+
+## Run Movements (`type: run`)
+
+A run movement executes a non-empty `command` argv array directly, with `execve`
+semantics: per-element templating, no word splitting, no globbing, no shell
+interpretation. A leading `~/` in an argv element or `cwd` expands to the home
+directory. Env values are literal after templating. Write a pipeline or glob
+explicitly as `["bash", "-lc", "..."]`.
+
+```yaml
+  - id: resolve_base
+    name: "Resolve base branch"
+    section: setup
+    type: run
+    command: ["gh", "repo", "view", "{{context.repo}}", "--json", "defaultBranchRef"]
+    output: { mode: structured }
+    transitions:
+      - to: fetch
+        on: success
+      - to: fail_cleanup
+        on: failure
+```
+
+**Results.** Each attempt captures `exitCode`, `stdout`, and `stderr`
+separately. The movement record persists `exitCode`, `output` = stdout verbatim,
+`structured` = parsed stdout when `output.mode: structured`, and a one-line
+`summary`; on a non-success outcome `error` carries
+`{ code: "EXIT_NONZERO", message: <first stderr line> }`. Run spend is measured
+`$0`. stdout/stderr are streamed live and written per attempt as `stdout.log` /
+`stderr.log`.
+
+**Outcomes.** `outcomes` maps exit codes to `success`/`failure`/`rejection`.
+Keys are numeric exit codes or `default`. The mapping *is* the evaluation — no
+evaluator session runs. For a run movement `rejection` is a control-flow
+outcome: the step's post-condition was not met and an alternate deterministic
+path applies (it is not a judged goal rejection).
+
+```yaml
+    outcomes:
+      0: success
+      3: rejection   # back off — another concert owns the lock
+      default: failure
+```
+
+`retryOnFailure` retries a mapped `failure`; `retryOnRejection` is rejected at
+validation. Run movements count toward movement, section, and program duration
+limits like any other movement. Nothing special runs on cancel/abort: the child
+is killed, partial logs remain, and the movement resolves to a technical
+`failure`.
+
+**Rejected run fields:** `goal`, `harness`, `model`, `provider`, `skills`,
+`retryOnRejection`, `prompt`, and `subscore` are rejected on a run movement.
+**Rejected harness fields:** `command`, `outcomes`, `cwd`, and `env` are
+rejected on a harness movement.
+
+> **Warning — scores are executable code.** Run steps execute commands with the
+> host user's privileges; there is no sandbox, allowlist, or trust gate. Only
+> run scores you trust.
 
 ## Per-Harness Model Configuration
 
@@ -197,13 +262,14 @@ Paths to a skill *file* and paths to a skill *directory* are both accepted. Open
 
 ## Prompt Templating
 
-Movement prompts can reference:
+Movement prompts, run argv elements, run `cwd`, and run `env` values can reference:
 - `{{context.key}}` — values passed in the `context` parameter of `orchestron_start_concert`.
-- `{{context.previousOutputs.<movementId>}}` — the full text output of a previous movement.
+- `{{context.previousOutputs.<movementId>}}` — the full text output of a previous movement. When that movement is a `run` movement, this returns its stdout with **one** trailing line terminator removed (POSIX command-substitution semantics), so it is safe to embed in a later argv element; leading and interior whitespace are preserved. Harness output is unchanged.
 - `{{context.previousOutputs.<movementId>.<path>}}` — a specific field from a previous movement's structured output using dot-notation, e.g. `{{context.previousOutputs.plan.steps}}` or `{{context.previousOutputs.analyze.summary}}`.
   - Traverses into the parsed `structured` data if available.
   - Falls back to parsing the text `output` as JSON if no structured data was stored.
   - Unrecognized paths are left as-is in the rendered prompt for debugging.
+  - Structured accessors return parsed leaf values and are never affected by trailing newlines; prefer them (with `output.mode: structured`) for run-to-run data flow.
 
 ## Prompt Variants for Loop-back Movements
 
@@ -231,9 +297,9 @@ Each transition is `{ to, on }`:
 
 | `on` value | Meaning |
 |------------|---------|
-| `success` | Movement completed and goal was achieved. |
-| `failure` | A technical execution failure (harness/adapter error, timeout, crash) — the prompt/model combination itself broke. |
-| `rejection` | The harness produced a valid output but the evaluator judged the goal was not achieved. |
+| `success` | Harness movement: completed and goal achieved. Run movement: exit code mapped to `success`. |
+| `failure` | A technical execution failure (harness/adapter error, timeout, crash) or a run exit code mapped to `failure`. |
+| `rejection` | Harness movement: the harness produced a valid output but the evaluator judged the goal was not achieved. Run movement: exit code mapped to the control-flow `rejection` outcome. |
 | `any` | Wildcard: matches `success`, `failure`, or `rejection`. |
 
 | `to` value | Meaning |
@@ -272,6 +338,9 @@ The `contextMapping` maps keys in the child score's context to dot-paths in the 
 
 - The score must have at least one movement.
 - `startMovement` must exist in `movements`.
+- Each movement is `type: harness` (default) or `type: run`.
+- Harness movements require a `goal` and reject `command`/`outcomes`/`cwd`/`env`.
+- Run movements require a non-empty `command` array of non-empty strings; `outcomes` keys must be numeric exit codes or `default`, with values in `success`/`failure`/`rejection`; `cwd` must be a non-empty string; `env` values must be strings; and `goal`, `harness`, `model`, `provider`, `skills`, `retryOnRejection`, `prompt`, and `subscore` are rejected.
 - Every non-start movement must have at least one incoming transition.
 - All transition targets must be valid movement ids, `__end__`, or `__fail__`.
 - The movement graph must not have cycles that cannot reach a terminal state (`__end__` or `__fail__`).

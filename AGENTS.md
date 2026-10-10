@@ -14,7 +14,7 @@ logged per concert to `concerts/<concertId>/stream.jsonl` (JSONL), not to Loge.
 |---|---|
 | Maestro | The human operator |
 | Score | Workflow definition (YAML DAG of movements) |
-| Movement | A single workflow step |
+| Movement | A single workflow step: a harness movement (default) or a deterministic run movement |
 | Section | Logical grouping of movements |
 | Concert | A running instance of a Score |
 | Conductor | Runtime engine executing one Concert |
@@ -44,21 +44,27 @@ pnpm test        # vitest run
 ## Scores
 
 Scores are YAML (`.score.yaml`) defining movements with prompts, goals, output
-schemas, and transitions. Use `{{context.<key>}}` and
-`{{context.previousOutputs.<movementId>}}` for templating.
+schemas, and transitions. A movement has `type: harness` (default) or
+`type: run`; harness movements require a `goal`, while run movements declare a
+`command` argv array and an `outcomes` exit-code map. Use `{{context.<key>}}`
+and `{{context.previousOutputs.<movementId>}}` for templating.
 Special transition targets: `__end__`, `__fail__`.
 
 Harness resolution priority: movement-level > explicit CLI arg > config default.
+It does not apply to run movements, which resolve no adapter.
 
 ## Core Architectural Rules
 
 1. **Adapter pattern** — each Musician implements a common harness interface.
    New adapters go in `packages/adapter-*`.
-2. **The Conductor is the sole runtime** — it resolves movements, delegates to
-   adapters, evaluates goals, logs concerts/movements/usage to Loge and live
-   events to `concerts/<id>/stream.jsonl`. ConcertHall only creates and indexes.
+2. **The Conductor is the sole runtime** — it resolves movements, executes run
+   movements directly (argv-only, no shell, no adapter/session/evaluator), delegates
+   harness movements to adapters, evaluates harness goals, logs
+   concerts/movements/usage to Loge and live events to `concerts/<id>/stream.jsonl`.
+   ConcertHall only creates and indexes.
 3. **Evaluators are separate harness sessions** — `FakeEvaluator` (deterministic)
-   or `HarnessEvaluator` (LLM-based).
+   or `HarnessEvaluator` (LLM-based). Run movements have no evaluator: their
+   `outcomes` map is the evaluation.
 4. **Session reuse** per movement (`concertId:movementId` key) unless the
    score program sets `reuseSession: false`; a movement-level `reuseSession`
    overrides the score-resolved mode for that movement only.

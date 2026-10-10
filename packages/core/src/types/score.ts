@@ -41,6 +41,28 @@ export interface Goal {
   strategy: 'llm_judge';
 }
 
+/**
+ * A movement is either a stochastic harness session (`harness`, the default)
+ * or a deterministic argv execution (`run`).
+ */
+export type MovementKind = 'harness' | 'run';
+
+/**
+ * Outcome an exit code maps to for a `run` movement. It reuses the existing
+ * transition taxonomy: `success`, `failure`, and `rejection`. For a run
+ * movement `rejection` is a control-flow outcome (the step's post-condition was
+ * not met and an alternate deterministic path applies), not a judged goal
+ * rejection.
+ */
+export type RunOutcome = 'success' | 'failure' | 'rejection';
+
+/**
+ * Exit-code → outcome map for a `run` movement. Keys are numeric exit codes
+ * (as strings when parsed from YAML, numbers in object literals) or the literal
+ * `default`. When omitted, `0 → success` and every other code → `failure`.
+ */
+export type MovementOutcomes = Record<string, RunOutcome>;
+
 export interface Transition {
   to: MovementID | '__end__' | '__fail__';
   /**
@@ -81,6 +103,12 @@ export interface Movement {
   name: string;
   section: SectionID;
   description?: string;
+  /**
+   * Movement kind. `harness` (default, and used when omitted) runs a prompt
+   * through a harness session and is evaluated against a goal. `run` executes
+   * a bounded argv command and maps its exit code to an outcome.
+   */
+  type?: MovementKind;
   harness?: string;
   subscore?: {
     scoreId: ScoreID;
@@ -88,7 +116,29 @@ export interface Movement {
   };
   prompt?: MovementPrompt;
   output?: OutputConfig;
-  goal: Goal;
+  /**
+   * Goal for a `harness` movement. Required for harness movements; rejected on
+   * `run` movements (the exit-code outcomes map is the evaluation).
+   */
+  goal?: Goal;
+  /**
+   * Argv command for a `run` movement, executed with `execve` semantics:
+   * per-element templating, no word splitting, no globbing, no shell. A leading
+   * `~/` in an element expands to the home directory.
+   */
+  command?: string[];
+  /**
+   * Exit-code → outcome map for a `run` movement. Keys are numeric exit codes
+   * or `default`. Omitted means `0 → success`, otherwise `failure`.
+   */
+  outcomes?: MovementOutcomes;
+  /** Working directory override for a `run` movement. Templated; leading `~/` expands. */
+  cwd?: string;
+  /**
+   * Environment overrides for a `run` movement, layered over the Conductor
+   * process environment. Values are templated but receive no `~/` expansion.
+   */
+  env?: Record<string, string>;
   transitions: Transition[];
   budget?: MovementBudget;
   /**

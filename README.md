@@ -31,7 +31,7 @@ snapshots per attempt.
 |---|---|
 | **Maestro** | The human operator (you). |
 | **Score** | A workflow definition: a DAG of movements with transitions. |
-| **Movement** | A single step in a workflow. |
+| **Movement** | A single step in a workflow: a **harness movement** (default) runs a prompt through a harness session and is judged against a goal; a **run movement** (`type: run`) executes a bounded argv command and maps its exit code to an outcome. |
 | **Section** | Logical grouping of movements (e.g. "Planning", "Execution", "Review"). |
 | **Concert** | A running instance of a Score. |
 | **Conductor** | Engine that executes one Concert. |
@@ -260,18 +260,71 @@ movements:
 
 ### Templating
 
-Movement prompts can reference:
+Movement prompts, run argv elements, run `cwd`, and run `env` values can
+reference:
 
 - `{{context.<key>}}` — shared context values.
 - `{{context.previousOutputs.<movementId>}}` — raw output from a previous
-  movement.
+  movement. For a `run` movement, this is its stdout with one trailing line
+  terminator removed (POSIX command-substitution semantics), so it is safe to
+  embed in a later argv element.
+- `{{context.previousOutputs.<movementId>.<path>}}` — a parsed leaf from a
+  structured output. Use this (with `output.mode: structured`) to pass
+  machine-consumed values between run steps with no trailing-newline hazard.
+
+### Deterministic run movements
+
+Not every step needs a model. A movement with `type: run` executes a non-empty
+`command` argv array directly, with `execve` semantics: per-element templating,
+no word splitting, no globbing, no shell interpretation. A leading `~/` in an
+argv element or `cwd` expands to the home directory; env values are literal
+after templating. Write a pipeline or glob explicitly as
+`["bash", "-lc", "..."]`.
+
+```yaml
+movements:
+  - id: claim
+    name: "Claim issue"
+    section: setup
+    type: run
+    command: ["bash", "-lc", "labels.sh claim {{context.issue}}"]
+    outcomes:
+      0: success
+      3: rejection   # another concert owns the lock — back off
+      default: failure
+    transitions:
+      - to: implement
+        on: success
+      - to: __end__
+        on: rejection
+      - to: fail_cleanup
+        on: failure
+```
+
+Run movements have no `goal`, harness, session, model, provider, or skills, and
+they never invoke the evaluator: the `outcomes` map *is* the evaluation. Omitted
+`outcomes` means `0 → success`, every other code → `failure`. `cwd`, `env`, and
+`budget.timeoutMs` apply to run movements; `retryOnFailure` retries a mapped
+`failure`; `retryOnRejection` is rejected. Each attempt captures `exitCode`,
+`stdout`, and `stderr` separately, streamed live and written per attempt; spend
+is measured `$0`.
+
+> **Warning — scores are executable code.** Run steps execute commands directly
+> with the host user's privileges. There is no sandbox, allowlist, or trust gate.
+> Treat a score file like a script and only run scores you trust.
 
 ### Transitions
 
-- `on: success` — when the movement completes and the evaluator says the goal is
-  achieved.
-- `on: failure` — when the movement fails or the goal is not achieved.
-- `on: any` — wildcard: matches either `success` or `failure`.
+- `on: success` — for a harness movement, the movement completed and the
+  evaluator says the goal is achieved; for a run movement, the exit code mapped
+  to `success`.
+- `on: failure` — a technical execution failure, a mapped `failure` exit code,
+  or (for harness movements) the goal was not achieved.
+- `on: rejection` — for a harness movement, the evaluator judged the goal was not
+  achieved; for a run movement, the exit code mapped to the control-flow
+  `rejection` outcome (the post-condition was not met and an alternate
+  deterministic path applies).
+- `on: any` — wildcard: matches any outcome.
 - Special targets: `__end__` and `__fail__`.
 
 ### Constraints
@@ -412,8 +465,14 @@ normalization — into a unified raw envelope stream per concert:
     attempt-0/
       metadata.json               # attempt summary written by the adapter
       pi-session.jsonl            # native pi session snapshot (opencode: opencode-session.json)
+      stdout.log                  # run movements: captured stdout
+      stderr.log                  # run movements: captured stderr
     attempt-1/ …                  # one dir per retry
 ```
+
+For a `run` movement the attempt dir holds `stdout.log` and `stderr.log`
+instead of a native session file; its movement `index.json` carries `kind: run`
+and no `harness`, and `orchestron session` renders the captured logs.
 
 - `source: "sdk"` envelopes carry raw `data`; `source: "concert"` envelopes are
   conductor lifecycle events. Line order is event order; there is no `seq` field.

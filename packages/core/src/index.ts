@@ -42,6 +42,7 @@ export { PromptBuilder } from './conductor/prompt-builder.js';
 export { ConstraintChecker } from './conductor/constraint-checker.js';
 export type { ConstraintResult } from './conductor/constraint-checker.js';
 export { matchTransition } from './conductor/transition-resolver.js';
+export { resolveRunOutcome } from './conductor/run-outcome.js';
 export { createAdapterResolver } from './adapter-resolver.js';
 export type { AdapterResolver } from './adapter-resolver.js';
 

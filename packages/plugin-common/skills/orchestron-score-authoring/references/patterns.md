@@ -114,3 +114,33 @@ movements:
 - "Pause the running concert with id abc-123."
 - "List all my scores."
 - "What is the status of concert xyz-456?"
+
+### Deterministic Step (run movement)
+
+Use `type: run` for mechanical, verifiable work whose exit codes fully encode the
+outcome — claiming a lock, creating a branch, running a linter, notifying a
+webhook. Do not wrap it in a harness movement and judge it from prose.
+
+```yaml
+  - id: claim
+    name: "Claim Issue"
+    section: setup
+    type: run
+    command: ["labels.sh", "claim", "{{context.issue}}"]
+    outcomes: { 0: success, 3: rejection, default: failure }
+    transitions:
+      - to: implement
+        on: success
+      - to: __end__
+        on: rejection      # another concert owns the lock — back off
+      - to: fail_cleanup
+        on: failure
+```
+
+Guidelines:
+
+- Keep commands argv-only. If you need a pipe or glob, write `["bash", "-lc", "..."]` explicitly.
+- Map every known exit code in `outcomes`; use `default` for the unexpected case.
+- Read `rejection` as control-flow ("post-condition not met, take another deterministic path"), not as a judged goal rejection.
+- Use `output: { mode: structured }` and dot-notation accessors to pass machine-consumed values between run steps.
+- Put failure cleanup in a run movement reached via `on: failure`; nothing special runs on cancel/abort (that is stale-lock reclamation, not cleanup).
